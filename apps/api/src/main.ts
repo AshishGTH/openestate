@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -11,6 +12,7 @@ async function bootstrap() {
 
   app.useLogger(app.get(Logger));
   app.use(helmet());
+  app.use(cookieParser());
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(new ZodValidationPipe());
 

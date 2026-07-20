@@ -7,4 +7,441 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Domain models are added starting Phase 1 (tenancy, auth, RBAC, masters).
+// ─── Tenancy ───────────────────────────────────────────────────
+
+model Company {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @db.VarChar(255)
+  slug      String   @unique @db.VarChar(100)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  users                User[]
+  roles                Role[]
+  config               CompanyConfig?
+  customFieldDefs      CustomFieldDefinition[]
+  auditLogs            AuditLog[]
+  inquirySources       InquirySource[]
+  inquiryTypes         InquiryType[]
+  followUpTypes        FollowUpType[]
+  communicationTypes   CommunicationType[]
+  areaLocations        AreaLocation[]
+  projectTypes         ProjectType[]
+  documentTypes        DocumentType[]
+  letterTemplates      LetterTemplate[]
+  banks                Bank[]
+  receiptTypes         ReceiptType[]
+  registrationTypes    RegistrationType[]
+  chargeTypes          ChargeType[]
+  gstRates             GstRate[]
+  tdsRules             TdsRule[]
+  interestRules        InterestRule[]
+  transferFeeRules     TransferFeeRule[]
+  paymentPlanTemplates PaymentPlanTemplate[]
+
+  @@map("companies")
+}
+
+// ─── Auth ──────────────────────────────────────────────────────
+
+model User {
+  id                  String    @id @default(uuid()) @db.Uuid
+  companyId           String    @map("company_id") @db.Uuid
+  email               String    @db.VarChar(255)
+  passwordHash        String    @map("password_hash") @db.VarChar(255)
+  name                String    @db.VarChar(255)
+  phone               String?   @db.VarChar(20)
+  roleId              String    @map("role_id") @db.Uuid
+  isActive            Boolean   @default(true) @map("is_active")
+  forcePasswordChange Boolean   @default(true) @map("force_password_change")
+
+  totpSecret    String?  @map("totp_secret") @db.VarChar(255)
+  totpEnabled   Boolean  @default(false) @map("totp_enabled")
+  recoveryCodes String[] @map("recovery_codes")
+
+  failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
+  lockedUntil         DateTime? @map("locked_until")
+  lastLoginAt         DateTime? @map("last_login_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company       Company        @relation(fields: [companyId], references: [id])
+  role          Role           @relation(fields: [roleId], references: [id])
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+
+  @@unique([companyId, email])
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tokenHash String   @map("token_hash") @db.VarChar(64)
+  family    String   @db.Uuid
+  isRevoked Boolean  @default(false) @map("is_revoked")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tokenHash])
+  @@index([family])
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ─── RBAC ──────────────────────────────────────────────────────
+
+model Role {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(100)
+  slug      String   @db.VarChar(100)
+  isSystem  Boolean  @default(false) @map("is_system")
+  isPortal  Boolean  @default(false) @map("is_portal")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company     Company          @relation(fields: [companyId], references: [id])
+  users       User[]
+  permissions RolePermission[]
+
+  @@unique([companyId, slug])
+  @@map("roles")
+}
+
+model Permission {
+  id  String @id @default(uuid()) @db.Uuid
+  key String @unique @db.VarChar(100)
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id") @db.Uuid
+  permissionId String @map("permission_id") @db.Uuid
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ─── Audit ─────────────────────────────────────────────────────
+
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String?  @map("company_id") @db.Uuid
+  userId     String?  @map("user_id") @db.Uuid
+  entityType String   @map("entity_type") @db.VarChar(100)
+  entityId   String   @map("entity_id") @db.VarChar(100)
+  action     String   @db.VarChar(20)
+  before     Json?
+  after      Json?
+  ipAddress  String?  @map("ip_address") @db.VarChar(45)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  company Company? @relation(fields: [companyId], references: [id])
+  user    User?    @relation(fields: [userId], references: [id])
+
+  @@index([companyId, entityType, entityId])
+  @@index([companyId, createdAt])
+  @@map("audit_logs")
+}
+
+// ─── Custom Fields ─────────────────────────────────────────────
+
+model CustomFieldDefinition {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String   @map("company_id") @db.Uuid
+  entityType String   @map("entity_type") @db.VarChar(100)
+  key        String   @db.VarChar(100)
+  label      String   @db.VarChar(255)
+  fieldType  String   @map("field_type") @db.VarChar(20)
+  options    Json?
+  isRequired Boolean  @default(false) @map("is_required")
+  sortOrder  Int      @default(0) @map("sort_order")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, entityType, key])
+  @@map("custom_field_definitions")
+}
+
+// ─── Company Config ────────────────────────────────────────────
+
+model CompanyConfig {
+  companyId      String   @id @map("company_id") @db.Uuid
+  labelOverrides Json     @default("{}") @map("label_overrides")
+  enabledModules Json     @default("[\"presales\",\"postsales\",\"accounts\"]") @map("enabled_modules")
+  currency       String   @default("INR") @db.VarChar(3)
+  timezone       String   @default("Asia/Kolkata") @db.VarChar(50)
+  fyStartMonth   Int      @default(4) @map("fy_start_month")
+  dateFormat     String   @default("DD-MM-YYYY") @map("date_format") @db.VarChar(20)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@map("company_configs")
+}
+
+// ─── Masters: simple lookups ───────────────────────────────────
+
+model InquirySource {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  company   Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("inquiry_sources")
+}
+
+model InquiryType {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  company   Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("inquiry_types")
+}
+
+model FollowUpType {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  company   Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("follow_up_types")
+}
+
+model CommunicationType {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  company   Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("communication_types")
+}
+
+model ProjectType {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  company   Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("project_types")
+}
+
+model ReceiptType {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  company   Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("receipt_types")
+}
+
+model RegistrationType {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  company   Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("registration_types")
+}
+
+// ─── Masters: with extra fields ────────────────────────────────
+
+model AreaLocation {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  city      String?  @db.VarChar(100)
+  state     String?  @db.VarChar(100)
+  pincode   String?  @db.VarChar(10)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  company   Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("area_locations")
+}
+
+model DocumentType {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String   @map("company_id") @db.Uuid
+  name       String   @db.VarChar(255)
+  entityType String   @map("entity_type") @db.VarChar(50)
+  isActive   Boolean  @default(true) @map("is_active")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  company    Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("document_types")
+}
+
+model LetterTemplate {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String   @map("company_id") @db.Uuid
+  name       String   @db.VarChar(255)
+  subject    String   @db.VarChar(500)
+  body       String   @db.Text
+  entityType String   @map("entity_type") @db.VarChar(50)
+  isActive   Boolean  @default(true) @map("is_active")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  company    Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("letter_templates")
+}
+
+model Bank {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String   @map("company_id") @db.Uuid
+  name       String   @db.VarChar(255)
+  ifscPrefix String?  @map("ifsc_prefix") @db.VarChar(11)
+  isActive   Boolean  @default(true) @map("is_active")
+  sortOrder  Int      @default(0) @map("sort_order")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  company    Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("banks")
+}
+
+model ChargeType {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  hsnSac    String?  @map("hsn_sac") @db.VarChar(20)
+  gstRateId String?  @map("gst_rate_id") @db.Uuid
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  company   Company  @relation(fields: [companyId], references: [id])
+  gstRate   GstRate? @relation(fields: [gstRateId], references: [id])
+  @@unique([companyId, name])
+  @@map("charge_types")
+}
+
+model GstRate {
+  id            String    @id @default(uuid()) @db.Uuid
+  companyId     String    @map("company_id") @db.Uuid
+  rate          Decimal   @db.Decimal(5, 2)
+  description   String    @db.VarChar(255)
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  isActive      Boolean   @default(true) @map("is_active")
+  sortOrder     Int       @default(0) @map("sort_order")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  company       Company   @relation(fields: [companyId], references: [id])
+  chargeTypes   ChargeType[]
+  @@map("gst_rates")
+}
+
+model TdsRule {
+  id             String    @id @default(uuid()) @db.Uuid
+  companyId      String    @map("company_id") @db.Uuid
+  section        String    @db.VarChar(20)
+  ratePercent    Decimal   @map("rate_percent") @db.Decimal(5, 2)
+  thresholdPaise BigInt    @map("threshold_paise")
+  effectiveFrom  DateTime  @map("effective_from") @db.Date
+  effectiveTo    DateTime? @map("effective_to") @db.Date
+  description    String?   @db.VarChar(255)
+  isActive       Boolean   @default(true) @map("is_active")
+  sortOrder      Int       @default(0) @map("sort_order")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  company        Company   @relation(fields: [companyId], references: [id])
+  @@map("tds_rules")
+}
+
+model InterestRule {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  name        String   @db.VarChar(255)
+  rateType    String   @map("rate_type") @db.VarChar(20)
+  ratePercent Decimal  @map("rate_percent") @db.Decimal(5, 2)
+  frequency   String   @db.VarChar(20)
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  company     Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("interest_rules")
+}
+
+model TransferFeeRule {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  name        String   @db.VarChar(255)
+  feeType     String   @map("fee_type") @db.VarChar(20)
+  amountPaise BigInt?  @map("amount_paise")
+  percentage  Decimal? @db.Decimal(5, 2)
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  company     Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("transfer_fee_rules")
+}
+
+model PaymentPlanTemplate {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  name        String   @db.VarChar(255)
+  description String?  @db.Text
+  isActive    Boolean  @default(true) @map("is_active")
+  sortOrder   Int      @default(0) @map("sort_order")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  company     Company  @relation(fields: [companyId], references: [id])
+  @@unique([companyId, name])
+  @@map("payment_plan_templates")
+}

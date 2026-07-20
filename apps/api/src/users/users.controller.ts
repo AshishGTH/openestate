@@ -1,0 +1,88 @@
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
+import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Request } from 'express';
+import { createZodDto } from 'nestjs-zod';
+import {
+  createUserSchema,
+  updateUserSchema,
+  paginationQuerySchema,
+  PERMISSIONS,
+} from '@openestate/shared';
+import type { JwtPayload } from '@openestate/shared';
+import { RequirePermissions } from '../auth/guards/permissions.guard';
+import { UsersService } from './users.service';
+
+class CreateUserDto extends createZodDto(createUserSchema) {}
+class UpdateUserDto extends createZodDto(updateUserSchema) {}
+class PaginationQueryDto extends createZodDto(paginationQuerySchema) {}
+
+@ApiTags('Users')
+@Controller('users')
+export class UsersController {
+  constructor(private readonly usersService: UsersService) {}
+
+  @Get()
+  @RequirePermissions(PERMISSIONS.ADMIN_USER_READ)
+  @ApiOperation({ summary: 'List users' })
+  findAll(@Query() query: PaginationQueryDto, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.usersService.findAll(user.companyId, query);
+  }
+
+  @Get(':id')
+  @RequirePermissions(PERMISSIONS.ADMIN_USER_READ)
+  @ApiOperation({ summary: 'Get user by ID' })
+  findOne(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.usersService.findOne(user.companyId, id);
+  }
+
+  @Post()
+  @RequirePermissions(PERMISSIONS.ADMIN_USER_CREATE)
+  @ApiOperation({ summary: 'Create user' })
+  create(@Body() dto: CreateUserDto, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.usersService.create(user.companyId, dto);
+  }
+
+  @Patch(':id')
+  @RequirePermissions(PERMISSIONS.ADMIN_USER_UPDATE)
+  @ApiOperation({ summary: 'Update user' })
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdateUserDto,
+    @Req() req: Request,
+  ) {
+    const user = req.user as JwtPayload;
+    return this.usersService.update(user.companyId, id, dto);
+  }
+
+  @Post(':id/deactivate')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(PERMISSIONS.ADMIN_USER_DEACTIVATE)
+  @ApiOperation({ summary: 'Deactivate user (soft delete)' })
+  deactivate(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.usersService.deactivate(user.companyId, id);
+  }
+
+  @Post(':id/reactivate')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(PERMISSIONS.ADMIN_USER_UPDATE)
+  @ApiOperation({ summary: 'Reactivate user' })
+  reactivate(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.usersService.reactivate(user.companyId, id);
+  }
+}

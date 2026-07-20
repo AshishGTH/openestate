@@ -1,0 +1,22 @@
+name: openestate-test
+
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: openestate_super
+      POSTGRES_PASSWORD: test_super_pass
+      POSTGRES_DB: openestate_test
+      POSTGRES_APP_PASSWORD: test_app_pass
+      POSTGRES_SYSTEM_PASSWORD: test_system_pass
+    volumes:
+      - ./docker/init-db:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openestate_super -d openestate_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 15

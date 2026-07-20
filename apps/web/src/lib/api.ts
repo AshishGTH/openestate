@@ -1,0 +1,89 @@
+const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
+
+let accessToken: string | null = null;
+let refreshPromise: Promise<string | null> | null = null;
+
+export function setAccessToken(token: string | null) {
+  accessToken = token;
+}
+
+export function getAccessToken() {
+  return accessToken;
+}
+
+function getCsrfToken(): string | null {
+  const match = document.cookie
+    .split('; ')
+    .find((c) => c.startsWith('openestate_csrf='));
+  return match ? match.split('=')[1] : null;
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    accessToken = data.accessToken;
+    return accessToken;
+  } catch {
+    return null;
+  }
+}
+
+export async function api<T = unknown>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const url = `${API_BASE}/api/v1${path}`;
+
+  const headers = new Headers(options.headers);
+  if (!headers.has('Content-Type') && options.body) {
+    headers.set('Content-Type', 'application/json');
+  }
+  if (accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
+  }
+  const csrf = getCsrfToken();
+  if (csrf) {
+    headers.set('X-CSRF-Token', csrf);
+  }
+
+  let res = await fetch(url, {
+    ...options,
+    headers,
+    credentials: 'include',
+  });
+
+  if (res.status === 401 && accessToken) {
+    if (!refreshPromise) {
+      refreshPromise = refreshAccessToken().finally(() => {
+        refreshPromise = null;
+      });
+    }
+    const newToken = await refreshPromise;
+    if (newToken) {
+      headers.set('Authorization', `Bearer ${newToken}`);
+      res = await fetch(url, { ...options, headers, credentials: 'include' });
+    }
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const err = new Error(body.message ?? `API error ${res.status}`);
+    (err as ApiError).status = res.status;
+    (err as ApiError).body = body;
+    throw err;
+  }
+
+  if (res.status === 204) return undefined as T;
+  return res.json();
+}
+
+export interface ApiError extends Error {
+  status: number;
+  body: Record<string, unknown>;
+}
