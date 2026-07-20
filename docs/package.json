@@ -1,0 +1,21 @@
+{
+  "name": "@openestate/docs",
+  "version": "0.1.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "docusaurus start",
+    "build": "docusaurus build",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo \"no lint configured for docs yet\""
+  },
+  "dependencies": {
+    "@docusaurus/core": "^3.6.3",
+    "@docusaurus/preset-classic": "^3.6.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
