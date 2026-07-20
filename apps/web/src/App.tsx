@@ -1,31 +1,37 @@
-import { useQuery } from '@tanstack/react-query';
-
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
-
-async function fetchHealth() {
-  const res = await fetch(`${API_URL}/api/v1/health`);
-  if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
-  return res.json();
-}
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import ProtectedRoute from './components/ProtectedRoute';
+import AppShell from './components/AppShell';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
+import UsersPage from './pages/admin/Users';
+import UserForm from './pages/admin/UserForm';
+import RolesPage from './pages/admin/Roles';
+import RoleForm from './pages/admin/RoleForm';
+import MastersPage from './pages/admin/Masters';
+import CustomFieldsPage from './pages/admin/CustomFields';
+import CompanyConfigPage from './pages/admin/CompanyConfig';
+import AuditLogPage from './pages/admin/AuditLog';
 
 export default function App() {
-  const { data, isLoading, isError } = useQuery({ queryKey: ['health'], queryFn: fetchHealth });
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <div className="rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
-        <h1 className="text-xl font-semibold text-slate-900">OpenEstate — Admin</h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Staff admin shell. Modules (masters, users, RBAC, inventory, pre-sales, post-sales) land
-          starting Phase 1.
-        </p>
-        <div className="mt-4 rounded-md bg-slate-100 p-3 text-sm">
-          <span className="font-medium">API health:</span>{' '}
-          {isLoading && 'checking…'}
-          {isError && <span className="text-red-600">unreachable</span>}
-          {data && <span className="text-emerald-600">{JSON.stringify(data)}</span>}
-        </div>
-      </div>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+
+        <Route element={<ProtectedRoute />}>
+          <Route element={<AppShell />}>
+            <Route index element={<Dashboard />} />
+            <Route path="admin/users" element={<UsersPage />} />
+            <Route path="admin/users/:id" element={<UserForm />} />
+            <Route path="admin/roles" element={<RolesPage />} />
+            <Route path="admin/roles/:id" element={<RoleForm />} />
+            <Route path="admin/masters" element={<MastersPage />} />
+            <Route path="admin/custom-fields" element={<CustomFieldsPage />} />
+            <Route path="admin/config" element={<CompanyConfigPage />} />
+            <Route path="admin/audit" element={<AuditLogPage />} />
+          </Route>
+        </Route>
+      </Routes>
+    </BrowserRouter>
   );
 }

@@ -1,0 +1,102 @@
+import { PERMISSIONS } from './permissions';
+
+export const SYSTEM_ROLES = {
+  SUPER_ADMIN: 'super_admin',
+  COMPANY_ADMIN: 'company_admin',
+  SALES_MANAGER: 'sales_manager',
+  SALES_EXECUTIVE: 'sales_executive',
+  ACCOUNTS: 'accounts',
+  CUSTOMER: 'customer',
+  BROKER: 'broker',
+} as const;
+
+export type SystemRoleSlug = (typeof SYSTEM_ROLES)[keyof typeof SYSTEM_ROLES];
+
+const P = PERMISSIONS;
+
+export const ROLE_PERMISSIONS: Record<SystemRoleSlug, readonly string[]> = {
+  super_admin: Object.values(P),
+
+  company_admin: [
+    ...Object.values(P).filter((p) => p.startsWith('admin.')),
+    ...Object.values(P).filter((p) => p.startsWith('presales.')),
+    ...Object.values(P).filter((p) => p.startsWith('postsales.')),
+    ...Object.values(P).filter((p) => p.startsWith('accounts.')),
+    ...Object.values(P).filter((p) => p.startsWith('reports.')),
+  ],
+
+  sales_manager: [
+    P.ADMIN_USER_READ,
+    P.ADMIN_MASTER_READ,
+    ...Object.values(P).filter((p) => p.startsWith('presales.')),
+    P.POSTSALES_BOOKING_READ,
+    P.POSTSALES_BOOKING_CREATE,
+    P.POSTSALES_BOOKING_UPDATE,
+    P.POSTSALES_UNIT_READ,
+    P.POSTSALES_DOCUMENT_READ,
+    P.POSTSALES_DOCUMENT_UPLOAD,
+    P.REPORTS_SALES_VIEW,
+    P.REPORTS_COLLECTION_VIEW,
+    P.REPORTS_BROKER_VIEW,
+  ],
+
+  sales_executive: [
+    P.ADMIN_MASTER_READ,
+    P.PRESALES_INQUIRY_READ,
+    P.PRESALES_INQUIRY_CREATE,
+    P.PRESALES_INQUIRY_UPDATE,
+    P.PRESALES_FOLLOW_UP_READ,
+    P.PRESALES_FOLLOW_UP_CREATE,
+    P.PRESALES_FOLLOW_UP_UPDATE,
+    P.PRESALES_SITE_VISIT_READ,
+    P.PRESALES_SITE_VISIT_CREATE,
+    P.PRESALES_SITE_VISIT_UPDATE,
+    P.POSTSALES_BOOKING_READ,
+    P.POSTSALES_UNIT_READ,
+    P.POSTSALES_DOCUMENT_READ,
+    P.POSTSALES_DOCUMENT_UPLOAD,
+  ],
+
+  accounts: [
+    P.ADMIN_MASTER_READ,
+    P.POSTSALES_RECEIPT_READ,
+    P.POSTSALES_DEMAND_READ,
+    P.POSTSALES_DEMAND_GENERATE,
+    P.ACCOUNTS_RECEIPT_VERIFY,
+    P.ACCOUNTS_PAYMENT_READ,
+    P.ACCOUNTS_PAYMENT_CREATE,
+    P.ACCOUNTS_COMMISSION_READ,
+    P.ACCOUNTS_COMMISSION_APPROVE,
+    P.REPORTS_COLLECTION_VIEW,
+    P.REPORTS_OUTSTANDING_VIEW,
+    P.REPORTS_GST_VIEW,
+  ],
+
+  customer: [
+    P.PORTAL_BOOKING_READ,
+    P.PORTAL_RECEIPT_READ,
+    P.PORTAL_DOCUMENT_READ,
+    P.PORTAL_DOCUMENT_UPLOAD,
+    P.PORTAL_PAYMENT_SCHEDULE_READ,
+    P.PORTAL_PROFILE_UPDATE,
+  ],
+
+  broker: [
+    P.PORTAL_BOOKING_READ,
+    P.PORTAL_RECEIPT_READ,
+    P.PORTAL_DOCUMENT_READ,
+    P.PORTAL_PAYMENT_SCHEDULE_READ,
+    P.PORTAL_PROFILE_UPDATE,
+    P.REPORTS_BROKER_VIEW,
+  ],
+};
+
+export const ROLE_DISPLAY_NAMES: Record<SystemRoleSlug, string> = {
+  super_admin: 'Super Admin',
+  company_admin: 'Company Admin',
+  sales_manager: 'Sales Manager',
+  sales_executive: 'Sales Executive',
+  accounts: 'Accounts',
+  customer: 'Customer',
+  broker: 'Broker',
+};

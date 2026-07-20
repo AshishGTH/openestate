@@ -1,6 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { getPrismaClient } from '@openestate/db';
+import { getSystemPrisma } from '@openestate/db';
 import type { HealthStatus } from '@openestate/shared';
 import Redis from 'ioredis';
 
@@ -26,7 +26,7 @@ export class HealthController {
 
   private async checkDb(): Promise<'ok' | 'down'> {
     try {
-      await getPrismaClient().$queryRaw`SELECT 1`;
+      await getSystemPrisma().$queryRaw`SELECT 1`;
       return 'ok';
     } catch {
       return 'down';

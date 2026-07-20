@@ -187,3 +187,67 @@ this is a log, not a design doc.
   left unfilled rather than invented, since "OpenEstate" is a
   placeholder name/org for this project (see the build guide's
   launch-checklist note to verify the name before going public).
+
+### Phase 1 — auth, RBAC, multi-tenancy, masters, custom fields, frontend
+
+- **Three Postgres roles, not one.** `openestate_superuser` (migrations
+  only, never in app connection strings), `openestate_system` (BYPASSRLS,
+  used by system Prisma client for cross-tenant operations like auth
+  lookups), `openestate_app` (RLS-enforced, used by tenant Prisma client
+  for all domain operations). Two Prisma clients injected via NestJS DI
+  tokens (`TENANT_PRISMA`, `SYSTEM_PRISMA`).
+- **RLS via `set_config('app.current_company_id', ...)` + Prisma
+  extension**, not middleware. Prisma middleware fires too late for
+  `$queryRaw` and can be bypassed by `$executeRaw`. The extension
+  approach wraps each tenant transaction with a `SET LOCAL` call.
+- **`withTenantTx` scopes a data-access unit of work, not an HTTP
+  request.** Wrapping the entire request in one interactive transaction
+  would hold a DB connection for the full request lifetime, including
+  any I/O to external services. No external I/O (HTTP, SMS, email,
+  file storage) inside `withTenantTx`.
+- **Refresh tokens: SHA-256 hashed, family-based reuse detection.**
+  Raw token in httpOnly cookie, SHA-256 hash in DB. Each token carries
+  a `family` UUID; reuse of a revoked token revokes the entire family
+  (compromise detection). `isRevoked` boolean, not a `revokedAt`
+  datetime — simpler queries, same semantics.
+- **httpOnly Secure cookie + double-submit CSRF for both apps/web and
+  apps/portal.** Access token in JSON response body (stored in memory,
+  not localStorage). CSRF cookie is non-httpOnly so JS can read it
+  and send it as `X-CSRF-Token` header.
+- **Separate `TOTP_ENCRYPTION_KEY`, not reused from PAN encryption.**
+  TOTP secrets encrypted with AES-256-GCM using a dedicated env var.
+  If the PAN key is rotated or compromised, TOTP secrets are unaffected
+  and vice versa.
+- **`admin.user.delete` renamed to `admin.user.deactivate` (soft
+  delete, no hard deletes).** Users are deactivated (`isActive = false`),
+  never removed from the database. Preserves referential integrity for
+  audit logs, bookings, and receipts.
+- **Master factory pattern: `createMasterModule(config)` produces a
+  NestJS module with ~30 lines of config per table.** 15 of 17 masters
+  use the factory; GstRate and TdsRule have specialized services with
+  overlapping effective-date validation. The factory returns anonymous
+  classes with `Object.defineProperty` to set meaningful names for
+  debugging/DI — `private` keyword removed from anonymous class
+  properties to avoid TS4094.
+- **GstRate stores a single `rate` Decimal + `description` String, not
+  separate CGST/SGST/IGST fields.** The CGST/SGST/IGST split is a
+  calculation concern (based on inter- vs intra-state), not a storage
+  concern. The master rate table stores the total GST rate; the split
+  is computed at invoice/receipt generation time.
+- **CompanyConfig: single row per company with typed columns, not a
+  key-value store.** `labelOverrides` (JSON), `enabledModules` (JSON
+  array), `currency`, `timezone`, `fyStartMonth`, `dateFormat`. Avoids
+  N+1 queries for config lookups and gives type safety at the DB level.
+- **Money as BigInt paise, never floats.** All monetary values stored
+  as BigInt paise in the database. Shared `formatInr` helper handles
+  lakh/crore digit grouping for display.
+- **`@prisma/client` added as direct dependency in `apps/api`.**
+  Fixes TS2742 "inferred type cannot be named" errors that occur in
+  pnpm monorepos when the Prisma runtime types are only reachable
+  through a workspace dependency.
+- **Frontend: React 18 + Vite + react-router-dom v7 + TanStack Query
+  + react-hook-form + zod.** Auth state managed via React context with
+  automatic silent refresh on mount. API client handles transparent
+  token refresh (401 → refresh → retry). All admin screens
+  (users, roles, masters, custom fields, company config, audit log)
+  are permission-gated in the sidebar via `hasPermission` checks.

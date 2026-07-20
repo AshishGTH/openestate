@@ -11,8 +11,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-openestate}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: ${POSTGRES_DB:-openestate}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?POSTGRES_APP_PASSWORD is required}
+      POSTGRES_SYSTEM_PASSWORD: ${POSTGRES_SYSTEM_PASSWORD:?POSTGRES_SYSTEM_PASSWORD is required}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/init-db:/docker-entrypoint-initdb.d:ro
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
@@ -49,13 +52,15 @@ services:
       NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-openestate}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-openestate}
+      DATABASE_URL: postgresql://openestate_app:${POSTGRES_APP_PASSWORD:-openestate}@postgres:5432/${POSTGRES_DB:-openestate}
+      DATABASE_URL_SYSTEM: postgresql://openestate_system:${POSTGRES_SYSTEM_PASSWORD}@postgres:5432/${POSTGRES_DB:-openestate}
       REDIS_URL: redis://redis:6379
       CORS_ALLOWLIST: ${CORS_ALLOWLIST:-http://localhost:8080}
       SWAGGER_ENABLED: ${SWAGGER_ENABLED:-false}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET is required}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
       PAN_ENCRYPTION_KEY: ${PAN_ENCRYPTION_KEY:?PAN_ENCRYPTION_KEY is required}
+      TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:?TOTP_ENCRYPTION_KEY is required}
     volumes:
       - uploads:/app/uploads
     ports:
