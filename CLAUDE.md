@@ -135,3 +135,55 @@ docs/           Docusaurus site: install, admin, API, plugin dev
 
 types → zod schema → migration → service + tests → endpoint +
 OpenAPI → UI → seed/demo data → docs page stub → audit logging
+
+## Decisions log
+
+Append-only. One entry per architectural decision made while building a
+phase — what was decided, why, and what it rules out. Keep entries short;
+this is a log, not a design doc.
+
+### Phase 0 — scaffold, Docker, CI
+
+- **Global zod validation via `nestjs-zod`, not a hand-rolled pipe.**
+  A per-DTO `PipeTransform` can't be registered as a single global pipe
+  the way `ValidationPipe` is in a class-validator NestJS app — schemas
+  differ per route. `nestjs-zod`'s `createZodDto` + global
+  `ZodValidationPipe` gets the "global zod validation pipe" behavior
+  the phase spec actually asked for. DTOs must use `.strict()` to get
+  the whitelist-unknown-fields behavior CLAUDE.md requires.
+- **`@nestjs/config` added even though Phase 0's spec didn't list it.**
+  Without it, `.env` is only read by Docker Compose (which injects env
+  vars directly); `pnpm dev` outside Docker had no way to load
+  `apps/api/.env` at all. `ConfigModule.forRoot({ isGlobal: true })`
+  fixes local dev without changing container behavior.
+- **`tsconfig.base.json` must not set `"incremental": true`.** It
+  silently breaks `nest-cli`'s `start --watch`: the compiler reports
+  "Found 0 errors" but never writes `dist/main.js`, and `nest start`
+  then crashes with `MODULE_NOT_FOUND`. Root-caused by hand (removed
+  the flag, watch mode started working immediately). If a build-speed
+  win from incremental compilation is wanted later, apply it only to
+  `tsc -p` one-shot build scripts, never to the base config `nest-cli`
+  watch mode inherits from.
+- **`apps/api/nest-cli.json` sets `"deleteOutDir": false`.** Paired
+  with the incremental fix above as a second layer of defense against
+  the same watch-mode race (wiping `dist/` on every recompile is a
+  known trigger for watchers starting the node process before the
+  first write lands). Means stale compiled files can outlive deleted
+  source files between full rebuilds — acceptable in dev, irrelevant
+  in Docker/CI where the image is built fresh every time.
+- **Docker base images pinned by tag (`postgres:16-alpine`, etc.), not
+  by sha256 digest**, despite CLAUDE.md's "pinned Docker base images"
+  rule. No verified way to confirm real digests without risking a
+  fabricated/stale hash in a file meant to gate what actually runs.
+  Revisit in Phase 8's security pass once there's a way to pull and
+  verify current digests as part of the change, not from memory.
+  Dependabot's `docker` ecosystem entry (`/deploy/docker`) is wired up
+  so tag bumps at least get proposed automatically in the meantime.
+- **LICENSE and CODE_OF_CONDUCT.md are fetched verbatim from their
+  canonical sources (gnu.org, contributor-covenant.org), not
+  reproduced from memory.** Legal/community-policy text shouldn't risk
+  subtle inaccuracies. `CODE_OF_CONDUCT.md` and `SECURITY.md` both
+  have `TODO` placeholders for a real contact/disclosure channel —
+  left unfilled rather than invented, since "OpenEstate" is a
+  placeholder name/org for this project (see the build guide's
+  launch-checklist note to verify the name before going public).
