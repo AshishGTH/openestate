@@ -116,6 +116,10 @@ async function main() {
       items: ['Fresh', 'Resale', 'Rental', 'Commercial'],
     },
     {
+      model: 'inquiryTemperature',
+      items: ['Cold', 'Warm', 'Hot'],
+    },
+    {
       model: 'followUpType',
       items: ['Phone Call', 'Site Visit', 'Email', 'WhatsApp', 'Meeting', 'Video Call'],
     },

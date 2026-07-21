@@ -34,6 +34,16 @@ const TENANT_SCOPED_MODELS = new Set([
   'UnitCharge',
   'UnitRateRevision',
   'UnitStatusChange',
+  'Applicant',
+  'ApplicantConsent',
+  'ApplicantMerge',
+  'InquiryTemperature',
+  'Inquiry',
+  'InquiryAssignment',
+  'ProjectAssignmentPool',
+  'FollowUp',
+  'SmsTemplate',
+  'CommunicationLog',
 ]);
 
 const READ_OPS = new Set([

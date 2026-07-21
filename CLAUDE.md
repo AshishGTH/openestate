@@ -338,3 +338,116 @@ this is a log, not a design doc.
   to both the migration's RLS loop and `TENANT_SCOPED_MODELS` in the
   tenant Prisma extension. Integration tests prove cross-tenant
   isolation on `units` and `unit_rate_revisions` specifically.
+
+### Phase 3 — pre-sales: inquiries, assignment, follow-ups, funnel reports
+
+- **Round-robin fairness needed a per-project advisory lock in addition
+  to `SELECT ... FOR UPDATE SKIP LOCKED`.** SKIP LOCKED alone guarantees
+  *no duplicate picks* under concurrency (two transactions can never lock
+  the same pool row), but it does **not** guarantee *fair ordering* under
+  a true thundering herd — verified by a failing test (50 concurrent
+  claims against a pool of 5 produced a max-min spread of 2, not the
+  required ≤1). Root cause: nothing serializes the order in which
+  concurrent transactions re-queue a row to the back of the line, so
+  independently-correct SKIP LOCKED picks can still converge on an uneven
+  distribution. Fix: `pg_advisory_xact_lock(hashtext(project_id))` at the
+  top of `AssignmentService.autoAssign` serializes the pick-and-claim
+  critical section per project (transaction-scoped, auto-released on
+  commit/rollback; different projects never contend). SKIP LOCKED stays
+  as the row-picking mechanism inside the now-serialized section — it's
+  what still lets a truly-empty-of-contention fast path skip locked rows
+  cheaply. Also switched `last_assigned_at` to `TIMESTAMP(6)` (from the
+  Prisma default `TIMESTAMP(3)`) and the UPDATE to `clock_timestamp()`
+  (statement-execution time, not transaction-start time) to eliminate
+  millisecond-tie ordering ambiguity as a contributing factor.
+- **Bounded retries, never a 500.** `autoAssign` retries the SKIP LOCKED
+  select up to 3 times (short random backoff) only for the case where
+  every pool row is momentarily locked by other in-flight claims; if
+  still empty after retries, or if the pool has zero active members, it
+  returns `null` and the caller leaves the inquiry unassigned rather than
+  failing inquiry creation. Lead capture must never be blocked by the
+  assignment engine.
+- **Consent is an append-only ledger (`ApplicantConsent`), not columns on
+  `Applicant`.** Every grant/revoke inserts a new row; current consent is
+  the latest row per applicant. Nothing is ever updated or deleted, so
+  consent state at any past timestamp is reconstructible by filtering the
+  ledger — required for DPDP-style audit questions ("was consent valid
+  when we sent this message").
+- **Applicant merge reassigns `Inquiry.applicantId` only —
+  `CommunicationLog.applicantId` is never rewritten.** A merged
+  (tombstoned) applicant's send history keeps pointing at that applicant
+  permanently, preserving the original recipient's identity for audit.
+  The survivor's timeline still surfaces those rows by joining through
+  `Applicant.mergedIntoId` (`WHERE applicantId IN (survivorId, ...ids of
+  applicants merged into survivorId)`) rather than by data movement.
+  `FollowUp` rows are never touched at all during a merge — they key off
+  `inquiryId`, which already moved to the survivor, so no follow-up can
+  ever be lost or duplicated by the merge operation itself. Already-merged
+  applicants (`mergedIntoId != null`) can't be merged again in either
+  direction — the API returns 409 pointing at the current survivor.
+- **Phone normalization is intentionally narrow.** Only strips Indian
+  country/trunk prefixes (`+91`/`91`/`0`) and only normalizes when the
+  result is a 10-digit number starting 6–9 (a valid Indian mobile).
+  Anything else — NRI numbers, landlines, malformed input — is stored
+  trimmed-but-otherwise-untouched and matched by exact string equality.
+  Deliberately does not attempt to be a general international phone
+  parser; guessing wrong would silently corrupt or falsely merge
+  unrelated contacts, which is worse than not normalizing at all.
+- **Per-company escalation dispatch, not a single cross-tenant sweep.**
+  `EscalationService.dispatchTick()` uses the SYSTEM client only to
+  enumerate active companies (`select: { id: true }` — never touches
+  inquiry rows), then enqueues one `company-escalation` BullMQ job per
+  company. `runForCompany(companyId)` does all inquiry-row access inside
+  `runWithTenant` + `withTenantTx` for that one company, so RLS (not just
+  the Prisma tenant-filter extension) is what ultimately restricts
+  visibility — proven by a test that runs a raw, filter-less
+  `SELECT ... FROM inquiries` inside company A's tenant transaction and
+  confirms it cannot see company B's rows even though the query has no
+  `WHERE company_id` clause at all.
+- **Escalation notifies ALL active `sales_manager` users company-wide,
+  not a specific manager.** No project→manager reporting-line field
+  exists in the schema yet, so "notify the inquiry's manager" isn't
+  expressible. **Revisit this once a project→manager (or user→manager)
+  mapping is added** — likely in a later phase alongside team hierarchy
+  for the "manager-wise interaction" report, which has the same
+  simplification (reports each manager's own logged interactions, not a
+  team roll-up).
+- **`Inquiry.lastEscalatedAt` prevents re-notifying every tick forever.**
+  An inquiry is only (re-)escalated when `lastEscalatedAt IS NULL OR
+  lastEscalatedAt < nextFollowupAt` — i.e. once per overdue occurrence.
+  If the follow-up date is pushed forward and lapses again later, the new
+  `nextFollowupAt` is newer than the old `lastEscalatedAt`, so it
+  re-qualifies.
+- **`FollowUpType` (not `CommunicationType`) is the follow-up "type"
+  master.** `FollowUpType`'s seeded values (Phone Call, Site Visit,
+  Email, WhatsApp, Meeting, Video Call) are literally the follow-up
+  interaction types; `CommunicationType` is reused instead for the
+  outbound send-channel log (`CommunicationLog.channel` is a Postgres
+  enum, `EMAIL | SMS`, not yet driven by the `CommunicationType` master —
+  channel is a small closed set like `UnitStatus`, not an admin-tunable
+  business constant). Site visit is not a separate table — it's a
+  `FollowUp` row with `type = 'Site Visit'` and `scheduledAt`/`venue`
+  populated; everything else on the row stays generic.
+- **BullMQ added for Phase 3** (`bullmq` + `@nestjs/bullmq`), two queues
+  (`communication`, `escalation`). The dev `ConsoleCommunicationProvider`
+  logs instead of calling a real gateway — swappable via the
+  `COMMUNICATION_PROVIDER` DI token when real SMS/email plugins land in
+  Phase 7. Enqueueing always happens **outside** any `withTenantTx` (it's
+  Redis I/O); the `CommunicationLog` row is created and committed first,
+  then the job references its ID.
+- **Import auto-links duplicates instead of prompting.** Bulk Excel
+  import has no interactive UI to show a duplicate warning, so a
+  phone/email match auto-links the row to the existing `Applicant`
+  instead of creating a new one; the response enumerates every linked row
+  (`linked: [{ row, applicantName, applicantId }]`) alongside
+  `createdCount`, mirroring Phase 2's "never silently skip" discipline.
+  Interactive single-inquiry creation instead surfaces
+  `possibleDuplicateApplicantIds` in the response and lets the caller
+  decide, since there a human is present to resolve it.
+- **All 10 new Phase 3 tables are RLS-protected**: `applicants`,
+  `applicant_consents`, `applicant_merges`, `inquiry_temperatures`,
+  `inquiries`, `inquiry_assignments`, `project_assignment_pools`,
+  `follow_ups`, `sms_templates`, `communication_logs` — added to both
+  the migration's RLS loop and `TENANT_SCOPED_MODELS`. Integration tests
+  prove isolation on all ten, with extra emphasis on `applicants` and
+  `inquiries` (including a raw, filter-less-query variant per table).

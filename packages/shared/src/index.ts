@@ -9,3 +9,4 @@ export * from './master.dto';
 export * from './custom-field.dto';
 export * from './company.dto';
 export * from './inventory';
+export * from './presales';

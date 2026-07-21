@@ -2,12 +2,14 @@ import { Module } from '@nestjs/common';
 import { createMasterModule } from './master.factory';
 import { GstRateModule } from './gst-rate/gst-rate.module';
 import { TdsRuleModule } from './tds-rule/tds-rule.module';
+import { SmsTemplateModule } from './sms-template/sms-template.module';
 
 const SIMPLE_MASTERS = [
   { modelName: 'UnitType', routePath: 'unit-types', apiTag: 'Unit Types' },
   { modelName: 'PlcType', routePath: 'plc-types', apiTag: 'PLC Types' },
   { modelName: 'InquirySource', routePath: 'inquiry-sources', apiTag: 'Inquiry Sources' },
   { modelName: 'InquiryType', routePath: 'inquiry-types', apiTag: 'Inquiry Types' },
+  { modelName: 'InquiryTemperature', routePath: 'inquiry-temperatures', apiTag: 'Inquiry Temperatures' },
   { modelName: 'FollowUpType', routePath: 'follow-up-types', apiTag: 'Follow-Up Types' },
   { modelName: 'CommunicationType', routePath: 'communication-types', apiTag: 'Communication Types' },
   { modelName: 'ProjectType', routePath: 'project-types', apiTag: 'Project Types' },
@@ -28,6 +30,6 @@ const simpleMasterModules = SIMPLE_MASTERS.map((config) =>
 );
 
 @Module({
-  imports: [...simpleMasterModules, GstRateModule, TdsRuleModule],
+  imports: [...simpleMasterModules, GstRateModule, TdsRuleModule, SmsTemplateModule],
 })
 export class MastersModule {}

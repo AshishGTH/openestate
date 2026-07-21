@@ -40,6 +40,16 @@ const AUDITED_MODELS = new Set([
   'UnitCharge',
   'UnitRateRevision',
   'UnitStatusChange',
+  'Applicant',
+  'ApplicantConsent',
+  'ApplicantMerge',
+  'InquiryTemperature',
+  'Inquiry',
+  'InquiryAssignment',
+  'ProjectAssignmentPool',
+  'FollowUp',
+  'SmsTemplate',
+  'CommunicationLog',
 ]);
 
 const SENSITIVE_FIELDS = new Set([

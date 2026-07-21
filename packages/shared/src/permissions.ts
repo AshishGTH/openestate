@@ -51,17 +51,24 @@ export const PERMISSIONS = {
   INVENTORY_UPLOAD_DELETE: 'inventory.upload.delete',
 
   // ── Presales ───────────────────────────────────────
+  PRESALES_APPLICANT_READ: 'presales.applicant.read',
+  PRESALES_APPLICANT_CREATE: 'presales.applicant.create',
+  PRESALES_APPLICANT_UPDATE: 'presales.applicant.update',
+  PRESALES_APPLICANT_MERGE: 'presales.applicant.merge',
   PRESALES_INQUIRY_READ: 'presales.inquiry.read',
   PRESALES_INQUIRY_CREATE: 'presales.inquiry.create',
   PRESALES_INQUIRY_UPDATE: 'presales.inquiry.update',
   PRESALES_INQUIRY_DELETE: 'presales.inquiry.delete',
   PRESALES_INQUIRY_ASSIGN: 'presales.inquiry.assign',
+  PRESALES_INQUIRY_IMPORT: 'presales.inquiry.import',
   PRESALES_FOLLOW_UP_READ: 'presales.follow-up.read',
   PRESALES_FOLLOW_UP_CREATE: 'presales.follow-up.create',
   PRESALES_FOLLOW_UP_UPDATE: 'presales.follow-up.update',
   PRESALES_SITE_VISIT_READ: 'presales.site-visit.read',
   PRESALES_SITE_VISIT_CREATE: 'presales.site-visit.create',
   PRESALES_SITE_VISIT_UPDATE: 'presales.site-visit.update',
+  PRESALES_COMMUNICATION_SEND: 'presales.communication.send',
+  PRESALES_ASSIGNMENT_POOL_MANAGE: 'presales.assignment-pool.manage',
   PRESALES_REPORT_VIEW: 'presales.report.view',
 
   // ── Postsales ──────────────────────────────────────
