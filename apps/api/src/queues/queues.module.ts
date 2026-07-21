@@ -8,6 +8,7 @@ import {
 
 export const COMMUNICATION_QUEUE = 'communication';
 export const ESCALATION_QUEUE = 'escalation';
+export const INTEREST_QUEUE = 'interest';
 
 @Global()
 @Module({
@@ -22,6 +23,7 @@ export const ESCALATION_QUEUE = 'escalation';
     BullModule.registerQueue(
       { name: COMMUNICATION_QUEUE },
       { name: ESCALATION_QUEUE },
+      { name: INTEREST_QUEUE },
     ),
   ],
   providers: [

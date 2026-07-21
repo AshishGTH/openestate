@@ -9,6 +9,7 @@ import { TENANT_PRISMA } from '../database/database.module';
 import {
   isValidTransition,
   REASON_REQUIRED_STATUSES,
+  isSystemOnlyTarget,
 } from '@openestate/shared';
 import type { UnitStatus, ActorType } from '@openestate/shared';
 
@@ -31,6 +32,15 @@ export class UnitStateMachineService {
     if (REASON_REQUIRED_STATUSES.includes(toStatus) && !reason) {
       throw new BadRequestException(
         `Reason is mandatory when transitioning to ${toStatus}`,
+      );
+    }
+
+    // Booking-lifecycle statuses are system-only (Phase 4). A user-initiated
+    // transition may never reach BOOKED/ALLOTTED/REGISTERED/CANCELLED — those
+    // are driven exclusively by the booking service.
+    if (actorType === 'user' && isSystemOnlyTarget(toStatus)) {
+      throw new BadRequestException(
+        `Transition to ${toStatus} is system-only and must go through the booking lifecycle, not the manual transition endpoint`,
       );
     }
 
