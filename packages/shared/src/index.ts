@@ -8,3 +8,4 @@ export * from './user.dto';
 export * from './master.dto';
 export * from './custom-field.dto';
 export * from './company.dto';
+export * from './inventory';

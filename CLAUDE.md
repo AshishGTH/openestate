@@ -290,3 +290,45 @@ this is a log, not a design doc.
   guard blocks unauthenticated requests; the health controller must
   opt out via the `@Public()` decorator so Docker healthchecks and
   load-balancer probes work without a token.
+
+### Phase 2 — inventory (projects, towers, floors, units)
+
+- **Unit rate revisions are append-only with monotonic dating.**
+  `effectiveFrom` must be `<= today` and `>= latest existing revision`
+  for the same unit. Future-dated revisions are rejected at the service
+  layer. `@@unique([unitId, effectiveFrom])` prevents duplicate dates.
+  `Unit.baseRatePaise` is the current market rate; booking will snapshot
+  `agreedRatePaise` in Phase 3.
+- **Unit status state machine with actor type.** Transitions carry
+  `actorType: 'user' | 'system'`. Reason is mandatory (not optional)
+  for `BLOCKED` and `CANCELLED`. Phase 4 will restrict
+  `BOOKED → ALLOTTED → REGISTERED → CANCELLED` to `system`-only
+  transitions triggered by booking/payment workflows.
+- **Upload category is a whitelisted enum, not freeform.**
+  `layout_plan | brochure | photo | document` — validated via zod
+  before touching any file path. Storage names are `uuid + ext`,
+  never derived from user input. Images are re-encoded through `sharp`.
+- **sharp Docker verification deferred.** `sharp` 0.35 uses
+  optional platform-specific packages (`@img/sharp-linux-x64`,
+  `@img/sharp-libvips-linux-x64`) that pnpm installs only for the
+  target platform. Verified that these packages exist in sharp's
+  `optionalDependencies`. Docker build + container-level verification
+  requires a Docker-capable environment; deferred until Docker is
+  available (dev machine currently has no Docker). The Dockerfile's
+  multi-stage build with `pnpm deploy` must copy sharp's native
+  binaries correctly.
+- **Import enumerates skipped rows, never silently skips.** The
+  `ImportResult` type includes `skipped: Array<{ row, unitNumber,
+  reason }>` alongside `createdCount`. Callers always see which rows
+  were already present and why they were skipped.
+- **Tower-scoped unit number uniqueness.** `@@unique([floorId, number])`
+  enforces floor-level uniqueness at the DB level. Import and
+  bulk-generate also validate that unit numbers are unique within the
+  entire tower (cross-floor check), reporting violations as row-level
+  errors before the transaction commits.
+- **All 10 Phase 2 tables are RLS-protected.** `unit_types`,
+  `plc_types`, `projects`, `towers`, `floors`, `units`, `unit_plcs`,
+  `unit_charges`, `unit_rate_revisions`, `unit_status_changes` added
+  to both the migration's RLS loop and `TENANT_SCOPED_MODELS` in the
+  tenant Prisma extension. Integration tests prove cross-tenant
+  isolation on `units` and `unit_rate_revisions` specifically.

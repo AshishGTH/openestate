@@ -30,6 +30,16 @@ const AUDITED_MODELS = new Set([
   'InterestRule',
   'TransferFeeRule',
   'PaymentPlanTemplate',
+  'UnitType',
+  'PlcType',
+  'Project',
+  'Tower',
+  'Floor',
+  'Unit',
+  'UnitPlc',
+  'UnitCharge',
+  'UnitRateRevision',
+  'UnitStatusChange',
 ]);
 
 const SENSITIVE_FIELDS = new Set([

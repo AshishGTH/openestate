@@ -39,6 +39,16 @@ model Company {
   interestRules        InterestRule[]
   transferFeeRules     TransferFeeRule[]
   paymentPlanTemplates PaymentPlanTemplate[]
+  unitTypes            UnitType[]
+  plcTypes             PlcType[]
+  projects             Project[]
+  towers               Tower[]
+  floors               Floor[]
+  units                Unit[]
+  unitPlcs             UnitPlc[]
+  unitCharges          UnitCharge[]
+  unitRateRevisions    UnitRateRevision[]
+  unitStatusChanges    UnitStatusChange[]
 
   @@map("companies")
 }
@@ -46,15 +56,15 @@ model Company {
 // ─── Auth ──────────────────────────────────────────────────────
 
 model User {
-  id                  String    @id @default(uuid()) @db.Uuid
-  companyId           String    @map("company_id") @db.Uuid
-  email               String    @db.VarChar(255)
-  passwordHash        String    @map("password_hash") @db.VarChar(255)
-  name                String    @db.VarChar(255)
-  phone               String?   @db.VarChar(20)
-  roleId              String    @map("role_id") @db.Uuid
-  isActive            Boolean   @default(true) @map("is_active")
-  forcePasswordChange Boolean   @default(true) @map("force_password_change")
+  id                  String  @id @default(uuid()) @db.Uuid
+  companyId           String  @map("company_id") @db.Uuid
+  email               String  @db.VarChar(255)
+  passwordHash        String  @map("password_hash") @db.VarChar(255)
+  name                String  @db.VarChar(255)
+  phone               String? @db.VarChar(20)
+  roleId              String  @map("role_id") @db.Uuid
+  isActive            Boolean @default(true) @map("is_active")
+  forcePasswordChange Boolean @default(true) @map("force_password_change")
 
   totpSecret    String?  @map("totp_secret") @db.VarChar(255)
   totpEnabled   Boolean  @default(false) @map("totp_enabled")
@@ -67,10 +77,12 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  company       Company        @relation(fields: [companyId], references: [id])
-  role          Role           @relation(fields: [roleId], references: [id])
-  refreshTokens RefreshToken[]
-  auditLogs     AuditLog[]
+  company              Company            @relation(fields: [companyId], references: [id])
+  role                 Role               @relation(fields: [roleId], references: [id])
+  refreshTokens        RefreshToken[]
+  auditLogs            AuditLog[]
+  rateRevisionsCreated UnitRateRevision[] @relation("rateRevisionCreator")
+  statusChangesActed   UnitStatusChange[] @relation("statusChangeActor")
 
   @@unique([companyId, email])
   @@map("users")
@@ -207,6 +219,7 @@ model InquirySource {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   company   Company  @relation(fields: [companyId], references: [id])
+
   @@unique([companyId, name])
   @@map("inquiry_sources")
 }
@@ -220,6 +233,7 @@ model InquiryType {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   company   Company  @relation(fields: [companyId], references: [id])
+
   @@unique([companyId, name])
   @@map("inquiry_types")
 }
@@ -233,6 +247,7 @@ model FollowUpType {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   company   Company  @relation(fields: [companyId], references: [id])
+
   @@unique([companyId, name])
   @@map("follow_up_types")
 }
@@ -246,19 +261,22 @@ model CommunicationType {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   company   Company  @relation(fields: [companyId], references: [id])
+
   @@unique([companyId, name])
   @@map("communication_types")
 }
 
 model ProjectType {
-  id        String   @id @default(uuid()) @db.Uuid
-  companyId String   @map("company_id") @db.Uuid
-  name      String   @db.VarChar(255)
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  company   Company  @relation(fields: [companyId], references: [id])
+  id        String    @id @default(uuid()) @db.Uuid
+  companyId String    @map("company_id") @db.Uuid
+  name      String    @db.VarChar(255)
+  isActive  Boolean   @default(true) @map("is_active")
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  company   Company   @relation(fields: [companyId], references: [id])
+  projects  Project[]
+
   @@unique([companyId, name])
   @@map("project_types")
 }
@@ -272,6 +290,7 @@ model ReceiptType {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   company   Company  @relation(fields: [companyId], references: [id])
+
   @@unique([companyId, name])
   @@map("receipt_types")
 }
@@ -285,6 +304,7 @@ model RegistrationType {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   company   Company  @relation(fields: [companyId], references: [id])
+
   @@unique([companyId, name])
   @@map("registration_types")
 }
@@ -292,17 +312,19 @@ model RegistrationType {
 // ─── Masters: with extra fields ────────────────────────────────
 
 model AreaLocation {
-  id        String   @id @default(uuid()) @db.Uuid
-  companyId String   @map("company_id") @db.Uuid
-  name      String   @db.VarChar(255)
-  city      String?  @db.VarChar(100)
-  state     String?  @db.VarChar(100)
-  pincode   String?  @db.VarChar(10)
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  company   Company  @relation(fields: [companyId], references: [id])
+  id        String    @id @default(uuid()) @db.Uuid
+  companyId String    @map("company_id") @db.Uuid
+  name      String    @db.VarChar(255)
+  city      String?   @db.VarChar(100)
+  state     String?   @db.VarChar(100)
+  pincode   String?   @db.VarChar(10)
+  isActive  Boolean   @default(true) @map("is_active")
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  company   Company   @relation(fields: [companyId], references: [id])
+  projects  Project[]
+
   @@unique([companyId, name])
   @@map("area_locations")
 }
@@ -317,6 +339,7 @@ model DocumentType {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
   company    Company  @relation(fields: [companyId], references: [id])
+
   @@unique([companyId, name])
   @@map("document_types")
 }
@@ -333,6 +356,7 @@ model LetterTemplate {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
   company    Company  @relation(fields: [companyId], references: [id])
+
   @@unique([companyId, name])
   @@map("letter_templates")
 }
@@ -347,39 +371,43 @@ model Bank {
   createdAt  DateTime @default(now()) @map("created_at")
   updatedAt  DateTime @updatedAt @map("updated_at")
   company    Company  @relation(fields: [companyId], references: [id])
+
   @@unique([companyId, name])
   @@map("banks")
 }
 
 model ChargeType {
-  id        String   @id @default(uuid()) @db.Uuid
-  companyId String   @map("company_id") @db.Uuid
-  name      String   @db.VarChar(255)
-  hsnSac    String?  @map("hsn_sac") @db.VarChar(20)
-  gstRateId String?  @map("gst_rate_id") @db.Uuid
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  company   Company  @relation(fields: [companyId], references: [id])
-  gstRate   GstRate? @relation(fields: [gstRateId], references: [id])
+  id          String       @id @default(uuid()) @db.Uuid
+  companyId   String       @map("company_id") @db.Uuid
+  name        String       @db.VarChar(255)
+  hsnSac      String?      @map("hsn_sac") @db.VarChar(20)
+  gstRateId   String?      @map("gst_rate_id") @db.Uuid
+  isActive    Boolean      @default(true) @map("is_active")
+  sortOrder   Int          @default(0) @map("sort_order")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  company     Company      @relation(fields: [companyId], references: [id])
+  gstRate     GstRate?     @relation(fields: [gstRateId], references: [id])
+  unitCharges UnitCharge[]
+
   @@unique([companyId, name])
   @@map("charge_types")
 }
 
 model GstRate {
-  id            String    @id @default(uuid()) @db.Uuid
-  companyId     String    @map("company_id") @db.Uuid
-  rate          Decimal   @db.Decimal(5, 2)
-  description   String    @db.VarChar(255)
-  effectiveFrom DateTime  @map("effective_from") @db.Date
-  effectiveTo   DateTime? @map("effective_to") @db.Date
-  isActive      Boolean   @default(true) @map("is_active")
-  sortOrder     Int       @default(0) @map("sort_order")
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
-  company       Company   @relation(fields: [companyId], references: [id])
+  id            String       @id @default(uuid()) @db.Uuid
+  companyId     String       @map("company_id") @db.Uuid
+  rate          Decimal      @db.Decimal(5, 2)
+  description   String       @db.VarChar(255)
+  effectiveFrom DateTime     @map("effective_from") @db.Date
+  effectiveTo   DateTime?    @map("effective_to") @db.Date
+  isActive      Boolean      @default(true) @map("is_active")
+  sortOrder     Int          @default(0) @map("sort_order")
+  createdAt     DateTime     @default(now()) @map("created_at")
+  updatedAt     DateTime     @updatedAt @map("updated_at")
+  company       Company      @relation(fields: [companyId], references: [id])
   chargeTypes   ChargeType[]
+
   @@map("gst_rates")
 }
 
@@ -397,6 +425,7 @@ model TdsRule {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
   company        Company   @relation(fields: [companyId], references: [id])
+
   @@map("tds_rules")
 }
 
@@ -412,6 +441,7 @@ model InterestRule {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   company     Company  @relation(fields: [companyId], references: [id])
+
   @@unique([companyId, name])
   @@map("interest_rules")
 }
@@ -428,6 +458,7 @@ model TransferFeeRule {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   company     Company  @relation(fields: [companyId], references: [id])
+
   @@unique([companyId, name])
   @@map("transfer_fee_rules")
 }
@@ -442,6 +473,210 @@ model PaymentPlanTemplate {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
   company     Company  @relation(fields: [companyId], references: [id])
+
   @@unique([companyId, name])
   @@map("payment_plan_templates")
+}
+
+// ─── Phase 2: Inventory ───────────────────────────────────────
+
+enum UnitStatus {
+  AVAILABLE
+  HELD
+  BLOCKED
+  BOOKED
+  ALLOTTED
+  REGISTERED
+  CANCELLED
+}
+
+model UnitType {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  company   Company  @relation(fields: [companyId], references: [id])
+  units     Unit[]
+
+  @@unique([companyId, name])
+  @@map("unit_types")
+}
+
+model PlcType {
+  id        String    @id @default(uuid()) @db.Uuid
+  companyId String    @map("company_id") @db.Uuid
+  name      String    @db.VarChar(255)
+  isActive  Boolean   @default(true) @map("is_active")
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  company   Company   @relation(fields: [companyId], references: [id])
+  unitPlcs  UnitPlc[]
+
+  @@unique([companyId, name])
+  @@map("plc_types")
+}
+
+model Project {
+  id              String    @id @default(uuid()) @db.Uuid
+  companyId       String    @map("company_id") @db.Uuid
+  name            String    @db.VarChar(255)
+  code            String    @db.VarChar(50)
+  projectTypeId   String?   @map("project_type_id") @db.Uuid
+  reraNumber      String?   @map("rera_number") @db.VarChar(100)
+  areaLocationId  String?   @map("area_location_id") @db.Uuid
+  address         String?   @db.Text
+  description     String?   @db.Text
+  startDate       DateTime? @map("start_date") @db.Date
+  expectedEndDate DateTime? @map("expected_end_date") @db.Date
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  company      Company       @relation(fields: [companyId], references: [id])
+  projectType  ProjectType?  @relation(fields: [projectTypeId], references: [id])
+  areaLocation AreaLocation? @relation(fields: [areaLocationId], references: [id])
+  towers       Tower[]
+
+  @@unique([companyId, code])
+  @@map("projects")
+}
+
+model Tower {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  name        String   @db.VarChar(255)
+  code        String   @db.VarChar(50)
+  totalFloors Int      @default(0) @map("total_floors")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  project Project @relation(fields: [projectId], references: [id])
+  floors  Floor[]
+
+  @@unique([projectId, code])
+  @@map("towers")
+}
+
+model Floor {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  towerId     String   @map("tower_id") @db.Uuid
+  name        String   @db.VarChar(100)
+  floorNumber Int      @map("floor_number")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  tower   Tower   @relation(fields: [towerId], references: [id])
+  units   Unit[]
+
+  @@unique([towerId, floorNumber])
+  @@map("floors")
+}
+
+model Unit {
+  id               String     @id @default(uuid()) @db.Uuid
+  companyId        String     @map("company_id") @db.Uuid
+  floorId          String     @map("floor_id") @db.Uuid
+  unitTypeId       String?    @map("unit_type_id") @db.Uuid
+  number           String     @db.VarChar(50)
+  status           UnitStatus @default(AVAILABLE)
+  carpetAreaSqft   Decimal?   @map("carpet_area_sqft") @db.Decimal(10, 2)
+  builtUpAreaSqft  Decimal?   @map("built_up_area_sqft") @db.Decimal(10, 2)
+  superBuiltUpSqft Decimal?   @map("super_built_up_sqft") @db.Decimal(10, 2)
+  baseRatePaise    BigInt     @default(0) @map("base_rate_paise")
+  isActive         Boolean    @default(true) @map("is_active")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  company       Company            @relation(fields: [companyId], references: [id])
+  floor         Floor              @relation(fields: [floorId], references: [id])
+  unitType      UnitType?          @relation(fields: [unitTypeId], references: [id])
+  plcs          UnitPlc[]
+  charges       UnitCharge[]
+  rateRevisions UnitRateRevision[]
+  statusChanges UnitStatusChange[]
+
+  @@unique([floorId, number])
+  @@map("units")
+}
+
+model UnitPlc {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  unitId      String   @map("unit_id") @db.Uuid
+  plcTypeId   String   @map("plc_type_id") @db.Uuid
+  amountPaise BigInt   @map("amount_paise")
+  percentage  Decimal? @db.Decimal(5, 2)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  unit    Unit    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  plcType PlcType @relation(fields: [plcTypeId], references: [id])
+
+  @@unique([unitId, plcTypeId])
+  @@map("unit_plcs")
+}
+
+model UnitCharge {
+  id           String   @id @default(uuid()) @db.Uuid
+  companyId    String   @map("company_id") @db.Uuid
+  unitId       String   @map("unit_id") @db.Uuid
+  chargeTypeId String   @map("charge_type_id") @db.Uuid
+  amountPaise  BigInt   @map("amount_paise")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  company    Company    @relation(fields: [companyId], references: [id])
+  unit       Unit       @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  chargeType ChargeType @relation(fields: [chargeTypeId], references: [id])
+
+  @@unique([unitId, chargeTypeId])
+  @@map("unit_charges")
+}
+
+model UnitRateRevision {
+  id            String   @id @default(uuid()) @db.Uuid
+  companyId     String   @map("company_id") @db.Uuid
+  unitId        String   @map("unit_id") @db.Uuid
+  ratePaise     BigInt   @map("rate_paise")
+  effectiveFrom DateTime @map("effective_from") @db.Date
+  reason        String?  @db.VarChar(500)
+  createdById   String?  @map("created_by_id") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  company   Company @relation(fields: [companyId], references: [id])
+  unit      Unit    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  createdBy User?   @relation("rateRevisionCreator", fields: [createdById], references: [id])
+
+  @@unique([unitId, effectiveFrom])
+  @@map("unit_rate_revisions")
+}
+
+model UnitStatusChange {
+  id         String     @id @default(uuid()) @db.Uuid
+  companyId  String     @map("company_id") @db.Uuid
+  unitId     String     @map("unit_id") @db.Uuid
+  fromStatus UnitStatus @map("from_status")
+  toStatus   UnitStatus @map("to_status")
+  reason     String?    @db.VarChar(500)
+  actorType  String     @map("actor_type") @db.VarChar(20)
+  actorId    String?    @map("actor_id") @db.Uuid
+  createdAt  DateTime   @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  unit    Unit    @relation(fields: [unitId], references: [id], onDelete: Cascade)
+  actor   User?   @relation("statusChangeActor", fields: [actorId], references: [id])
+
+  @@index([unitId, createdAt])
+  @@map("unit_status_changes")
 }

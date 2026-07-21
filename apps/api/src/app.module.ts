@@ -12,6 +12,7 @@ import { MastersModule } from './masters/masters.module';
 import { CustomFieldsModule } from './custom-fields/custom-fields.module';
 import { CompanyModule } from './company/company.module';
 import { AuditModule } from './audit/audit.module';
+import { InventoryModule } from './inventory/inventory.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { CsrfGuard } from './auth/csrf.guard';
@@ -46,6 +47,7 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     CustomFieldsModule,
     CompanyModule,
     AuditModule,
+    InventoryModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -22,6 +22,34 @@ export const PERMISSIONS = {
   ADMIN_CONFIG_UPDATE: 'admin.config.update',
   ADMIN_AUDIT_READ: 'admin.audit.read',
 
+  // ── Inventory ─────────────────────────────────────
+  INVENTORY_PROJECT_READ: 'inventory.project.read',
+  INVENTORY_PROJECT_CREATE: 'inventory.project.create',
+  INVENTORY_PROJECT_UPDATE: 'inventory.project.update',
+  INVENTORY_PROJECT_DELETE: 'inventory.project.delete',
+  INVENTORY_TOWER_READ: 'inventory.tower.read',
+  INVENTORY_TOWER_CREATE: 'inventory.tower.create',
+  INVENTORY_TOWER_UPDATE: 'inventory.tower.update',
+  INVENTORY_TOWER_DELETE: 'inventory.tower.delete',
+  INVENTORY_UNIT_READ: 'inventory.unit.read',
+  INVENTORY_UNIT_CREATE: 'inventory.unit.create',
+  INVENTORY_UNIT_UPDATE: 'inventory.unit.update',
+  INVENTORY_UNIT_BULK_GENERATE: 'inventory.unit.bulk-generate',
+  INVENTORY_UNIT_IMPORT: 'inventory.unit.import',
+  INVENTORY_UNIT_EXPORT: 'inventory.unit.export',
+  INVENTORY_UNIT_HOLD: 'inventory.unit.hold',
+  INVENTORY_UNIT_BOOK: 'inventory.unit.book',
+  INVENTORY_UNIT_BLOCK: 'inventory.unit.block',
+  INVENTORY_UNIT_ALLOT: 'inventory.unit.allot',
+  INVENTORY_UNIT_REGISTER: 'inventory.unit.register',
+  INVENTORY_UNIT_CANCEL: 'inventory.unit.cancel',
+  INVENTORY_UNIT_RELEASE: 'inventory.unit.release',
+  INVENTORY_RATE_READ: 'inventory.rate.read',
+  INVENTORY_RATE_CHANGE: 'inventory.rate.change',
+  INVENTORY_UPLOAD_READ: 'inventory.upload.read',
+  INVENTORY_UPLOAD_CREATE: 'inventory.upload.create',
+  INVENTORY_UPLOAD_DELETE: 'inventory.upload.delete',
+
   // ── Presales ───────────────────────────────────────
   PRESALES_INQUIRY_READ: 'presales.inquiry.read',
   PRESALES_INQUIRY_CREATE: 'presales.inquiry.create',
@@ -87,6 +115,7 @@ export const ALL_PERMISSIONS = Object.values(PERMISSIONS);
 
 export const PERMISSION_MODULES = [
   'admin',
+  'inventory',
   'presales',
   'postsales',
   'accounts',

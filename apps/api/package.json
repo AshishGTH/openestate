@@ -25,10 +25,13 @@
     "@openestate/db": "workspace:*",
     "@openestate/shared": "workspace:*",
     "@prisma/client": "^6.1.0",
+    "@types/multer": "^2.2.0",
     "argon2": "^0.45.0",
     "cookie-parser": "^1.4.7",
+    "exceljs": "^4.4.0",
     "helmet": "^8.0.0",
     "ioredis": "^5.4.2",
+    "multer": "^2.2.0",
     "nestjs-pino": "^4.3.1",
     "nestjs-zod": "^4.3.1",
     "otpauth": "^9.5.1",
@@ -37,6 +40,7 @@
     "pino-http": "^10.3.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
+    "sharp": "^0.35.3",
     "zod": "^3.24.1"
   },
   "devDependencies": {

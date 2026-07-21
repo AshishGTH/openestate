@@ -19,6 +19,7 @@ export const ROLE_PERMISSIONS: Record<SystemRoleSlug, readonly string[]> = {
 
   company_admin: [
     ...Object.values(P).filter((p) => p.startsWith('admin.')),
+    ...Object.values(P).filter((p) => p.startsWith('inventory.')),
     ...Object.values(P).filter((p) => p.startsWith('presales.')),
     ...Object.values(P).filter((p) => p.startsWith('postsales.')),
     ...Object.values(P).filter((p) => p.startsWith('accounts.')),
@@ -28,6 +29,14 @@ export const ROLE_PERMISSIONS: Record<SystemRoleSlug, readonly string[]> = {
   sales_manager: [
     P.ADMIN_USER_READ,
     P.ADMIN_MASTER_READ,
+    P.INVENTORY_PROJECT_READ,
+    P.INVENTORY_TOWER_READ,
+    P.INVENTORY_UNIT_READ,
+    P.INVENTORY_UNIT_HOLD,
+    P.INVENTORY_UNIT_BOOK,
+    P.INVENTORY_UNIT_EXPORT,
+    P.INVENTORY_RATE_READ,
+    P.INVENTORY_UPLOAD_READ,
     ...Object.values(P).filter((p) => p.startsWith('presales.')),
     P.POSTSALES_BOOKING_READ,
     P.POSTSALES_BOOKING_CREATE,
@@ -42,6 +51,12 @@ export const ROLE_PERMISSIONS: Record<SystemRoleSlug, readonly string[]> = {
 
   sales_executive: [
     P.ADMIN_MASTER_READ,
+    P.INVENTORY_PROJECT_READ,
+    P.INVENTORY_TOWER_READ,
+    P.INVENTORY_UNIT_READ,
+    P.INVENTORY_UNIT_HOLD,
+    P.INVENTORY_RATE_READ,
+    P.INVENTORY_UPLOAD_READ,
     P.PRESALES_INQUIRY_READ,
     P.PRESALES_INQUIRY_CREATE,
     P.PRESALES_INQUIRY_UPDATE,
