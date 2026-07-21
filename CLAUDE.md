@@ -251,3 +251,42 @@ this is a log, not a design doc.
   token refresh (401 → refresh → retry). All admin screens
   (users, roles, masters, custom fields, company config, audit log)
   are permission-gated in the sidebar via `hasPermission` checks.
+
+### Phase 1 verification — Docker, packaging, runtime fixes
+
+- **API runtime image is `node:20-slim` (Debian), not Alpine.** The
+  `argon2` native module ships glibc prebuilt binaries but not musl;
+  Alpine falls through to node-gyp compilation which requires network
+  access to download Node.js headers during `docker build`. Never
+  switch back to Alpine without verifying all native deps have musl
+  prebuilds.
+- **Workspace packages use the `exports` field with dual resolution.**
+  `"import": "./src/index.ts"` for Vite/bundlers (direct TS
+  consumption, no pre-build needed), `"require": "./dist/index.js"`
+  for Node.js runtime (compiled CJS). `"main"` stays at `dist/` for
+  backwards compatibility. This means Vite builds don't require
+  `pnpm --filter @openestate/shared build` first, but NestJS
+  production runtime does.
+- **Dockerfiles copy selective source paths, not entire directories.**
+  `COPY packages/shared packages/shared` overwrites pnpm's
+  `node_modules` symlink tree; copying only `src/`, `tsconfig.json`,
+  and `prisma/` individually preserves the install step's layout.
+  `.dockerignore` excludes `node_modules` from the build context.
+- **API Dockerfile uses `pnpm deploy` for the runtime stage.** Creates
+  a self-contained directory with a flat `node_modules` that doesn't
+  depend on pnpm's symlink store. The generated Prisma client
+  (`.prisma/client/`) must be copied separately into the deployed
+  `node_modules` because `pnpm deploy` doesn't include it.
+- **Runtime stage must install `openssl`.** `node:20-slim` ships
+  without OpenSSL libraries; Prisma's query engine binary
+  (`debian-openssl-3.0.x`) links against `libssl.so.3` at runtime.
+  Without it, Prisma throws "could not locate the Query Engine."
+- **Encryption keys are always `openssl rand -hex 32` (64 hex chars =
+  32 bytes).** `TOTP_ENCRYPTION_KEY` and `PAN_ENCRYPTION_KEY` validate
+  exact length at startup. `install.sh` uses a separate `rand_hex_32`
+  helper; CI's `.env` generation uses `rand -hex 32` for these two
+  keys and `rand -hex 24` for passwords/secrets.
+- **Health endpoint is `@Public()` by design.** The global JWT auth
+  guard blocks unauthenticated requests; the health controller must
+  opt out via the `@Public()` decorator so Docker healthchecks and
+  load-balancer probes work without a token.
