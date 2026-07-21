@@ -61,8 +61,15 @@ describeIf('Ledger property: balance == Σ(ledger) for random sequences', () => 
   });
 
   afterAll(async () => {
-    // Teardown deletes every booking created across all runs; at 2000 runs
-    // that is a lot of rows, so give the hook a generous timeout.
+    // This 300s timeout is TEARDOWN-ONLY, not a signal about ledger runtime
+    // performance: cleanupCompany bulk-deletes every booking (and its cost
+    // lines, installments, ledger entries, receipts, …) created across every
+    // property-test run in one GUC-scoped transaction. At the CI-floor 2000
+    // runs that's ~2000 bookings' worth of rows to delete, which alone can
+    // approach vitest's default 10s afterAll hook timeout — the ledger
+    // WRITES during the test itself stay fast throughout (each run posts a
+    // handful of entries in well under a second; see the per-test durations
+    // in CI output). Do not read this timeout as "the ledger is slow."
     await cleanupCompany(systemPrisma, fx.companyId);
     await systemPrisma.$disconnect();
     await tenantPrisma.$disconnect();
