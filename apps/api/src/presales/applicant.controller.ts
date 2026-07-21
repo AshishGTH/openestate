@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  Inject,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -11,6 +13,7 @@ import {
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { createZodDto } from 'nestjs-zod';
+import { PrismaClient } from '@openestate/db';
 import {
   createApplicantSchema,
   updateApplicantSchema,
@@ -20,6 +23,7 @@ import {
 } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
+import { SYSTEM_PRISMA } from '../database/database.module';
 import { ApplicantService } from './applicant.service';
 
 class CreateApplicantDto extends createZodDto(createApplicantSchema) {}
@@ -30,7 +34,11 @@ class PaginationQueryDto extends createZodDto(paginationQuerySchema) {}
 @ApiTags('Applicants')
 @Controller('applicants')
 export class ApplicantController {
-  constructor(private readonly applicantService: ApplicantService) {}
+  constructor(
+    private readonly applicantService: ApplicantService,
+    @Inject(SYSTEM_PRISMA)
+    private readonly systemPrisma: PrismaClient,
+  ) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.PRESALES_APPLICANT_READ)
@@ -104,6 +112,41 @@ export class ApplicantController {
   communications(@Param('id') id: string, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.applicantService.getCommunicationTimeline(user.companyId, id);
+  }
+
+  @Get(':id/360')
+  @RequirePermissions(PERMISSIONS.PRESALES_APPLICANT_READ)
+  @ApiOperation({ summary: 'Applicant 360°: bookings, inquiries + follow-ups, documents, dispatch history' })
+  async threeSixty(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    const applicant = await this.systemPrisma.applicant.findFirst({ where: { id, companyId: user.companyId } });
+    if (!applicant) throw new NotFoundException('Applicant not found');
+
+    const [bookings, inquiries, documents, dispatches] = await Promise.all([
+      this.systemPrisma.booking.findMany({
+        where: {
+          companyId: user.companyId,
+          OR: [{ primaryApplicantId: id }, { coApplicants: { some: { applicantId: id } } }],
+        },
+        include: { unit: { include: { floor: { include: { tower: true } } } } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.systemPrisma.inquiry.findMany({
+        where: { companyId: user.companyId, applicantId: id },
+        include: { followUps: { orderBy: { createdAt: 'desc' } } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.systemPrisma.generatedDocument.findMany({
+        where: { companyId: user.companyId, applicantId: id },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.systemPrisma.documentDispatch.findMany({
+        where: { companyId: user.companyId, applicantId: id },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    return { applicant, bookings, inquiries, documents, dispatches };
   }
 
   @Post(':survivorId/merge/:mergedId')
