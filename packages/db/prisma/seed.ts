@@ -134,6 +134,7 @@ async function main() {
     {
       model: 'documentType',
       items: ['PAN Card', 'Aadhaar (reference only)', 'Passport', 'Voter ID', 'Agreement Copy', 'Allotment Letter', 'Demand Letter', 'Receipt', 'NOC', 'Possession Letter'],
+      extraFields: { entityType: 'Applicant' },
     },
     {
       model: 'chargeType',
@@ -144,20 +145,13 @@ async function main() {
       items: ['State Bank of India', 'HDFC Bank', 'ICICI Bank', 'Axis Bank', 'Punjab National Bank', 'Bank of Baroda', 'Kotak Mahindra Bank', 'Yes Bank'],
     },
     {
-      model: 'interestRule',
-      items: ['Standard 18% p.a.', 'Penal 24% p.a.'],
-    },
-    {
-      model: 'transferFeeRule',
-      items: ['Standard Transfer Fee', 'Mutation Charge'],
-    },
-    {
       model: 'paymentPlanTemplate',
       items: ['Construction-Linked Plan', 'Down Payment Plan', 'Flexi Plan', 'Subvention Plan'],
     },
   ];
 
-  for (const { model, items } of masters) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  for (const { model, items, extraFields } of masters as { model: string; items: string[]; extraFields?: Record<string, any> }[]) {
     for (let i = 0; i < items.length; i++) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (prisma as any)[model].create({
@@ -165,11 +159,28 @@ async function main() {
           companyId: company.id,
           name: items[i],
           sortOrder: i,
+          ...extraFields,
         },
       });
     }
     console.log(`  ${model}: ${items.length} entries`);
   }
+
+  console.log('Seeding interest rules...');
+  await prisma.interestRule.create({
+    data: { companyId: company.id, name: 'Standard 18% p.a.', rateType: 'SIMPLE', ratePercent: 18, frequency: 'YEARLY', sortOrder: 0 },
+  });
+  await prisma.interestRule.create({
+    data: { companyId: company.id, name: 'Penal 24% p.a.', rateType: 'SIMPLE', ratePercent: 24, frequency: 'YEARLY', sortOrder: 1 },
+  });
+
+  console.log('Seeding transfer fee rules...');
+  await prisma.transferFeeRule.create({
+    data: { companyId: company.id, name: 'Standard Transfer Fee', feeType: 'PERCENTAGE', percentage: 2, sortOrder: 0 },
+  });
+  await prisma.transferFeeRule.create({
+    data: { companyId: company.id, name: 'Mutation Charge', feeType: 'FIXED', amountPaise: BigInt(25_000_00), sortOrder: 1 },
+  });
 
   console.log('Seeding GST rates...');
   await prisma.gstRate.create({
