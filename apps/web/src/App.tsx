@@ -11,6 +11,13 @@ import MastersPage from './pages/admin/Masters';
 import CustomFieldsPage from './pages/admin/CustomFields';
 import CompanyConfigPage from './pages/admin/CompanyConfig';
 import AuditLogPage from './pages/admin/AuditLog';
+import BookingWizard from './pages/postsales/BookingWizard';
+import InstallmentSchedule from './pages/postsales/InstallmentSchedule';
+import ReceiptEntry from './pages/postsales/ReceiptEntry';
+import ChequeQueue from './pages/postsales/ChequeQueue';
+import DuesDashboard from './pages/postsales/DuesDashboard';
+import Applicant360 from './pages/postsales/Applicant360';
+import ReportsPage from './pages/postsales/Reports';
 
 export default function App() {
   return (
@@ -29,6 +36,14 @@ export default function App() {
             <Route path="admin/custom-fields" element={<CustomFieldsPage />} />
             <Route path="admin/config" element={<CompanyConfigPage />} />
             <Route path="admin/audit" element={<AuditLogPage />} />
+
+            <Route path="postsales/bookings/new" element={<BookingWizard />} />
+            <Route path="postsales/bookings/:bookingId/installments" element={<InstallmentSchedule />} />
+            <Route path="postsales/receipts/new" element={<ReceiptEntry />} />
+            <Route path="postsales/cheques" element={<ChequeQueue />} />
+            <Route path="postsales/dues" element={<DuesDashboard />} />
+            <Route path="postsales/applicants/:applicantId" element={<Applicant360 />} />
+            <Route path="postsales/reports" element={<ReportsPage />} />
           </Route>
         </Route>
       </Routes>

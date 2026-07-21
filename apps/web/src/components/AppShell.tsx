@@ -6,6 +6,17 @@ import { PERMISSIONS } from '@openestate/shared';
 const NAV_ITEMS = [
   { label: 'Dashboard', to: '/', icon: 'H' },
   {
+    label: 'Post-sales',
+    icon: 'P',
+    children: [
+      { label: 'New Booking', to: '/postsales/bookings/new', perm: PERMISSIONS.POSTSALES_BOOKING_CREATE },
+      { label: 'Receipt Entry', to: '/postsales/receipts/new', perm: PERMISSIONS.POSTSALES_RECEIPT_CREATE },
+      { label: 'Cheque Queue', to: '/postsales/cheques', perm: PERMISSIONS.POSTSALES_CHEQUE_VERIFY },
+      { label: 'Dues Dashboard', to: '/postsales/dues', perm: PERMISSIONS.REPORTS_OUTSTANDING_VIEW },
+      { label: 'Reports', to: '/postsales/reports', perm: PERMISSIONS.REPORTS_COLLECTION_VIEW },
+    ],
+  },
+  {
     label: 'Admin',
     icon: 'A',
     children: [
