@@ -11,17 +11,22 @@ RUN pnpm install --frozen-lockfile --filter @openestate/portal... --filter @open
 
 FROM deps AS build
 COPY tsconfig.base.json ./
-COPY packages/shared packages/shared
-COPY apps/portal apps/portal
+COPY packages/shared/src packages/shared/src
+COPY packages/shared/tsconfig.json packages/shared/tsconfig.json
+COPY apps/portal/src apps/portal/src
+COPY apps/portal/tsconfig.json apps/portal/tsconfig.json
+COPY apps/portal/vite.config.ts apps/portal/vite.config.ts
+COPY apps/portal/index.html apps/portal/index.html
+COPY apps/portal/postcss.config.js apps/portal/postcss.config.js
+COPY apps/portal/tailwind.config.js apps/portal/tailwind.config.js
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
-RUN pnpm --filter @openestate/shared build
 RUN pnpm --filter @openestate/portal build
 
 FROM nginx:1.27-alpine AS runtime
 COPY --from=build /app/apps/portal/dist /usr/share/nginx/html
 COPY deploy/nginx/static-spa.conf /etc/nginx/conf.d/default.conf
-RUN sed -i 's#/var/run/nginx.pid#/tmp/nginx.pid#' /etc/nginx/nginx.conf \
+RUN sed -i 's#/run/nginx.pid#/tmp/nginx.pid#' /etc/nginx/nginx.conf \
   && touch /tmp/nginx.pid \
   && chown -R nginx:nginx /usr/share/nginx/html /tmp/nginx.pid /var/cache/nginx
 USER nginx

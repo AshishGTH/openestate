@@ -18,6 +18,10 @@ rand_secret() {
   # 48 bytes -> 64 base64 chars, url-safe, no padding noise.
   openssl rand -base64 48 | tr -d '\n=+/' | cut -c1-48
 }
+rand_hex_32() {
+  # 32 bytes -> 64 hex chars for AES-256-GCM encryption keys.
+  openssl rand -hex 32
+}
 
 if [ -f .env ]; then
   warn ".env already exists — leaving it in place. Delete deploy/.env to regenerate secrets."
@@ -29,8 +33,8 @@ else
   POSTGRES_SYSTEM_PASSWORD="$(rand_secret)"
   JWT_ACCESS_SECRET="$(rand_secret)"
   JWT_REFRESH_SECRET="$(rand_secret)"
-  PAN_ENCRYPTION_KEY="$(rand_secret)"
-  TOTP_ENCRYPTION_KEY="$(rand_secret)"
+  PAN_ENCRYPTION_KEY="$(rand_hex_32)"
+  TOTP_ENCRYPTION_KEY="$(rand_hex_32)"
   MINIO_ROOT_PASSWORD="$(rand_secret)"
 
   # Portable in-place sed for both GNU and BSD/macOS sed.

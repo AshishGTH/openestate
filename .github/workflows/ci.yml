@@ -14,7 +14,7 @@ env:
   NODE_VERSION: "20"
 
 jobs:
-  lint-typecheck-test:
+  lint-typecheck-build:
     name: Lint, typecheck, unit tests, build
     runs-on: ubuntu-latest
     steps:
@@ -41,7 +41,7 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Unit tests
+      - name: Unit tests (no DB)
         run: pnpm test
 
       - name: Build
@@ -51,10 +51,130 @@ jobs:
         run: pnpm audit --audit-level=high
         continue-on-error: true
 
+  integration-tests:
+    name: Integration tests (Postgres + Redis)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: openestate_super
+          POSTGRES_PASSWORD: test_super_pass
+          POSTGRES_DB: openestate_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U openestate_super -d openestate_test"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @openestate/db generate
+
+      - name: Create application roles
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: openestate_super
+          PGPASSWORD: test_super_pass
+          PGDATABASE: openestate_test
+        run: |
+          psql <<'EOSQL'
+            CREATE ROLE openestate_app WITH LOGIN PASSWORD 'test_app_pass' NOINHERIT;
+            CREATE ROLE openestate_system WITH LOGIN PASSWORD 'test_system_pass' NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
+            GRANT USAGE ON SCHEMA public TO openestate_app;
+            GRANT USAGE ON SCHEMA public TO openestate_system;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openestate_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openestate_system;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO openestate_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO openestate_system;
+          EOSQL
+
+      - name: Apply migration
+        env:
+          DATABASE_URL: postgresql://openestate_super:test_super_pass@localhost:5432/openestate_test
+        run: |
+          cd packages/db
+          npx prisma migrate deploy
+          npx prisma migrate status
+
+      - name: Grant table-level permissions
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: openestate_super
+          PGPASSWORD: test_super_pass
+          PGDATABASE: openestate_test
+        run: |
+          psql <<'EOSQL'
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openestate_app;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openestate_system;
+          EOSQL
+
+      - name: Run seed
+        env:
+          DATABASE_URL: postgresql://openestate_super:test_super_pass@localhost:5432/openestate_test
+        run: pnpm --filter @openestate/db seed
+
+      - name: Run integration tests
+        env:
+          DATABASE_URL_TEST: postgresql://openestate_app:test_app_pass@localhost:5432/openestate_test
+          DATABASE_URL_TEST_SYSTEM: postgresql://openestate_system:test_system_pass@localhost:5432/openestate_test
+          REDIS_TEST_URL: redis://localhost:6379
+        run: pnpm test
+
+      - name: Fail if any test was skipped
+        env:
+          DATABASE_URL_TEST: postgresql://openestate_app:test_app_pass@localhost:5432/openestate_test
+          DATABASE_URL_TEST_SYSTEM: postgresql://openestate_system:test_system_pass@localhost:5432/openestate_test
+          REDIS_TEST_URL: redis://localhost:6379
+        run: |
+          # Run tests with JSON reporter and check for skipped tests
+          cd packages/db
+          npx vitest run --reporter=json 2>/dev/null | tee /tmp/db-results.json || true
+          SKIPPED=$(node -e "const r=require('/tmp/db-results.json'); console.log(r.numPendingTests || 0)" 2>/dev/null || echo "0")
+          if [ "$SKIPPED" != "0" ]; then
+            echo "::error::$SKIPPED integration tests were skipped in packages/db — a skipped security test must never look green"
+            exit 1
+          fi
+          cd ../../apps/api
+          npx vitest run --reporter=json 2>/dev/null | tee /tmp/api-results.json || true
+          SKIPPED=$(node -e "const r=require('/tmp/api-results.json'); console.log(r.numPendingTests || 0)" 2>/dev/null || echo "0")
+          if [ "$SKIPPED" != "0" ]; then
+            echo "::error::$SKIPPED integration tests were skipped in apps/api — a skipped security test must never look green"
+            exit 1
+          fi
+          echo "All integration tests ran — zero skipped."
+
   compose-healthcheck:
     name: docker compose up + healthcheck
     runs-on: ubuntu-latest
-    needs: lint-typecheck-test
+    needs: lint-typecheck-build
     steps:
       - uses: actions/checkout@v4
 
@@ -63,9 +183,13 @@ jobs:
         run: |
           cp .env.example .env
           sed -i "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=$(openssl rand -hex 24)#" .env
+          sed -i "s#^POSTGRES_APP_PASSWORD=.*#POSTGRES_APP_PASSWORD=$(openssl rand -hex 24)#" .env
+          sed -i "s#^POSTGRES_SYSTEM_PASSWORD=.*#POSTGRES_SYSTEM_PASSWORD=$(openssl rand -hex 24)#" .env
           sed -i "s#^JWT_ACCESS_SECRET=.*#JWT_ACCESS_SECRET=$(openssl rand -hex 24)#" .env
           sed -i "s#^JWT_REFRESH_SECRET=.*#JWT_REFRESH_SECRET=$(openssl rand -hex 24)#" .env
-          sed -i "s#^PAN_ENCRYPTION_KEY=.*#PAN_ENCRYPTION_KEY=$(openssl rand -hex 24)#" .env
+          sed -i "s#^PAN_ENCRYPTION_KEY=.*#PAN_ENCRYPTION_KEY=$(openssl rand -hex 32)#" .env
+          sed -i "s#^TOTP_ENCRYPTION_KEY=.*#TOTP_ENCRYPTION_KEY=$(openssl rand -hex 32)#" .env
+          sed -i "s#^MINIO_ROOT_PASSWORD=.*#MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)#" .env
 
       - name: docker compose up
         working-directory: deploy

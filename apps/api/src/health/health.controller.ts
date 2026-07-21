@@ -2,6 +2,7 @@ import { Controller, Get } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { getSystemPrisma } from '@openestate/db';
 import type { HealthStatus } from '@openestate/shared';
+import { Public } from '../auth/guards/jwt-auth.guard';
 import Redis from 'ioredis';
 
 const startedAt = Date.now();
@@ -10,6 +11,7 @@ const startedAt = Date.now();
 @Controller('health')
 export class HealthController {
   @Get()
+  @Public()
   @ApiOperation({ summary: 'Liveness/readiness check: verifies DB and Redis connectivity.' })
   @ApiOkResponse({ description: 'Health status of the API and its dependencies.' })
   async check(): Promise<HealthStatus> {

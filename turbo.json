@@ -14,7 +14,12 @@
       "dependsOn": ["^build"]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "env": [
+        "DATABASE_URL_TEST",
+        "DATABASE_URL_TEST_SYSTEM",
+        "REDIS_TEST_URL"
+      ]
     },
     "typecheck": {
       "dependsOn": ["^build"]
