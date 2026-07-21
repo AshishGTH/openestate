@@ -87,3 +87,29 @@ export interface ApiError extends Error {
   status: number;
   body: Record<string, unknown>;
 }
+
+/**
+ * Downloads a binary response (PDF, CSV) through the same auth as `api()`.
+ * A plain `window.open`/`<a href>` navigation can't carry the in-memory
+ * Bearer token (by design — CLAUDE.md keeps it out of cookies/localStorage),
+ * so protected binary endpoints must be fetched here and opened as a blob
+ * URL instead.
+ */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const url = `${API_BASE}/api/v1${path}`;
+  const headers = new Headers();
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+
+  const res = await fetch(url, { headers, credentials: 'include' });
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
+}

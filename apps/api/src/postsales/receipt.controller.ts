@@ -1,7 +1,8 @@
-import { Body, Controller, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Query, Req } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { createZodDto } from 'nestjs-zod';
+import { PrismaClient } from '@openestate/db';
 import {
   createReceiptSchema,
   chequeEventSchema,
@@ -11,6 +12,7 @@ import {
 } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
+import { SYSTEM_PRISMA } from '../database/database.module';
 import { ReceiptService } from './receipt.service';
 
 class CreateReceiptDto extends createZodDto(createReceiptSchema) {}
@@ -21,7 +23,33 @@ class TdsCertificateDto extends createZodDto(tdsCertificateSchema) {}
 @ApiTags('Receipts')
 @Controller('receipts')
 export class ReceiptController {
-  constructor(private readonly receipts: ReceiptService) {}
+  constructor(
+    private readonly receipts: ReceiptService,
+    @Inject(SYSTEM_PRISMA)
+    private readonly systemPrisma: PrismaClient,
+  ) {}
+
+  @Get('cheque-queue')
+  @RequirePermissions(PERMISSIONS.POSTSALES_CHEQUE_VERIFY)
+  @ApiOperation({ summary: 'Cheque/DD receipts awaiting clearance (RECEIVED/DEPOSITED), oldest first' })
+  chequeQueue(@Query('status') status: string | undefined, @Req() req: Request) {
+    const u = req.user as JwtPayload;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: any = {
+      companyId: u.companyId,
+      mode: { in: ['CHEQUE', 'DD'] },
+      clearanceStatus: status ? status : { in: ['RECEIVED', 'DEPOSITED'] },
+      isReversed: false,
+    };
+    return this.systemPrisma.receipt.findMany({
+      where,
+      include: {
+        booking: { select: { id: true, bookingNumber: true, primaryApplicant: { select: { name: true } } } },
+        chequeEvents: { orderBy: { eventDate: 'asc' } },
+      },
+      orderBy: { receiptDate: 'asc' },
+    });
+  }
 
   @Post()
   @RequirePermissions(PERMISSIONS.POSTSALES_RECEIPT_CREATE)

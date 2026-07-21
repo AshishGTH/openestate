@@ -7,6 +7,19 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ZodValidationPipe } from 'nestjs-zod';
 import { AppModule } from './app.module';
 
+// Money is stored as BigInt paise everywhere per CLAUDE.md, but native
+// BigInt has no JSON representation — Express's res.json() (JSON.stringify)
+// throws "Do not know how to serialize a BigInt" on any controller response
+// containing a raw Prisma money field. This is the standard global fix:
+// every *Paise field crosses the wire as a decimal string, which the
+// frontend re-parses with BigInt(...) before formatting. Applies uniformly
+// to every response — no controller/service has to remember to .toString()
+// its own money fields.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(BigInt.prototype as any).toJSON = function (this: bigint) {
+  return this.toString();
+};
+
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { bufferLogs: true });
 
