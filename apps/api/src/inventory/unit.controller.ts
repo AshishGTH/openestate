@@ -102,8 +102,11 @@ export class UnitController {
   }
 
   @Post(':id/transition')
-  @RequirePermissions(PERMISSIONS.INVENTORY_UNIT_READ)
-  @ApiOperation({ summary: 'Transition unit status' })
+  @RequirePermissions(PERMISSIONS.INVENTORY_UNIT_HOLD)
+  @ApiOperation({
+    summary:
+      'Manually transition unit status (holds/blocks only; booking-lifecycle statuses are system-only)',
+  })
   transition(
     @Param('id') id: string,
     @Body() dto: UnitStatusTransitionDto,

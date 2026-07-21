@@ -32,6 +32,25 @@ export function isValidTransition(from: UnitStatus, to: UnitStatus): boolean {
 
 export const REASON_REQUIRED_STATUSES: readonly UnitStatus[] = ['BLOCKED', 'CANCELLED'];
 
+/**
+ * Statuses that may ONLY be reached by a system actor (the Phase 4 booking
+ * lifecycle), never by the manual transition endpoint. BOOKED/ALLOTTED/
+ * REGISTERED and the booking-driven CANCELLED are all driven exclusively by
+ * BookingService (actorType 'system'). Manual holds/blocks
+ * (AVAILABLE↔HELD, AVAILABLE→BLOCKED, BLOCKED→AVAILABLE, CANCELLED→AVAILABLE)
+ * remain available to users. (Implements the Phase 2 Decisions-log note.)
+ */
+export const SYSTEM_ONLY_TARGET_STATUSES: readonly UnitStatus[] = [
+  'BOOKED',
+  'ALLOTTED',
+  'REGISTERED',
+  'CANCELLED',
+];
+
+export function isSystemOnlyTarget(toStatus: UnitStatus): boolean {
+  return SYSTEM_ONLY_TARGET_STATUSES.includes(toStatus);
+}
+
 // ── Upload Categories ───────────────────────────────────────
 
 export const UPLOAD_CATEGORIES = ['layout_plan', 'brochure', 'photo', 'document'] as const;

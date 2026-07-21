@@ -50,6 +50,26 @@ const AUDITED_MODELS = new Set([
   'FollowUp',
   'SmsTemplate',
   'CommunicationLog',
+  // Phase 4: audit the high-level financial ENTITIES. The low-level ledger
+  // mechanism rows (LedgerEntry, ReceiptAllocation, BookingCostLine,
+  // InterestAccrual, ChequeStatusEvent, TdsDeduction, NumberSequence) are
+  // intentionally NOT audited here — they ARE the append-only financial
+  // record (DB-trigger-enforced), so mirroring each into audit_logs is pure
+  // noise and would balloon under the property tests.
+  'CancellationRule',
+  'ApplicantAddress',
+  'ApplicantDocument',
+  'Booking',
+  'BookingCoApplicant',
+  'PaymentPlan',
+  'Receipt',
+  'Transfer',
+  'Cancellation',
+  'Refund',
+  'PaymentVoucher',
+  'ExtraCharge',
+  'TdsCertificate',
+  'PaymentPlanMilestone',
 ]);
 
 const SENSITIVE_FIELDS = new Set([

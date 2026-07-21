@@ -59,6 +59,28 @@ model Company {
   followUps              FollowUp[]
   smsTemplates           SmsTemplate[]
   communicationLogs      CommunicationLog[]
+  cancellationRules      CancellationRule[]
+  applicantAddresses     ApplicantAddress[]
+  applicantDocuments     ApplicantDocument[]
+  bookings               Booking[]
+  bookingCoApplicants    BookingCoApplicant[]
+  bookingCostLines       BookingCostLine[]
+  paymentPlans           PaymentPlan[]
+  installments           Installment[]
+  ledgerEntries          LedgerEntry[]
+  receipts               Receipt[]
+  receiptAllocations     ReceiptAllocation[]
+  chequeStatusEvents     ChequeStatusEvent[]
+  numberSequences        NumberSequence[]
+  transfers              Transfer[]
+  cancellations          Cancellation[]
+  refunds                Refund[]
+  paymentVouchers        PaymentVoucher[]
+  extraCharges           ExtraCharge[]
+  tdsDeductions          TdsDeduction[]
+  tdsCertificates        TdsCertificate[]
+  interestAccruals       InterestAccrual[]
+  paymentPlanMilestones  PaymentPlanMilestone[]
 
   @@map("companies")
 }
@@ -219,6 +241,14 @@ model CompanyConfig {
   timezone       String   @default("Asia/Kolkata") @db.VarChar(50)
   fyStartMonth   Int      @default(4) @map("fy_start_month")
   dateFormat     String   @default("DD-MM-YYYY") @map("date_format") @db.VarChar(20)
+  // Supplier-side GST identity — source of truth for the CGST/SGST-vs-IGST
+  // split (Phase 4). gstStateCode is the 2-char GST state code (e.g. "09"
+  // for UP, "27" for Maharashtra); the first two chars of a GSTIN.
+  companyGstin   String?  @map("company_gstin") @db.VarChar(15)
+  gstStateCode   String?  @map("gst_state_code") @db.VarChar(2)
+  // Flat charge (paise) applied when a cheque bounces (Phase 4). A receipt
+  // or refund cheque bounce posts a BOUNCE_CHARGE debit of this amount.
+  chequeBounceChargePaise BigInt @default(0) @map("cheque_bounce_charge_paise")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
@@ -339,6 +369,9 @@ model AreaLocation {
   name      String    @db.VarChar(255)
   city      String?   @db.VarChar(100)
   state     String?   @db.VarChar(100)
+  // GST state code of the property location — the default place-of-supply
+  // for bookings on projects in this area (IGST Act §12(3)(a), Phase 4).
+  stateCode String?   @map("state_code") @db.VarChar(2)
   pincode   String?   @db.VarChar(10)
   isActive  Boolean   @default(true) @map("is_active")
   sortOrder Int       @default(0) @map("sort_order")
@@ -486,18 +519,41 @@ model TransferFeeRule {
 }
 
 model PaymentPlanTemplate {
-  id          String   @id @default(uuid()) @db.Uuid
-  companyId   String   @map("company_id") @db.Uuid
-  name        String   @db.VarChar(255)
-  description String?  @db.Text
-  isActive    Boolean  @default(true) @map("is_active")
-  sortOrder   Int      @default(0) @map("sort_order")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  company     Company  @relation(fields: [companyId], references: [id])
+  id          String                  @id @default(uuid()) @db.Uuid
+  companyId   String                  @map("company_id") @db.Uuid
+  name        String                  @db.VarChar(255)
+  description String?                 @db.Text
+  isActive    Boolean                 @default(true) @map("is_active")
+  sortOrder   Int                     @default(0) @map("sort_order")
+  createdAt   DateTime                @default(now()) @map("created_at")
+  updatedAt   DateTime                @updatedAt @map("updated_at")
+  company     Company                 @relation(fields: [companyId], references: [id])
+  milestones  PaymentPlanMilestone[]
 
   @@unique([companyId, name])
   @@map("payment_plan_templates")
+}
+
+/// A milestone line of a payment-plan template. Instantiated per booking into
+/// an Installment: amount = percent% of agreed price (allocated with no
+/// rounding loss), dueDate = bookingDate + dueOffsetDays. Milestone percents
+/// for a template should sum to 100.
+model PaymentPlanMilestone {
+  id            String              @id @default(uuid()) @db.Uuid
+  companyId     String              @map("company_id") @db.Uuid
+  templateId    String              @map("template_id") @db.Uuid
+  seq           Int
+  label         String              @db.VarChar(255)
+  percent       Decimal             @db.Decimal(6, 3)
+  dueOffsetDays Int                 @default(0) @map("due_offset_days")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  company  Company             @relation(fields: [companyId], references: [id])
+  template PaymentPlanTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, seq])
+  @@map("payment_plan_milestones")
 }
 
 // ─── Phase 2: Inventory ───────────────────────────────────────
@@ -629,6 +685,7 @@ model Unit {
   charges       UnitCharge[]
   rateRevisions UnitRateRevision[]
   statusChanges UnitStatusChange[]
+  bookings      Booking[]
 
   @@unique([floorId, number])
   @@map("units")
@@ -722,18 +779,28 @@ model Applicant {
   state                  String?  @db.VarChar(100)
   pincode                String?  @db.VarChar(10)
   customFields           Json?    @map("custom_fields")
+  // PAN encrypted at rest (AES-256-GCM, PAN_ENCRYPTION_KEY). panMasked is the
+  // display form (e.g. "XXXXX1234X"). panKeyVersion lets a future key rotation
+  // re-encrypt without a schema migration — no rotation logic exists yet.
+  panCiphertext          String?  @map("pan_ciphertext") @db.Text
+  panMasked              String?  @map("pan_masked") @db.VarChar(15)
+  panKeyVersion          Int      @default(1) @map("pan_key_version") @db.SmallInt
   mergedIntoId           String?  @map("merged_into_id") @db.Uuid
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
 
-  company           Company            @relation(fields: [companyId], references: [id])
-  mergedInto        Applicant?         @relation("applicantMergeChain", fields: [mergedIntoId], references: [id])
-  mergedFrom        Applicant[]        @relation("applicantMergeChain")
+  company           Company              @relation(fields: [companyId], references: [id])
+  mergedInto        Applicant?           @relation("applicantMergeChain", fields: [mergedIntoId], references: [id])
+  mergedFrom        Applicant[]          @relation("applicantMergeChain")
   consents          ApplicantConsent[]
-  survivorOfMerges  ApplicantMerge[]   @relation("mergeSurvivor")
-  absorbedInMerge   ApplicantMerge?    @relation("mergeAbsorbed")
+  survivorOfMerges  ApplicantMerge[]     @relation("mergeSurvivor")
+  absorbedInMerge   ApplicantMerge?      @relation("mergeAbsorbed")
   inquiries         Inquiry[]
   communicationLogs CommunicationLog[]
+  addresses         ApplicantAddress[]
+  documents         ApplicantDocument[]
+  primaryBookings   Booking[]            @relation("bookingPrimaryApplicant")
+  coApplicantOf     BookingCoApplicant[]
 
   @@index([companyId, primaryPhoneNormalized])
   @@index([companyId, emailNormalized])
@@ -964,4 +1031,621 @@ model CommunicationLog {
 
   @@index([companyId, applicantId, createdAt])
   @@map("communication_logs")
+}
+
+// ─── Phase 4: Financial core — bookings, ledger, receipts ─────
+//
+// Relation policy for Phase 4: the core financial graph (Booking, Installment,
+// LedgerEntry, Receipt, …) uses full Prisma relations. Master/config FKs
+// (chargeTypeId, gstRateId, bankId, receiptTypeId, interestRuleId,
+// transferFeeRuleId, cancellationRuleId, paymentPlanTemplateId, documentTypeId)
+// and user FKs (createdById, approvedById, verifiedById, uploadedById) are
+// plain @db.Uuid scalars WITHOUT Prisma relations — their FK constraints are
+// added at the DB level in the migration. This keeps User and the master
+// models from accumulating dozens of back-relations while preserving
+// referential integrity in Postgres.
+
+enum AddressType {
+  OFFICE
+  PERMANENT
+  PRESENT
+}
+
+model ApplicantAddress {
+  id          String      @id @default(uuid()) @db.Uuid
+  companyId   String      @map("company_id") @db.Uuid
+  applicantId String      @map("applicant_id") @db.Uuid
+  addressType AddressType @map("address_type")
+  line1       String      @db.VarChar(255)
+  line2       String?     @db.VarChar(255)
+  city        String?     @db.VarChar(100)
+  state       String?     @db.VarChar(100)
+  stateCode   String?     @map("state_code") @db.VarChar(2)
+  pincode     String?     @db.VarChar(10)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  company   Company   @relation(fields: [companyId], references: [id])
+  applicant Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+
+  @@unique([applicantId, addressType])
+  @@map("applicant_addresses")
+}
+
+model ApplicantDocument {
+  id             String   @id @default(uuid()) @db.Uuid
+  companyId      String   @map("company_id") @db.Uuid
+  applicantId    String   @map("applicant_id") @db.Uuid
+  documentTypeId String?  @map("document_type_id") @db.Uuid
+  storedName     String   @map("stored_name") @db.VarChar(255)
+  originalName   String   @map("original_name") @db.VarChar(255)
+  mimeType       String   @map("mime_type") @db.VarChar(100)
+  sizeBytes      Int      @map("size_bytes")
+  uploadedById   String?  @map("uploaded_by_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  company   Company   @relation(fields: [companyId], references: [id])
+  applicant Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, applicantId])
+  @@map("applicant_documents")
+}
+
+model CancellationRule {
+  id                   String   @id @default(uuid()) @db.Uuid
+  companyId            String   @map("company_id") @db.Uuid
+  name                 String   @db.VarChar(255)
+  deductionType        String   @map("deduction_type") @db.VarChar(20) // PERCENT | FLAT
+  deductionPercent     Decimal? @map("deduction_percent") @db.Decimal(5, 2)
+  deductionAmountPaise BigInt?  @map("deduction_amount_paise")
+  forfeitBookingAmount Boolean  @default(false) @map("forfeit_booking_amount")
+  isActive             Boolean  @default(true) @map("is_active")
+  sortOrder            Int      @default(0) @map("sort_order")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+  company              Company  @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, name])
+  @@map("cancellation_rules")
+}
+
+enum BookingStatus {
+  APPLICATION
+  BOOKED
+  ALLOTTED
+  REGISTERED
+  CANCELLED
+  SURRENDERED
+  TRANSFERRED_OUT
+}
+
+model Booking {
+  id                     String        @id @default(uuid()) @db.Uuid
+  companyId              String        @map("company_id") @db.Uuid
+  unitId                 String        @map("unit_id") @db.Uuid
+  primaryApplicantId     String        @map("primary_applicant_id") @db.Uuid
+  bookingNumber          String        @map("booking_number") @db.VarChar(40)
+  status                 BookingStatus @default(APPLICATION)
+  agreedPricePaise       BigInt        @map("agreed_price_paise")
+  // Snapshot of the GST place-of-supply state code, taken at booking and
+  // immutable thereafter. Per IGST Act §12(3)(a), the place of supply of
+  // services directly in relation to immovable property is the LOCATION OF
+  // THE PROPERTY — not the customer's residential state. Defaulted from the
+  // project/area-location state at creation, overridable then, frozen after.
+  // Do not "fix" this to follow the applicant's address.
+  placeOfSupplyStateCode String?       @map("place_of_supply_state_code") @db.VarChar(2)
+  paymentPlanTemplateId  String?       @map("payment_plan_template_id") @db.Uuid
+  // Interest rule for overdue installments (Phase 4). Null = no delay interest.
+  // Scalar + DB-level FK (no Prisma relation).
+  interestRuleId         String?       @map("interest_rule_id") @db.Uuid
+  bookingDate            DateTime      @map("booking_date") @db.Date
+  allotmentDate          DateTime?     @map("allotment_date") @db.Date
+  registrationDate       DateTime?     @map("registration_date") @db.Date
+  cancelledAt            DateTime?     @map("cancelled_at")
+  createdById            String?       @map("created_by_id") @db.Uuid
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
+
+  company          Company              @relation(fields: [companyId], references: [id])
+  unit             Unit                 @relation(fields: [unitId], references: [id])
+  primaryApplicant Applicant            @relation("bookingPrimaryApplicant", fields: [primaryApplicantId], references: [id])
+  coApplicants     BookingCoApplicant[]
+  costLines        BookingCostLine[]
+  paymentPlans     PaymentPlan[]
+  installments     Installment[]
+  ledgerEntries    LedgerEntry[]
+  receipts         Receipt[]
+  transfersFrom    Transfer[]           @relation("transferFrom")
+  transfersTo      Transfer[]           @relation("transferTo")
+  cancellations    Cancellation[]
+  refunds          Refund[]
+  paymentVouchers  PaymentVoucher[]
+  extraCharges     ExtraCharge[]
+  tdsDeductions    TdsDeduction[]
+  interestAccruals InterestAccrual[]
+
+  @@unique([companyId, bookingNumber])
+  @@index([companyId, status])
+  @@index([companyId, unitId])
+  @@map("bookings")
+}
+
+model BookingCoApplicant {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  bookingId   String   @map("booking_id") @db.Uuid
+  applicantId String   @map("applicant_id") @db.Uuid
+  ordinal     Int      @default(2)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  company   Company   @relation(fields: [companyId], references: [id])
+  booking   Booking   @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  applicant Applicant @relation(fields: [applicantId], references: [id])
+
+  @@unique([bookingId, applicantId])
+  @@map("booking_co_applicants")
+}
+
+enum CostLineKind {
+  BASE
+  PLC
+  PARKING
+  CLUB
+  MAINTENANCE
+  OTHER
+}
+
+/// Snapshot of a booking's agreed cost breakup, taken at booking time.
+/// The GST rate is captured here (gstRatePercentSnapshot) and immutable —
+/// re-pricing the charge master later never changes an existing booking.
+model BookingCostLine {
+  id                     String       @id @default(uuid()) @db.Uuid
+  companyId              String       @map("company_id") @db.Uuid
+  bookingId              String       @map("booking_id") @db.Uuid
+  kind                   CostLineKind
+  chargeTypeId           String?      @map("charge_type_id") @db.Uuid
+  label                  String       @db.VarChar(255)
+  baseAmountPaise        BigInt       @map("base_amount_paise")
+  gstRateId              String?      @map("gst_rate_id") @db.Uuid
+  gstRatePercentSnapshot Decimal      @default(0) @map("gst_rate_percent_snapshot") @db.Decimal(5, 2)
+  cgstPaise              BigInt       @default(0) @map("cgst_paise")
+  sgstPaise              BigInt       @default(0) @map("sgst_paise")
+  igstPaise              BigInt       @default(0) @map("igst_paise")
+  lineTotalPaise         BigInt       @map("line_total_paise")
+  sortOrder              Int          @default(0) @map("sort_order")
+  createdAt              DateTime     @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, bookingId])
+  @@map("booking_cost_lines")
+}
+
+model PaymentPlan {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  bookingId   String   @map("booking_id") @db.Uuid
+  templateId  String?  @map("template_id") @db.Uuid
+  name        String   @db.VarChar(255)
+  isCustom    Boolean  @default(false) @map("is_custom")
+  version     Int      @default(1)
+  isActive    Boolean  @default(true) @map("is_active")
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company      Company       @relation(fields: [companyId], references: [id])
+  booking      Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  installments Installment[]
+
+  @@index([companyId, bookingId])
+  @@map("payment_plans")
+}
+
+enum InstallmentStatus {
+  UNPAID
+  PART_PAID
+  PAID
+}
+
+/// An installment is FROZEN (immutable, may not be edited or regenerated)
+/// exactly when allocatedPaise > 0. There is no separate isFrozen column —
+/// allocatedPaise (a maintained cache of Σ ReceiptAllocation) is the single
+/// source of truth for the freeze rule (see CLAUDE.md Phase 4 decisions).
+model Installment {
+  id               String            @id @default(uuid()) @db.Uuid
+  companyId        String            @map("company_id") @db.Uuid
+  bookingId        String            @map("booking_id") @db.Uuid
+  planId           String            @map("plan_id") @db.Uuid
+  seq              Int
+  label            String            @db.VarChar(255)
+  dueDate          DateTime          @map("due_date") @db.Date
+  amountPaise      BigInt            @map("amount_paise")
+  milestonePercent Decimal?          @map("milestone_percent") @db.Decimal(6, 3)
+  allocatedPaise   BigInt            @default(0) @map("allocated_paise")
+  status           InstallmentStatus @default(UNPAID)
+  isActive         Boolean           @default(true) @map("is_active")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+
+  company     Company             @relation(fields: [companyId], references: [id])
+  booking     Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  plan        PaymentPlan         @relation(fields: [planId], references: [id], onDelete: Cascade)
+  allocations ReceiptAllocation[]
+
+  @@index([companyId, bookingId])
+  @@index([companyId, dueDate])
+  @@map("installments")
+}
+
+enum LedgerEntryType {
+  CHARGE
+  EXTRA_CHARGE
+  RECEIPT_ALLOC
+  INTEREST
+  INTEREST_WAIVER
+  BOUNCE_REVERSAL
+  BOUNCE_CHARGE
+  REFUND_APPROVED
+  REFUND_BOUNCE_REVERSAL
+  TRANSFER_CARRY_OUT
+  TRANSFER_CARRY_IN
+  TRANSFER_FEE
+  CANCELLATION_SETTLEMENT
+  CANCELLATION_DEDUCTION
+  TDS_RECEIVABLE
+  TDS_CERT_ADJUSTMENT
+  ADJUSTMENT
+}
+
+/// APPEND-ONLY. The booking balance is DEFINED as SUM(signed_amount_paise).
+/// Positive = debit (customer owes); negative = credit (customer paid/credited).
+/// Corrections are new negating rows referencing reversalOfEntryId — never an
+/// UPDATE or DELETE. A DB trigger forbids UPDATE/DELETE on this table.
+model LedgerEntry {
+  id                String          @id @default(uuid()) @db.Uuid
+  companyId         String          @map("company_id") @db.Uuid
+  bookingId         String          @map("booking_id") @db.Uuid
+  entryType         LedgerEntryType @map("entry_type")
+  signedAmountPaise BigInt          @map("signed_amount_paise")
+  installmentId     String?         @map("installment_id") @db.Uuid
+  receiptId         String?         @map("receipt_id") @db.Uuid
+  reversalOfEntryId String?         @map("reversal_of_entry_id") @db.Uuid
+  reason            String?         @db.VarChar(500)
+  effectiveDate     DateTime        @map("effective_date") @db.Date
+  createdById       String?         @map("created_by_id") @db.Uuid
+  createdAt         DateTime        @default(now()) @map("created_at")
+
+  company    Company       @relation(fields: [companyId], references: [id])
+  booking    Booking       @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  receipt    Receipt?      @relation(fields: [receiptId], references: [id])
+  reversalOf LedgerEntry?  @relation("ledgerReversal", fields: [reversalOfEntryId], references: [id])
+  reversedBy LedgerEntry[] @relation("ledgerReversal")
+
+  @@index([companyId, bookingId])
+  @@index([companyId, entryType])
+  @@map("ledger_entries")
+}
+
+enum ReceiptMode {
+  CASH
+  CHEQUE
+  DD
+  NEFT
+  RTGS
+  UPI
+  CARD
+}
+
+enum ChequeClearanceStatus {
+  NOT_APPLICABLE
+  RECEIVED
+  DEPOSITED
+  CLEARED
+  BOUNCED
+}
+
+model Receipt {
+  id               String                @id @default(uuid()) @db.Uuid
+  companyId        String                @map("company_id") @db.Uuid
+  bookingId        String                @map("booking_id") @db.Uuid
+  receiptNumber    String                @map("receipt_number") @db.VarChar(40)
+  fyLabel          String                @map("fy_label") @db.VarChar(9)
+  seqValue         Int                   @map("seq_value")
+  receiptDate      DateTime              @map("receipt_date") @db.Date
+  mode             ReceiptMode
+  grossAmountPaise BigInt                @map("gross_amount_paise")
+  receiptTypeId    String?               @map("receipt_type_id") @db.Uuid
+  bankId           String?               @map("bank_id") @db.Uuid
+  instrumentNumber String?               @map("instrument_number") @db.VarChar(50)
+  instrumentDate   DateTime?             @map("instrument_date") @db.Date
+  utr              String?               @db.VarChar(50)
+  clearanceStatus  ChequeClearanceStatus @default(NOT_APPLICABLE) @map("clearance_status")
+  isReversed       Boolean               @default(false) @map("is_reversed")
+  reversalReason   String?               @map("reversal_reason") @db.VarChar(500)
+  reprintCount     Int                   @default(0) @map("reprint_count")
+  createdById      String?               @map("created_by_id") @db.Uuid
+  createdAt        DateTime              @default(now()) @map("created_at")
+  updatedAt        DateTime              @updatedAt @map("updated_at")
+
+  company       Company             @relation(fields: [companyId], references: [id])
+  booking       Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  allocations   ReceiptAllocation[]
+  chequeEvents  ChequeStatusEvent[]
+  ledgerEntries LedgerEntry[]
+  tdsDeductions TdsDeduction[]
+
+  @@unique([companyId, receiptNumber])
+  @@index([companyId, bookingId])
+  @@map("receipts")
+}
+
+/// APPEND-ONLY. Which installment(s) a receipt settled. Σ allocations ==
+/// receipt gross. A DB trigger forbids UPDATE/DELETE.
+model ReceiptAllocation {
+  id            String   @id @default(uuid()) @db.Uuid
+  companyId     String   @map("company_id") @db.Uuid
+  receiptId     String   @map("receipt_id") @db.Uuid
+  installmentId String   @map("installment_id") @db.Uuid
+  amountPaise   BigInt   @map("amount_paise")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  company     Company     @relation(fields: [companyId], references: [id])
+  receipt     Receipt     @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  installment Installment @relation(fields: [installmentId], references: [id])
+
+  @@index([companyId, installmentId])
+  @@map("receipt_allocations")
+}
+
+/// APPEND-ONLY cheque lifecycle log. The cached Receipt.clearanceStatus is
+/// derived from the latest event. A DB trigger forbids UPDATE/DELETE.
+model ChequeStatusEvent {
+  id          String                @id @default(uuid()) @db.Uuid
+  companyId   String                @map("company_id") @db.Uuid
+  receiptId   String                @map("receipt_id") @db.Uuid
+  status      ChequeClearanceStatus
+  eventDate   DateTime              @map("event_date") @db.Date
+  reason      String?               @db.VarChar(500)
+  createdById String?               @map("created_by_id") @db.Uuid
+  createdAt   DateTime              @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  receipt Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, receiptId, createdAt])
+  @@map("cheque_status_events")
+}
+
+/// Gap-free document-number allocator. Incremented inside the same
+/// transaction as the row it numbers (e.g. a receipt); a rolled-back
+/// transaction releases its number, so committed rows are strictly
+/// contiguous per (company, kind, scope). Not append-only — it is a counter.
+model NumberSequence {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String   @map("company_id") @db.Uuid
+  kind       String   @db.VarChar(30) // RECEIPT | BOOKING | …
+  scopeLabel String   @map("scope_label") @db.VarChar(20) // FY label, or GLOBAL
+  nextValue  Int      @default(1) @map("next_value")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, kind, scopeLabel])
+  @@map("number_sequences")
+}
+
+enum TransferType {
+  UNIT
+  APPLICANT
+}
+
+model Transfer {
+  id                String       @id @default(uuid()) @db.Uuid
+  companyId         String       @map("company_id") @db.Uuid
+  fromBookingId     String       @map("from_booking_id") @db.Uuid
+  toBookingId       String?      @map("to_booking_id") @db.Uuid
+  transferType      TransferType @map("transfer_type")
+  transferFeeRuleId String?      @map("transfer_fee_rule_id") @db.Uuid
+  transferFeePaise  BigInt       @default(0) @map("transfer_fee_paise")
+  carryForwardPaise BigInt       @map("carry_forward_paise")
+  reason            String?      @db.VarChar(500)
+  createdById       String?      @map("created_by_id") @db.Uuid
+  createdAt         DateTime     @default(now()) @map("created_at")
+
+  company     Company  @relation(fields: [companyId], references: [id])
+  fromBooking Booking  @relation("transferFrom", fields: [fromBookingId], references: [id])
+  toBooking   Booking? @relation("transferTo", fields: [toBookingId], references: [id])
+
+  @@index([companyId, fromBookingId])
+  @@map("transfers")
+}
+
+enum CancellationType {
+  CANCEL
+  SURRENDER
+}
+
+model Cancellation {
+  id                    String           @id @default(uuid()) @db.Uuid
+  companyId             String           @map("company_id") @db.Uuid
+  bookingId             String           @map("booking_id") @db.Uuid
+  cancellationType      CancellationType @map("cancellation_type")
+  cancellationRuleId    String?          @map("cancellation_rule_id") @db.Uuid
+  deductionTypeSnapshot String           @map("deduction_type_snapshot") @db.VarChar(20)
+  deductionPaise        BigInt           @map("deduction_paise")
+  refundablePaise       BigInt           @map("refundable_paise")
+  reason                String?          @db.VarChar(500)
+  createdById           String?          @map("created_by_id") @db.Uuid
+  createdAt             DateTime         @default(now()) @map("created_at")
+
+  company Company  @relation(fields: [companyId], references: [id])
+  booking Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  refunds Refund[]
+
+  @@index([companyId, bookingId])
+  @@map("cancellations")
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  PAID
+  REJECTED
+}
+
+model Refund {
+  id             String       @id @default(uuid()) @db.Uuid
+  companyId      String       @map("company_id") @db.Uuid
+  bookingId      String       @map("booking_id") @db.Uuid
+  cancellationId String?      @map("cancellation_id") @db.Uuid
+  amountPaise    BigInt       @map("amount_paise")
+  status         RefundStatus @default(REQUESTED)
+  mode           ReceiptMode?
+  approvedById   String?      @map("approved_by_id") @db.Uuid
+  approvedAt     DateTime?    @map("approved_at")
+  createdById    String?      @map("created_by_id") @db.Uuid
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+
+  company      Company          @relation(fields: [companyId], references: [id])
+  booking      Booking          @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  cancellation Cancellation?    @relation(fields: [cancellationId], references: [id])
+  vouchers     PaymentVoucher[]
+
+  @@index([companyId, bookingId])
+  @@map("refunds")
+}
+
+enum VoucherStatus {
+  ISSUED
+  CLEARED
+  BOUNCED
+}
+
+/// Records actual cash/bank OUTFLOW (e.g. a refund payout). Separate from the
+/// customer sub-ledger: the ledger recognises the refund OBLIGATION at
+/// approval (REFUND_APPROVED debit); this voucher records the SETTLEMENT at
+/// payment. A bounced refund cheque re-opens the obligation via a
+/// REFUND_BOUNCE_REVERSAL ledger entry. See CLAUDE.md Phase 4 decisions.
+model PaymentVoucher {
+  id               String        @id @default(uuid()) @db.Uuid
+  companyId        String        @map("company_id") @db.Uuid
+  bookingId        String        @map("booking_id") @db.Uuid
+  refundId         String?       @map("refund_id") @db.Uuid
+  amountPaise      BigInt        @map("amount_paise")
+  mode             ReceiptMode
+  bankId           String?       @map("bank_id") @db.Uuid
+  instrumentNumber String?       @map("instrument_number") @db.VarChar(50)
+  instrumentDate   DateTime?     @map("instrument_date") @db.Date
+  status           VoucherStatus @default(ISSUED)
+  createdById      String?       @map("created_by_id") @db.Uuid
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  refund  Refund? @relation(fields: [refundId], references: [id])
+
+  @@index([companyId, bookingId])
+  @@map("payment_vouchers")
+}
+
+/// Off-schedule charge added to a booking after the fact. GST rate captured
+/// at entry-time from the linked ChargeType's current effective GST rate and
+/// immutable after — same discipline as BookingCostLine.
+model ExtraCharge {
+  id                     String   @id @default(uuid()) @db.Uuid
+  companyId              String   @map("company_id") @db.Uuid
+  bookingId              String   @map("booking_id") @db.Uuid
+  chargeTypeId           String?  @map("charge_type_id") @db.Uuid
+  label                  String   @db.VarChar(255)
+  baseAmountPaise        BigInt   @map("base_amount_paise")
+  gstRateId              String?  @map("gst_rate_id") @db.Uuid
+  gstRatePercentSnapshot Decimal  @default(0) @map("gst_rate_percent_snapshot") @db.Decimal(5, 2)
+  cgstPaise              BigInt   @default(0) @map("cgst_paise")
+  sgstPaise              BigInt   @default(0) @map("sgst_paise")
+  igstPaise              BigInt   @default(0) @map("igst_paise")
+  lineTotalPaise         BigInt   @map("line_total_paise")
+  createdById            String?  @map("created_by_id") @db.Uuid
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, bookingId])
+  @@map("extra_charges")
+}
+
+/// APPEND-ONLY. TDS (194-IA) withheld on a receipt. The TDS_RECEIVABLE ledger
+/// debit keeps the withheld amount visible as outstanding until a certificate
+/// is recorded. Certificate receipt is a separate append-only TdsCertificate
+/// row (not a mutable flag). A DB trigger forbids UPDATE/DELETE.
+model TdsDeduction {
+  id                      String   @id @default(uuid()) @db.Uuid
+  companyId               String   @map("company_id") @db.Uuid
+  bookingId               String   @map("booking_id") @db.Uuid
+  receiptId               String?  @map("receipt_id") @db.Uuid
+  sectionSnapshot         String   @map("section_snapshot") @db.VarChar(20)
+  ratePercentSnapshot     Decimal  @map("rate_percent_snapshot") @db.Decimal(5, 2)
+  deductedPaise           BigInt   @map("deducted_paise")
+  receivableLedgerEntryId String?  @map("receivable_ledger_entry_id") @db.Uuid
+  createdById             String?  @map("created_by_id") @db.Uuid
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  company     Company         @relation(fields: [companyId], references: [id])
+  booking     Booking         @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  receipt     Receipt?        @relation(fields: [receiptId], references: [id])
+  certificate TdsCertificate?
+
+  @@index([companyId, bookingId])
+  @@map("tds_deductions")
+}
+
+/// APPEND-ONLY. Recording a TDS certificate posts the TDS_CERT_ADJUSTMENT
+/// credit that zeroes the corresponding TDS receivable. One per deduction.
+/// A DB trigger forbids UPDATE/DELETE.
+model TdsCertificate {
+  id                      String   @id @default(uuid()) @db.Uuid
+  companyId               String   @map("company_id") @db.Uuid
+  tdsDeductionId          String   @unique @map("tds_deduction_id") @db.Uuid
+  certificateNumber       String   @map("certificate_number") @db.VarChar(50)
+  certificateDate         DateTime @map("certificate_date") @db.Date
+  adjustmentLedgerEntryId String?  @map("adjustment_ledger_entry_id") @db.Uuid
+  createdById             String?  @map("created_by_id") @db.Uuid
+  createdAt               DateTime @default(now()) @map("created_at")
+
+  company      Company      @relation(fields: [companyId], references: [id])
+  tdsDeduction TdsDeduction @relation(fields: [tdsDeductionId], references: [id], onDelete: Cascade)
+
+  @@map("tds_certificates")
+}
+
+/// APPEND-ONLY. One row per accrual period per installment, with a periodEnd
+/// cursor for idempotency (re-running the daily job never double-posts). The
+/// posted INTEREST debit is referenced by ledgerEntryId. A DB trigger forbids
+/// UPDATE/DELETE.
+model InterestAccrual {
+  id                  String   @id @default(uuid()) @db.Uuid
+  companyId           String   @map("company_id") @db.Uuid
+  bookingId           String   @map("booking_id") @db.Uuid
+  installmentId       String?  @map("installment_id") @db.Uuid
+  interestRuleId      String?  @map("interest_rule_id") @db.Uuid
+  rateType            String   @map("rate_type") @db.VarChar(20)
+  ratePercentSnapshot Decimal  @map("rate_percent_snapshot") @db.Decimal(5, 2)
+  periodStart         DateTime @map("period_start") @db.Date
+  periodEnd           DateTime @map("period_end") @db.Date
+  principalPaise      BigInt   @map("principal_paise")
+  accruedPaise        BigInt   @map("accrued_paise")
+  ledgerEntryId       String?  @map("ledger_entry_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, bookingId])
+  @@index([companyId, installmentId, periodEnd])
+  @@map("interest_accruals")
 }

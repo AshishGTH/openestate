@@ -466,3 +466,126 @@ this is a log, not a design doc.
   concurrently and asserts fairness holds for each independently.** A
   naive single-key change risks reintroducing cross-project head-of-line
   blocking under load without anyone noticing.
+
+### Phase 4 — financial core: bookings, ledger, receipts, GST/TDS, interest, transfer, cancellation
+
+- **The booking balance IS `SUM(ledger_entries.signed_amount_paise)`.**
+  There is no stored balance field to drift. Positive = debit (customer
+  owes), negative = credit. Every financial event appends immutable rows;
+  corrections append negating rows referencing `reversalOfEntryId` — never
+  an UPDATE/DELETE. Booking opens by posting the cost breakup as `CHARGE`
+  debits (Σ = agreed price). Proven by a fast-check property suite (below).
+- **Append-only is enforced at the DATABASE, not just the app.** A trigger
+  (`forbid_financial_mutation`) blocks UPDATE/DELETE on `ledger_entries`,
+  `receipt_allocations`, `cheque_status_events`, `interest_accruals`,
+  `tds_deductions`, `tds_certificates`. A deliberate maintenance escape
+  hatch — the transaction-local GUC `app.allow_financial_mutation='on'` —
+  lets admin purges and test teardown delete; normal app code never sets
+  it. (Because booking→ledger FKs are `ON DELETE CASCADE`, a booking can
+  only be hard-deleted under that GUC; in production bookings are cancelled,
+  never deleted.)
+- **Relation policy: master/config and user FKs are scalar `@db.Uuid`
+  columns with DB-level FK constraints, not Prisma relations.** The core
+  financial graph (Booking/Installment/LedgerEntry/Receipt/…) uses Prisma
+  relations; but `createdById`/`approvedById`, `chargeTypeId`, `gstRateId`,
+  `interestRuleId`, etc. are plain scalars whose FKs are added in the
+  migration. This keeps `User` and the master models from accumulating
+  ~30 back-relations. Trade-off: no `include:` for those links (look them
+  up by id) — fine for provenance fields.
+- **GST place of supply = the PROPERTY location, snapshotted at booking
+  (`Booking.placeOfSupplyStateCode`), immutable after.** IGST Act §12(3)(a):
+  services in relation to immovable property are supplied where the property
+  is — NOT the customer's residential state. Defaulted from the project's
+  area-location `stateCode`, overridable only at creation. Intra-state
+  (supplier `CompanyConfig.gstStateCode` == place of supply) → CGST+SGST;
+  else → IGST. A code comment cites §12(3)(a) so nobody "fixes" it to follow
+  the applicant's address.
+- **CGST/SGST rounding: the halves are equal by construction, so
+  `(CGST + SGST)` may differ from `IGST` by ≤1 paise per line.**
+  `cgst = sgst = roundHalfUp(base·rate/2)`, `igst = roundHalfUp(base·rate)`,
+  all BigInt. A test matrix asserts `|IGST − (CGST+SGST)| ≤ 1` across bases
+  and rates. GST rates are snapshotted per cost line (and per `ExtraCharge`,
+  captured from the linked ChargeType's effective rate at entry) — re-pricing
+  a rate master never changes an existing booking.
+- **TDS (194-IA) leaves no dangling receivable.** A receipt credits the
+  GROSS installment amount and, in the SAME transaction, posts a
+  `TDS_RECEIVABLE` debit for the withheld portion — so the booking balance
+  keeps showing the TDS as outstanding until a certificate is recorded, at
+  which point a `TDS_CERT_ADJUSTMENT` credit zeroes it. Certificate receipt
+  is a separate append-only `TdsCertificate` row (not a mutable flag).
+  Sub-threshold bookings (agreed price < effective threshold) post no TDS
+  receivable and reject any TDS-deducted receipt.
+- **Refund is a two-phase ledger event.** `REFUND_APPROVED` (debit) posts
+  when the refund is approved — the obligation is recognised in the customer
+  sub-ledger then, moving the balance toward zero. Payment records a
+  `PaymentVoucher` (cash outflow) and posts NO further ledger entry (that
+  would double-count the obligation). A refund cheque that bounces re-opens
+  the obligation with a `REFUND_BOUNCE_REVERSAL` credit + a `BOUNCE_CHARGE`
+  debit — exactly like a receipt cheque bounce. The sub-ledger tracks
+  obligations; the voucher tracks settlement.
+- **Installment freeze has one source of truth: `allocatedPaise > 0`.**
+  There is no `isFrozen` column. A plan edit regenerates only strictly-unpaid
+  installments (deleting them — they carry no ledger impact) and requires the
+  new ones to cover exactly the residual (agreed price − Σ frozen amounts),
+  so the schedule always still sums to the agreed price. Paid/part-paid
+  installments are never touched.
+- **Cancellation drives the balance to exactly `−refundable`.**
+  `refundable = netReceived − deduction` where `netReceived` is cash actually
+  collected (non-reversed, cleared/immediate receipts minus TDS) and the
+  deduction comes from a `CancellationRule` master (PERCENT/FLAT, optional
+  booking-amount forfeit), snapshotted. Two typed entries post:
+  `CANCELLATION_DEDUCTION` (the company-retained levy) and
+  `CANCELLATION_SETTLEMENT` = `−refundable − currentBalance − deduction`
+  (drives the balance to `−refundable` regardless of what the balance
+  contained). Emits the typed `bookingCancelled` event for Phase 5's
+  commission clawback (no commission logic yet — stable contract only).
+- **Transfer conserves total money via a carry pair.** The old booking is
+  closed with `TRANSFER_CARRY_OUT` = `−balance` (→ 0); the new booking opens
+  with `TRANSFER_CARRY_IN` = `+balance`. `Σ balances excluding company levies`
+  (`TRANSFER_FEE`, `CANCELLATION_DEDUCTION`, `BOUNCE_CHARGE` — enumerated in
+  `COMPANY_LEVY_ENTRY_TYPES`) is invariant across the transfer. UNIT transfer
+  releases the old unit (→ AVAILABLE) and books the new one; APPLICANT
+  transfer keeps the same booked unit. All unit moves are system-only.
+- **Booking-lifecycle unit statuses are now SYSTEM-ONLY** (implements the
+  Phase 2 note). `BOOKED/ALLOTTED/REGISTERED/CANCELLED` can be reached only
+  via `BookingService` (actorType `'system'`); the manual
+  `POST /units/:id/transition` (actorType `'user'`) rejects them and handles
+  only holds/blocks. Enforced in `UnitStateMachineService` via
+  `isSystemOnlyTarget`.
+- **Gap-free receipt/booking numbers via an in-transaction upsert-allocator.**
+  `NumberSequence(company, kind, scope)` is incremented with a single
+  `INSERT … ON CONFLICT DO UPDATE … RETURNING` inside the same transaction as
+  the row it numbers, so a rolled-back transaction releases its number and
+  committed numbers stay strictly contiguous per (company, FY). **The
+  number-allocating transaction must do no external I/O (email/SMS/PDF/S3)
+  before commit** — it holds the sequence row lock; same rule as
+  `withTenantTx`. Documented on the service.
+- **Interest accrual: per-installment cursor, declining balance, idempotent.**
+  Each run advances a cursor from the installment's due date (or the last
+  accrual's `periodEnd`) to `asOf`, accruing on the current outstanding for
+  the window's days — so a partial payment lowers the principal for future
+  windows. SIMPLE = `outstanding·rate·days/365`; COMPOUND adds prior accrued
+  interest to the base (interest-on-interest at the run cadence). Re-running
+  at the same `asOf` posts nothing (cursor already there). Waivers are
+  audited `INTEREST_WAIVER` credits (never edit the accrual). Time comes from
+  the injected `Clock`, so tests drive it against hand-computed fixtures. The
+  daily job dispatches per-company (system client enumerates companies; each
+  company accrues inside its own tenant transaction), mirroring Phase 3
+  escalation.
+- **Money is BigInt-exact.** `percentOf` uses integer basis points
+  (`(paise·bps + 5000)/10000`, half-up); `multiplyPaise` now takes an integer
+  factor (the old `number`-based version was lossy above 2^53 paise);
+  `allocate` uses the largest-remainder method so distributed shares always
+  sum to the total with no last-cent loss (property-tested, 2000 runs).
+- **Property-based ledger test (`fast-check`).** Random sequences of
+  receipts / receipt reversals / extra charges / interest waivers assert,
+  after every step: `service balance === reference model balance`, the ledger
+  entry count never decreases (append-only), and Σ allocations === receipt
+  gross. `numRuns` = CI default 2000, local dev 500, overridable via
+  `PROPERTY_NUM_RUNS`; a sub-2000 run under CI without an explicit override
+  fails loudly. Reproduce a failure by pinning `FC_SEED`.
+- **`AreaLocation.stateCode` and payment-plan template milestones added.**
+  Area locations carry a GST state code (property-location default for place
+  of supply). `PaymentPlanMilestone` gives templates their percent/offset
+  lines, instantiated per booking into an `Installment` schedule via
+  `allocate` (no rounding loss).

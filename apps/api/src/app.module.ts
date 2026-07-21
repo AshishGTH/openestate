@@ -14,6 +14,8 @@ import { CompanyModule } from './company/company.module';
 import { AuditModule } from './audit/audit.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { PresalesModule } from './presales/presales.module';
+import { PostsalesModule } from './postsales/postsales.module';
+import { QueuesModule } from './queues/queues.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { CsrfGuard } from './auth/csrf.guard';
@@ -48,8 +50,10 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     CustomFieldsModule,
     CompanyModule,
     AuditModule,
+    QueuesModule,
     InventoryModule,
     PresalesModule,
+    PostsalesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

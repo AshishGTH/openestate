@@ -227,6 +227,73 @@ async function main() {
     },
   });
 
+  console.log('Seeding Phase 4 financial config...');
+  // Supplier GST identity + cheque bounce charge on the company config.
+  await prisma.companyConfig.update({
+    where: { companyId: company.id },
+    data: {
+      companyGstin: '09ABCDE1234F1Z5',
+      gstStateCode: '09', // Uttar Pradesh
+      chequeBounceChargePaise: BigInt(500_00), // ₹500
+    },
+  });
+
+  // GST state codes for seeded area locations (place-of-supply defaults).
+  const areaStateCodes: Record<string, string> = {
+    Noida: '09',
+    'Greater Noida': '09',
+    Gurugram: '06',
+    Mumbai: '27',
+    Pune: '27',
+    Bangalore: '29',
+    Hyderabad: '36',
+    Chennai: '33',
+  };
+  for (const [name, stateCode] of Object.entries(areaStateCodes)) {
+    await prisma.areaLocation.updateMany({
+      where: { companyId: company.id, name },
+      data: { stateCode },
+    });
+  }
+
+  // Cancellation rules.
+  await prisma.cancellationRule.create({
+    data: { companyId: company.id, name: 'Standard 10% Deduction', deductionType: 'PERCENT', deductionPercent: 10, sortOrder: 0 },
+  });
+  await prisma.cancellationRule.create({
+    data: { companyId: company.id, name: 'Flat ₹50,000 Cancellation', deductionType: 'FLAT', deductionAmountPaise: BigInt(50_000_00), sortOrder: 1 },
+  });
+
+  // Payment-plan template milestones (percents sum to 100).
+  const milestoneSets: Record<string, Array<{ label: string; percent: number; dueOffsetDays: number }>> = {
+    'Down Payment Plan': [
+      { label: 'On Booking', percent: 10, dueOffsetDays: 0 },
+      { label: 'Within 30 days', percent: 85, dueOffsetDays: 30 },
+      { label: 'On Possession', percent: 5, dueOffsetDays: 720 },
+    ],
+    'Construction-Linked Plan': [
+      { label: 'On Booking', percent: 10, dueOffsetDays: 0 },
+      { label: 'Excavation', percent: 15, dueOffsetDays: 90 },
+      { label: 'Plinth', percent: 15, dueOffsetDays: 180 },
+      { label: 'Superstructure', percent: 30, dueOffsetDays: 360 },
+      { label: 'Finishing', percent: 20, dueOffsetDays: 540 },
+      { label: 'On Possession', percent: 10, dueOffsetDays: 720 },
+    ],
+  };
+  for (const [templateName, milestones] of Object.entries(milestoneSets)) {
+    const template = await prisma.paymentPlanTemplate.findFirst({
+      where: { companyId: company.id, name: templateName },
+    });
+    if (!template) continue;
+    for (let i = 0; i < milestones.length; i++) {
+      const m = milestones[i];
+      await prisma.paymentPlanMilestone.create({
+        data: { companyId: company.id, templateId: template.id, seq: i + 1, label: m.label, percent: m.percent, dueOffsetDays: m.dueOffsetDays },
+      });
+    }
+  }
+  console.log('  company GST state, cancellation rules, plan milestones seeded.');
+
   console.log('Seed complete.');
 }
 
