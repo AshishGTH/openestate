@@ -451,3 +451,18 @@ this is a log, not a design doc.
   the migration's RLS loop and `TENANT_SCOPED_MODELS`. Integration tests
   prove isolation on all ten, with extra emphasis on `applicants` and
   `inquiries` (including a raw, filter-less-query variant per table).
+- **Advisory-lock key is `hashtext(projectId)` — a single 32-bit hash,
+  so it serializes per project but is not collision-proof.** Two
+  *unrelated* projects whose UUIDs happen to collide under `hashtext`
+  (birthday-bound: non-negligible only across tens of thousands of
+  projects) would serialize against each other — a latency footgun, never
+  a correctness bug (assignment stays fair and duplicate-free; two pools
+  just occasionally wait on each other). Acceptable now. **Do not
+  "optimize" the collision away by widening/among-projects-sharding the
+  key without switching to the two-key form
+  `pg_advisory_xact_lock(hashtext(companyId), hashtext(projectId))`
+  (namespaced, halves collision probability per axis) AND adding a
+  saturation test that drives two deliberately hash-colliding project IDs
+  concurrently and asserts fairness holds for each independently.** A
+  naive single-key change risks reintroducing cross-project head-of-line
+  blocking under load without anyone noticing.
