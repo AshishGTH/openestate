@@ -42,6 +42,11 @@ export class UploadService {
     this.uploadsRoot = process.env.UPLOADS_DIR ?? path.join(process.cwd(), 'uploads');
   }
 
+  /** Filesystem path for a previously-stored file (never used to derive a path from user input). */
+  pathFor(category: UploadCategory, storageName: string): string {
+    return path.join(this.uploadsRoot, category, storageName);
+  }
+
   async validateAndStore(
     file: { buffer: Buffer; originalname: string; size: number },
     category: string,

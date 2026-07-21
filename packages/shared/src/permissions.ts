@@ -103,6 +103,8 @@ export const PERMISSIONS = {
   POSTSALES_DOCUMENT_DELETE: 'postsales.document.delete',
   POSTSALES_LETTER_READ: 'postsales.letter.read',
   POSTSALES_LETTER_GENERATE: 'postsales.letter.generate',
+  POSTSALES_DISPATCH_SEND: 'postsales.dispatch.send',
+  POSTSALES_DISPATCH_READ: 'postsales.dispatch.read',
 
   // ── Accounts ───────────────────────────────────────
   ACCOUNTS_RECEIPT_VERIFY: 'accounts.receipt.verify',
@@ -118,6 +120,8 @@ export const PERMISSIONS = {
   REPORTS_BROKER_VIEW: 'reports.broker.view',
   REPORTS_GST_VIEW: 'reports.gst.view',
   REPORTS_CUSTOM_CREATE: 'reports.custom.create',
+  REPORTS_APPLICANT_LEDGER_VIEW: 'reports.applicant-ledger.view',
+  REPORTS_BIRTHDAY_VIEW: 'reports.birthday.view',
 
   // ── Portal ─────────────────────────────────────────
   PORTAL_BOOKING_READ: 'portal.booking.read',

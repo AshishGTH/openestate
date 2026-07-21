@@ -122,6 +122,23 @@ export async function makeUnit(
   return u.id;
 }
 
+/** A second user in the same company, e.g. a colleague exec for role-scoping tests. */
+export async function makeUser(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  systemPrisma: any,
+  companyId: string,
+  roleSlug: string,
+): Promise<string> {
+  const tag = `${Date.now()}-${seq++}-${rnd()}`;
+  const role = await systemPrisma.role.create({
+    data: { companyId, name: roleSlug, slug: `${roleSlug}-${tag}`, isSystem: true },
+  });
+  const user = await systemPrisma.user.create({
+    data: { companyId, email: `${roleSlug}-${tag}@test`, passwordHash: 'x', name: roleSlug, roleId: role.id },
+  });
+  return user.id;
+}
+
 let appSeq = 0;
 export async function makeApplicant(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -139,7 +156,9 @@ export async function makeApplicant(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function cleanupCompany(systemPrisma: any, companyId: string): Promise<void> {
   const tables = [
-    // Financial rows first (incl. append-only tables) so master deletes below
+    // UI-layer rows first — they reference bookings/applicants/receipts.
+    'document_dispatches', 'generated_documents', 'booking_drafts',
+    // Financial rows next (incl. append-only tables) so master deletes below
     // never fire a SET-NULL cascade onto an already-deleted append-only table.
     'tds_certificates', 'tds_deductions', 'interest_accruals', 'cheque_status_events',
     'receipt_allocations', 'ledger_entries', 'payment_vouchers', 'refunds', 'cancellations',
@@ -149,7 +168,7 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     // Masters referenced by the financial rows above.
     'cancellation_rules', 'interest_rules', 'gst_rates', 'tds_rules', 'transfer_fee_rules',
     'payment_plan_milestones', 'payment_plan_templates', 'area_locations',
-    'applicants', 'number_sequences', 'company_configs', 'users', 'roles',
+    'letter_templates', 'applicants', 'number_sequences', 'company_configs', 'users', 'roles',
   ];
   // Single transaction so the maintenance GUC (which lets us bypass the
   // append-only triggers) and every DELETE share one connection. Generous

@@ -70,6 +70,8 @@ const AUDITED_MODELS = new Set([
   'ExtraCharge',
   'TdsCertificate',
   'PaymentPlanMilestone',
+  'GeneratedDocument',
+  'DocumentDispatch',
 ]);
 
 const SENSITIVE_FIELDS = new Set([

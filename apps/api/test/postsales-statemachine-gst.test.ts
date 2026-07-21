@@ -115,6 +115,11 @@ describeIf('State machine (system-only) + GST split', () => {
     });
 
     it('|IGST − (CGST+SGST)| ≤ 1 paise across a base/rate matrix', async () => {
+      // 20 iterations × 2 full booking creations each (~2s in isolation) —
+      // vitest's 5s default is fine standalone but too tight once this runs
+      // alongside the rest of the suite's parallel workers against one
+      // shared local Postgres; the assertions themselves are fast, this is
+      // pure DB-round-trip volume, not a real slowdown risk.
       const bases = [1n, 3n, 12_34_567n, 99_99_999n, 100_00_001n];
       const rates = [1, 5, 12, 18]; // percent
       for (const rupees of bases) {
@@ -143,6 +148,6 @@ describeIf('State machine (system-only) + GST split', () => {
           expect(abs <= 1n).toBe(true);
         }
       }
-    });
+    }, 30_000);
   });
 });
