@@ -4,6 +4,8 @@ import { GstRateModule } from './gst-rate/gst-rate.module';
 import { TdsRuleModule } from './tds-rule/tds-rule.module';
 
 const SIMPLE_MASTERS = [
+  { modelName: 'UnitType', routePath: 'unit-types', apiTag: 'Unit Types' },
+  { modelName: 'PlcType', routePath: 'plc-types', apiTag: 'PLC Types' },
   { modelName: 'InquirySource', routePath: 'inquiry-sources', apiTag: 'Inquiry Sources' },
   { modelName: 'InquiryType', routePath: 'inquiry-types', apiTag: 'Inquiry Types' },
   { modelName: 'FollowUpType', routePath: 'follow-up-types', apiTag: 'Follow-Up Types' },

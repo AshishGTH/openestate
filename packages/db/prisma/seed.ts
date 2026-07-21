@@ -97,6 +97,14 @@ async function main() {
 
   const masters = [
     {
+      model: 'unitType',
+      items: ['1 BHK', '2 BHK', '3 BHK', '4 BHK', 'Studio', 'Penthouse', 'Shop', 'Office'],
+    },
+    {
+      model: 'plcType',
+      items: ['Park Facing', 'Corner', 'Road Facing', 'Garden Facing', 'Pool Facing', 'Main Road'],
+    },
+    {
       model: 'inquirySource',
       items: [
         'Walk-in', 'Phone Call', 'Website', 'MagicBricks', '99acres',
