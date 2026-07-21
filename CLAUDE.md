@@ -589,3 +589,22 @@ this is a log, not a design doc.
   of supply). `PaymentPlanMilestone` gives templates their percent/offset
   lines, instantiated per booking into an `Installment` schedule via
   `allocate` (no rounding loss).
+- **Ledger property test: nightly-2000 / PR-500 split, not CI-matrix
+  sharding.** At the CI floor of 2000 runs the property test alone takes
+  ~6 minutes (each run creates a booking, plan, and several ledger-affecting
+  operations against real Postgres). Chose a time-based split over
+  sharding across parallel matrix jobs: `.github/workflows/ci.yml` now has
+  a `schedule: cron "0 3 * * *"` trigger, and the `integration-tests` job
+  sets `PROPERTY_NUM_RUNS=2000` only when `github.event_name == 'schedule'`,
+  else `500`. Every PR/push still exercises the invariant meaningfully
+  (500 runs, ~1.5 min) without paying the full 6-minute cost on every push;
+  the full 2000-run floor still runs unattended every night. Rejected
+  4-way matrix sharding (400–500/shard) because it would 4x the runner
+  minutes for the SAME total coverage per run (sharding parallelizes wall
+  time, not cost) and adds shard-partitioning complexity to fast-check's
+  seed/skip mechanics for no correctness benefit over the simpler
+  time-based split. The existing `PROPERTY_NUM_RUNS` env override and its
+  sub-2000-under-CI-without-override guard (in
+  `apps/api/test/postsales-property.test.ts`) needed no changes — CI now
+  always sets the var explicitly, so the guard's "no override" branch never
+  fires there; it still protects a stray local `CI=true` run.

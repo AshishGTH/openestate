@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    # Nightly full-strength property-test run (see integration-tests job).
+    - cron: "0 3 * * *"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -146,6 +149,12 @@ jobs:
           DATABASE_URL_TEST: postgresql://openestate_app:test_app_pass@localhost:5432/openestate_test
           DATABASE_URL_TEST_SYSTEM: postgresql://openestate_system:test_system_pass@localhost:5432/openestate_test
           REDIS_TEST_URL: redis://localhost:6379
+          # Ledger property test: full CI floor (2000 runs, ~6 min) only on
+          # the nightly schedule; PR/push runs 500 for fast feedback. Both
+          # are >= the property test's own local-dev default, so PR runs
+          # still exercise the invariant meaningfully, just not exhaustively.
+          # See CLAUDE.md Phase 4 decisions.
+          PROPERTY_NUM_RUNS: ${{ github.event_name == 'schedule' && '2000' || '500' }}
         run: pnpm test
 
       - name: Fail if any test was skipped
@@ -153,6 +162,7 @@ jobs:
           DATABASE_URL_TEST: postgresql://openestate_app:test_app_pass@localhost:5432/openestate_test
           DATABASE_URL_TEST_SYSTEM: postgresql://openestate_system:test_system_pass@localhost:5432/openestate_test
           REDIS_TEST_URL: redis://localhost:6379
+          PROPERTY_NUM_RUNS: ${{ github.event_name == 'schedule' && '2000' || '500' }}
         run: |
           # Run tests with JSON reporter and check for skipped tests
           cd packages/db
