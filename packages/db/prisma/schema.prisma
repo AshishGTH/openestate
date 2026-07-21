@@ -17,38 +17,48 @@ model Company {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  users                User[]
-  roles                Role[]
-  config               CompanyConfig?
-  customFieldDefs      CustomFieldDefinition[]
-  auditLogs            AuditLog[]
-  inquirySources       InquirySource[]
-  inquiryTypes         InquiryType[]
-  followUpTypes        FollowUpType[]
-  communicationTypes   CommunicationType[]
-  areaLocations        AreaLocation[]
-  projectTypes         ProjectType[]
-  documentTypes        DocumentType[]
-  letterTemplates      LetterTemplate[]
-  banks                Bank[]
-  receiptTypes         ReceiptType[]
-  registrationTypes    RegistrationType[]
-  chargeTypes          ChargeType[]
-  gstRates             GstRate[]
-  tdsRules             TdsRule[]
-  interestRules        InterestRule[]
-  transferFeeRules     TransferFeeRule[]
-  paymentPlanTemplates PaymentPlanTemplate[]
-  unitTypes            UnitType[]
-  plcTypes             PlcType[]
-  projects             Project[]
-  towers               Tower[]
-  floors               Floor[]
-  units                Unit[]
-  unitPlcs             UnitPlc[]
-  unitCharges          UnitCharge[]
-  unitRateRevisions    UnitRateRevision[]
-  unitStatusChanges    UnitStatusChange[]
+  users                  User[]
+  roles                  Role[]
+  config                 CompanyConfig?
+  customFieldDefs        CustomFieldDefinition[]
+  auditLogs              AuditLog[]
+  inquirySources         InquirySource[]
+  inquiryTypes           InquiryType[]
+  followUpTypes          FollowUpType[]
+  communicationTypes     CommunicationType[]
+  areaLocations          AreaLocation[]
+  projectTypes           ProjectType[]
+  documentTypes          DocumentType[]
+  letterTemplates        LetterTemplate[]
+  banks                  Bank[]
+  receiptTypes           ReceiptType[]
+  registrationTypes      RegistrationType[]
+  chargeTypes            ChargeType[]
+  gstRates               GstRate[]
+  tdsRules               TdsRule[]
+  interestRules          InterestRule[]
+  transferFeeRules       TransferFeeRule[]
+  paymentPlanTemplates   PaymentPlanTemplate[]
+  unitTypes              UnitType[]
+  plcTypes               PlcType[]
+  projects               Project[]
+  towers                 Tower[]
+  floors                 Floor[]
+  units                  Unit[]
+  unitPlcs               UnitPlc[]
+  unitCharges            UnitCharge[]
+  unitRateRevisions      UnitRateRevision[]
+  unitStatusChanges      UnitStatusChange[]
+  applicants             Applicant[]
+  applicantConsents      ApplicantConsent[]
+  applicantMerges        ApplicantMerge[]
+  inquiryTemperatures    InquiryTemperature[]
+  inquiries              Inquiry[]
+  inquiryAssignments     InquiryAssignment[]
+  projectAssignmentPools ProjectAssignmentPool[]
+  followUps              FollowUp[]
+  smsTemplates           SmsTemplate[]
+  communicationLogs      CommunicationLog[]
 
   @@map("companies")
 }
@@ -77,12 +87,21 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  company              Company            @relation(fields: [companyId], references: [id])
-  role                 Role               @relation(fields: [roleId], references: [id])
-  refreshTokens        RefreshToken[]
-  auditLogs            AuditLog[]
-  rateRevisionsCreated UnitRateRevision[] @relation("rateRevisionCreator")
-  statusChangesActed   UnitStatusChange[] @relation("statusChangeActor")
+  company                  Company                 @relation(fields: [companyId], references: [id])
+  role                     Role                    @relation(fields: [roleId], references: [id])
+  refreshTokens            RefreshToken[]
+  auditLogs                AuditLog[]
+  rateRevisionsCreated     UnitRateRevision[]      @relation("rateRevisionCreator")
+  statusChangesActed       UnitStatusChange[]      @relation("statusChangeActor")
+  consentsRecorded         ApplicantConsent[]      @relation("consentActor")
+  applicantMergesActed     ApplicantMerge[]        @relation("applicantMergeActor")
+  inquiriesAssigned        Inquiry[]               @relation("inquiryAssignee")
+  assignmentsFrom          InquiryAssignment[]     @relation("assignmentFrom")
+  assignmentsTo            InquiryAssignment[]     @relation("assignmentTo")
+  assignmentsActed         InquiryAssignment[]     @relation("assignmentActor")
+  assignmentPools          ProjectAssignmentPool[] @relation("assignmentPoolMember")
+  followUpsCreated         FollowUp[]              @relation("followUpCreator")
+  communicationLogsCreated CommunicationLog[]      @relation("commLogCreator")
 
   @@unique([companyId, email])
   @@map("users")
@@ -211,42 +230,45 @@ model CompanyConfig {
 // ─── Masters: simple lookups ───────────────────────────────────
 
 model InquirySource {
-  id        String   @id @default(uuid()) @db.Uuid
-  companyId String   @map("company_id") @db.Uuid
-  name      String   @db.VarChar(255)
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  company   Company  @relation(fields: [companyId], references: [id])
+  id        String    @id @default(uuid()) @db.Uuid
+  companyId String    @map("company_id") @db.Uuid
+  name      String    @db.VarChar(255)
+  isActive  Boolean   @default(true) @map("is_active")
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  company   Company   @relation(fields: [companyId], references: [id])
+  inquiries Inquiry[]
 
   @@unique([companyId, name])
   @@map("inquiry_sources")
 }
 
 model InquiryType {
-  id        String   @id @default(uuid()) @db.Uuid
-  companyId String   @map("company_id") @db.Uuid
-  name      String   @db.VarChar(255)
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  company   Company  @relation(fields: [companyId], references: [id])
+  id        String    @id @default(uuid()) @db.Uuid
+  companyId String    @map("company_id") @db.Uuid
+  name      String    @db.VarChar(255)
+  isActive  Boolean   @default(true) @map("is_active")
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  company   Company   @relation(fields: [companyId], references: [id])
+  inquiries Inquiry[]
 
   @@unique([companyId, name])
   @@map("inquiry_types")
 }
 
 model FollowUpType {
-  id        String   @id @default(uuid()) @db.Uuid
-  companyId String   @map("company_id") @db.Uuid
-  name      String   @db.VarChar(255)
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  company   Company  @relation(fields: [companyId], references: [id])
+  id        String     @id @default(uuid()) @db.Uuid
+  companyId String     @map("company_id") @db.Uuid
+  name      String     @db.VarChar(255)
+  isActive  Boolean    @default(true) @map("is_active")
+  sortOrder Int        @default(0) @map("sort_order")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+  company   Company    @relation(fields: [companyId], references: [id])
+  followUps FollowUp[]
 
   @@unique([companyId, name])
   @@map("follow_up_types")
@@ -491,15 +513,16 @@ enum UnitStatus {
 }
 
 model UnitType {
-  id        String   @id @default(uuid()) @db.Uuid
-  companyId String   @map("company_id") @db.Uuid
-  name      String   @db.VarChar(255)
-  isActive  Boolean  @default(true) @map("is_active")
-  sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  company   Company  @relation(fields: [companyId], references: [id])
+  id        String    @id @default(uuid()) @db.Uuid
+  companyId String    @map("company_id") @db.Uuid
+  name      String    @db.VarChar(255)
+  isActive  Boolean   @default(true) @map("is_active")
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  company   Company   @relation(fields: [companyId], references: [id])
   units     Unit[]
+  inquiries Inquiry[]
 
   @@unique([companyId, name])
   @@map("unit_types")
@@ -536,10 +559,12 @@ model Project {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  company      Company       @relation(fields: [companyId], references: [id])
-  projectType  ProjectType?  @relation(fields: [projectTypeId], references: [id])
-  areaLocation AreaLocation? @relation(fields: [areaLocationId], references: [id])
-  towers       Tower[]
+  company         Company                 @relation(fields: [companyId], references: [id])
+  projectType     ProjectType?            @relation(fields: [projectTypeId], references: [id])
+  areaLocation    AreaLocation?           @relation(fields: [areaLocationId], references: [id])
+  towers          Tower[]
+  inquiries       Inquiry[]
+  assignmentPools ProjectAssignmentPool[]
 
   @@unique([companyId, code])
   @@map("projects")
@@ -679,4 +704,264 @@ model UnitStatusChange {
 
   @@index([unitId, createdAt])
   @@map("unit_status_changes")
+}
+
+// ─── Phase 3: Pre-sales — inquiries, assignment, follow-ups ───
+
+model Applicant {
+  id                     String   @id @default(uuid()) @db.Uuid
+  companyId              String   @map("company_id") @db.Uuid
+  name                   String   @db.VarChar(255)
+  primaryPhone           String   @map("primary_phone") @db.VarChar(20)
+  primaryPhoneNormalized String   @map("primary_phone_normalized") @db.VarChar(20)
+  alternatePhones        String[] @map("alternate_phones")
+  email                  String?  @db.VarChar(255)
+  emailNormalized        String?  @map("email_normalized") @db.VarChar(255)
+  addressLine1           String?  @map("address_line1") @db.VarChar(255)
+  city                   String?  @db.VarChar(100)
+  state                  String?  @db.VarChar(100)
+  pincode                String?  @db.VarChar(10)
+  customFields           Json?    @map("custom_fields")
+  mergedIntoId           String?  @map("merged_into_id") @db.Uuid
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  company           Company            @relation(fields: [companyId], references: [id])
+  mergedInto        Applicant?         @relation("applicantMergeChain", fields: [mergedIntoId], references: [id])
+  mergedFrom        Applicant[]        @relation("applicantMergeChain")
+  consents          ApplicantConsent[]
+  survivorOfMerges  ApplicantMerge[]   @relation("mergeSurvivor")
+  absorbedInMerge   ApplicantMerge?    @relation("mergeAbsorbed")
+  inquiries         Inquiry[]
+  communicationLogs CommunicationLog[]
+
+  @@index([companyId, primaryPhoneNormalized])
+  @@index([companyId, emailNormalized])
+  @@map("applicants")
+}
+
+/// Append-only consent ledger. Current consent = latest row per applicant.
+/// Never updated or deleted — revoking/re-granting inserts a new row.
+model ApplicantConsent {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  applicantId String   @map("applicant_id") @db.Uuid
+  given       Boolean
+  source      String?  @map("source") @db.VarChar(100)
+  actorId     String?  @map("actor_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  company   Company   @relation(fields: [companyId], references: [id])
+  applicant Applicant @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  actor     User?     @relation("consentActor", fields: [actorId], references: [id])
+
+  @@index([applicantId, createdAt])
+  @@map("applicant_consents")
+}
+
+model ApplicantMerge {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String   @map("company_id") @db.Uuid
+  survivorId String   @map("survivor_id") @db.Uuid
+  mergedId   String   @unique @map("merged_id") @db.Uuid
+  mergedById String?  @map("merged_by_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  company  Company   @relation(fields: [companyId], references: [id])
+  survivor Applicant @relation("mergeSurvivor", fields: [survivorId], references: [id])
+  merged   Applicant @relation("mergeAbsorbed", fields: [mergedId], references: [id])
+  mergedBy User?     @relation("applicantMergeActor", fields: [mergedById], references: [id])
+
+  @@map("applicant_merges")
+}
+
+model InquiryTemperature {
+  id        String    @id @default(uuid()) @db.Uuid
+  companyId String    @map("company_id") @db.Uuid
+  name      String    @db.VarChar(255)
+  isActive  Boolean   @default(true) @map("is_active")
+  sortOrder Int       @default(0) @map("sort_order")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  company   Company   @relation(fields: [companyId], references: [id])
+  inquiries Inquiry[]
+
+  @@unique([companyId, name])
+  @@map("inquiry_temperatures")
+}
+
+enum InquiryStatus {
+  OPEN
+  CONTINUED
+  DUMPED
+  SUCCESSFUL
+}
+
+model Inquiry {
+  id                  String        @id @default(uuid()) @db.Uuid
+  companyId           String        @map("company_id") @db.Uuid
+  applicantId         String        @map("applicant_id") @db.Uuid
+  projectId           String?       @map("project_id") @db.Uuid
+  sourceId            String?       @map("source_id") @db.Uuid
+  inquiryTypeId       String?       @map("inquiry_type_id") @db.Uuid
+  budgetMinPaise      BigInt?       @map("budget_min_paise")
+  budgetMaxPaise      BigInt?       @map("budget_max_paise")
+  preferredUnitTypeId String?       @map("preferred_unit_type_id") @db.Uuid
+  temperatureId       String?       @map("temperature_id") @db.Uuid
+  assignedToId        String?       @map("assigned_to_id") @db.Uuid
+  status              InquiryStatus @default(OPEN)
+  nextFollowupAt      DateTime?     @map("next_followup_at")
+  lastEscalatedAt     DateTime?     @map("last_escalated_at")
+  customFields        Json?         @map("custom_fields")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
+
+  company           Company             @relation(fields: [companyId], references: [id])
+  applicant         Applicant           @relation(fields: [applicantId], references: [id])
+  project           Project?            @relation(fields: [projectId], references: [id])
+  source            InquirySource?      @relation(fields: [sourceId], references: [id])
+  inquiryType       InquiryType?        @relation(fields: [inquiryTypeId], references: [id])
+  preferredUnitType UnitType?           @relation(fields: [preferredUnitTypeId], references: [id])
+  temperature       InquiryTemperature? @relation(fields: [temperatureId], references: [id])
+  assignedTo        User?               @relation("inquiryAssignee", fields: [assignedToId], references: [id])
+  followUps         FollowUp[]
+  assignments       InquiryAssignment[]
+  communicationLogs CommunicationLog[]
+
+  @@index([companyId, assignedToId, status])
+  @@index([companyId, nextFollowupAt])
+  @@index([companyId, status, createdAt])
+  @@map("inquiries")
+}
+
+model InquiryAssignment {
+  id             String   @id @default(uuid()) @db.Uuid
+  companyId      String   @map("company_id") @db.Uuid
+  inquiryId      String   @map("inquiry_id") @db.Uuid
+  fromUserId     String?  @map("from_user_id") @db.Uuid
+  toUserId       String   @map("to_user_id") @db.Uuid
+  assignmentType String   @map("assignment_type") @db.VarChar(20)
+  actorId        String?  @map("actor_id") @db.Uuid
+  reason         String?  @db.VarChar(500)
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  company  Company @relation(fields: [companyId], references: [id])
+  inquiry  Inquiry @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  fromUser User?   @relation("assignmentFrom", fields: [fromUserId], references: [id])
+  toUser   User    @relation("assignmentTo", fields: [toUserId], references: [id])
+  actor    User?   @relation("assignmentActor", fields: [actorId], references: [id])
+
+  @@index([inquiryId, createdAt])
+  @@map("inquiry_assignments")
+}
+
+model ProjectAssignmentPool {
+  id             String    @id @default(uuid()) @db.Uuid
+  companyId      String    @map("company_id") @db.Uuid
+  projectId      String    @map("project_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  isActive       Boolean   @default(true) @map("is_active")
+  pausedReason   String?   @map("paused_reason") @db.VarChar(100)
+  lastAssignedAt DateTime? @map("last_assigned_at") @db.Timestamp(6)
+  sortOrder      Int       @default(0) @map("sort_order")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation("assignmentPoolMember", fields: [userId], references: [id])
+
+  @@unique([projectId, userId])
+  @@index([companyId, projectId, isActive])
+  @@map("project_assignment_pools")
+}
+
+enum FollowUpOutcome {
+  COMPLETED
+  NO_RESPONSE
+  RESCHEDULED
+  NOT_INTERESTED
+  CONVERTED
+}
+
+model FollowUp {
+  id           String           @id @default(uuid()) @db.Uuid
+  companyId    String           @map("company_id") @db.Uuid
+  inquiryId    String           @map("inquiry_id") @db.Uuid
+  typeId       String?          @map("follow_up_type_id") @db.Uuid
+  notes        String?          @db.Text
+  outcome      FollowUpOutcome?
+  nextActionAt DateTime?        @map("next_action_at")
+  scheduledAt  DateTime?        @map("scheduled_at")
+  venue        String?          @db.VarChar(255)
+  createdById  String?          @map("created_by_id") @db.Uuid
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  company   Company       @relation(fields: [companyId], references: [id])
+  inquiry   Inquiry       @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  type      FollowUpType? @relation(fields: [typeId], references: [id])
+  createdBy User?         @relation("followUpCreator", fields: [createdById], references: [id])
+
+  @@index([companyId, inquiryId, createdAt])
+  @@index([companyId, nextActionAt])
+  @@map("follow_ups")
+}
+
+model SmsTemplate {
+  id            String   @id @default(uuid()) @db.Uuid
+  companyId     String   @map("company_id") @db.Uuid
+  name          String   @db.VarChar(255)
+  dltTemplateId String   @map("dlt_template_id") @db.VarChar(50)
+  senderId      String   @map("sender_id") @db.VarChar(11)
+  headerId      String?  @map("header_id") @db.VarChar(50)
+  body          String   @db.Text
+  isActive      Boolean  @default(true) @map("is_active")
+  sortOrder     Int      @default(0) @map("sort_order")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  company       Company  @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, name])
+  @@map("sms_templates")
+}
+
+enum CommunicationChannel {
+  EMAIL
+  SMS
+}
+
+enum CommunicationStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+/// Append-only send ledger. applicantId is NEVER reassigned on applicant
+/// merge — it always identifies the original recipient of the message,
+/// even if that applicant is later merged into a survivor (see CLAUDE.md
+/// Phase 3 decisions).
+model CommunicationLog {
+  id                String               @id @default(uuid()) @db.Uuid
+  companyId         String               @map("company_id") @db.Uuid
+  inquiryId         String?              @map("inquiry_id") @db.Uuid
+  applicantId       String               @map("applicant_id") @db.Uuid
+  channel           CommunicationChannel
+  toAddress         String               @map("to_address") @db.VarChar(255)
+  subject           String?              @db.VarChar(500)
+  body              String               @db.Text
+  status            CommunicationStatus  @default(QUEUED)
+  providerMessageId String?              @map("provider_message_id") @db.VarChar(255)
+  errorMessage      String?              @map("error_message") @db.Text
+  sentAt            DateTime?            @map("sent_at")
+  createdById       String?              @map("created_by_id") @db.Uuid
+  createdAt         DateTime             @default(now()) @map("created_at")
+
+  company   Company   @relation(fields: [companyId], references: [id])
+  inquiry   Inquiry?  @relation(fields: [inquiryId], references: [id], onDelete: SetNull)
+  applicant Applicant @relation(fields: [applicantId], references: [id])
+  createdBy User?     @relation("commLogCreator", fields: [createdById], references: [id])
+
+  @@index([companyId, applicantId, createdAt])
+  @@map("communication_logs")
 }
