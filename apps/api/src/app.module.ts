@@ -15,6 +15,9 @@ import { AuditModule } from './audit/audit.module';
 import { InventoryModule } from './inventory/inventory.module';
 import { PresalesModule } from './presales/presales.module';
 import { PostsalesModule } from './postsales/postsales.module';
+import { PdfModule } from './pdf/pdf.module';
+import { DispatchModule } from './dispatch/dispatch.module';
+import { PostsalesReportsModule } from './reports/postsales-reports.module';
 import { QueuesModule } from './queues/queues.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
@@ -54,6 +57,9 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     InventoryModule,
     PresalesModule,
     PostsalesModule,
+    PdfModule,
+    DispatchModule,
+    PostsalesReportsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

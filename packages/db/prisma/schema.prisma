@@ -81,6 +81,9 @@ model Company {
   tdsCertificates        TdsCertificate[]
   interestAccruals       InterestAccrual[]
   paymentPlanMilestones  PaymentPlanMilestone[]
+  generatedDocuments     GeneratedDocument[]
+  documentDispatches     DocumentDispatch[]
+  bookingDrafts          BookingDraft[]
 
   @@map("companies")
 }
@@ -234,23 +237,23 @@ model CustomFieldDefinition {
 // ─── Company Config ────────────────────────────────────────────
 
 model CompanyConfig {
-  companyId      String   @id @map("company_id") @db.Uuid
-  labelOverrides Json     @default("{}") @map("label_overrides")
-  enabledModules Json     @default("[\"presales\",\"postsales\",\"accounts\"]") @map("enabled_modules")
-  currency       String   @default("INR") @db.VarChar(3)
-  timezone       String   @default("Asia/Kolkata") @db.VarChar(50)
-  fyStartMonth   Int      @default(4) @map("fy_start_month")
-  dateFormat     String   @default("DD-MM-YYYY") @map("date_format") @db.VarChar(20)
+  companyId               String   @id @map("company_id") @db.Uuid
+  labelOverrides          Json     @default("{}") @map("label_overrides")
+  enabledModules          Json     @default("[\"presales\",\"postsales\",\"accounts\"]") @map("enabled_modules")
+  currency                String   @default("INR") @db.VarChar(3)
+  timezone                String   @default("Asia/Kolkata") @db.VarChar(50)
+  fyStartMonth            Int      @default(4) @map("fy_start_month")
+  dateFormat              String   @default("DD-MM-YYYY") @map("date_format") @db.VarChar(20)
   // Supplier-side GST identity — source of truth for the CGST/SGST-vs-IGST
   // split (Phase 4). gstStateCode is the 2-char GST state code (e.g. "09"
   // for UP, "27" for Maharashtra); the first two chars of a GSTIN.
-  companyGstin   String?  @map("company_gstin") @db.VarChar(15)
-  gstStateCode   String?  @map("gst_state_code") @db.VarChar(2)
+  companyGstin            String?  @map("company_gstin") @db.VarChar(15)
+  gstStateCode            String?  @map("gst_state_code") @db.VarChar(2)
   // Flat charge (paise) applied when a cheque bounces (Phase 4). A receipt
   // or refund cheque bounce posts a BOUNCE_CHARGE debit of this amount.
-  chequeBounceChargePaise BigInt @default(0) @map("cheque_bounce_charge_paise")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  chequeBounceChargePaise BigInt   @default(0) @map("cheque_bounce_charge_paise")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
 
   company Company @relation(fields: [companyId], references: [id])
 
@@ -519,15 +522,15 @@ model TransferFeeRule {
 }
 
 model PaymentPlanTemplate {
-  id          String                  @id @default(uuid()) @db.Uuid
-  companyId   String                  @map("company_id") @db.Uuid
-  name        String                  @db.VarChar(255)
-  description String?                 @db.Text
-  isActive    Boolean                 @default(true) @map("is_active")
-  sortOrder   Int                     @default(0) @map("sort_order")
-  createdAt   DateTime                @default(now()) @map("created_at")
-  updatedAt   DateTime                @updatedAt @map("updated_at")
-  company     Company                 @relation(fields: [companyId], references: [id])
+  id          String                 @id @default(uuid()) @db.Uuid
+  companyId   String                 @map("company_id") @db.Uuid
+  name        String                 @db.VarChar(255)
+  description String?                @db.Text
+  isActive    Boolean                @default(true) @map("is_active")
+  sortOrder   Int                    @default(0) @map("sort_order")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+  company     Company                @relation(fields: [companyId], references: [id])
   milestones  PaymentPlanMilestone[]
 
   @@unique([companyId, name])
@@ -539,15 +542,15 @@ model PaymentPlanTemplate {
 /// rounding loss), dueDate = bookingDate + dueOffsetDays. Milestone percents
 /// for a template should sum to 100.
 model PaymentPlanMilestone {
-  id            String              @id @default(uuid()) @db.Uuid
-  companyId     String              @map("company_id") @db.Uuid
-  templateId    String              @map("template_id") @db.Uuid
+  id            String   @id @default(uuid()) @db.Uuid
+  companyId     String   @map("company_id") @db.Uuid
+  templateId    String   @map("template_id") @db.Uuid
   seq           Int
-  label         String              @db.VarChar(255)
-  percent       Decimal             @db.Decimal(6, 3)
-  dueOffsetDays Int                 @default(0) @map("due_offset_days")
-  createdAt     DateTime            @default(now()) @map("created_at")
-  updatedAt     DateTime            @updatedAt @map("updated_at")
+  label         String   @db.VarChar(255)
+  percent       Decimal  @db.Decimal(6, 3)
+  dueOffsetDays Int      @default(0) @map("due_offset_days")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   company  Company             @relation(fields: [companyId], references: [id])
   template PaymentPlanTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
@@ -766,41 +769,45 @@ model UnitStatusChange {
 // ─── Phase 3: Pre-sales — inquiries, assignment, follow-ups ───
 
 model Applicant {
-  id                     String   @id @default(uuid()) @db.Uuid
-  companyId              String   @map("company_id") @db.Uuid
-  name                   String   @db.VarChar(255)
-  primaryPhone           String   @map("primary_phone") @db.VarChar(20)
-  primaryPhoneNormalized String   @map("primary_phone_normalized") @db.VarChar(20)
-  alternatePhones        String[] @map("alternate_phones")
-  email                  String?  @db.VarChar(255)
-  emailNormalized        String?  @map("email_normalized") @db.VarChar(255)
-  addressLine1           String?  @map("address_line1") @db.VarChar(255)
-  city                   String?  @db.VarChar(100)
-  state                  String?  @db.VarChar(100)
-  pincode                String?  @db.VarChar(10)
-  customFields           Json?    @map("custom_fields")
+  id                     String    @id @default(uuid()) @db.Uuid
+  companyId              String    @map("company_id") @db.Uuid
+  name                   String    @db.VarChar(255)
+  primaryPhone           String    @map("primary_phone") @db.VarChar(20)
+  primaryPhoneNormalized String    @map("primary_phone_normalized") @db.VarChar(20)
+  alternatePhones        String[]  @map("alternate_phones")
+  email                  String?   @db.VarChar(255)
+  emailNormalized        String?   @map("email_normalized") @db.VarChar(255)
+  addressLine1           String?   @map("address_line1") @db.VarChar(255)
+  city                   String?   @db.VarChar(100)
+  state                  String?   @db.VarChar(100)
+  pincode                String?   @db.VarChar(10)
+  // Used by the birthday-list report only; optional, never required at intake.
+  dateOfBirth            DateTime? @map("date_of_birth") @db.Date
+  customFields           Json?     @map("custom_fields")
   // PAN encrypted at rest (AES-256-GCM, PAN_ENCRYPTION_KEY). panMasked is the
   // display form (e.g. "XXXXX1234X"). panKeyVersion lets a future key rotation
   // re-encrypt without a schema migration — no rotation logic exists yet.
-  panCiphertext          String?  @map("pan_ciphertext") @db.Text
-  panMasked              String?  @map("pan_masked") @db.VarChar(15)
-  panKeyVersion          Int      @default(1) @map("pan_key_version") @db.SmallInt
-  mergedIntoId           String?  @map("merged_into_id") @db.Uuid
-  createdAt              DateTime @default(now()) @map("created_at")
-  updatedAt              DateTime @updatedAt @map("updated_at")
+  panCiphertext          String?   @map("pan_ciphertext") @db.Text
+  panMasked              String?   @map("pan_masked") @db.VarChar(15)
+  panKeyVersion          Int       @default(1) @map("pan_key_version") @db.SmallInt
+  mergedIntoId           String?   @map("merged_into_id") @db.Uuid
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
 
-  company           Company              @relation(fields: [companyId], references: [id])
-  mergedInto        Applicant?           @relation("applicantMergeChain", fields: [mergedIntoId], references: [id])
-  mergedFrom        Applicant[]          @relation("applicantMergeChain")
-  consents          ApplicantConsent[]
-  survivorOfMerges  ApplicantMerge[]     @relation("mergeSurvivor")
-  absorbedInMerge   ApplicantMerge?      @relation("mergeAbsorbed")
-  inquiries         Inquiry[]
-  communicationLogs CommunicationLog[]
-  addresses         ApplicantAddress[]
-  documents         ApplicantDocument[]
-  primaryBookings   Booking[]            @relation("bookingPrimaryApplicant")
-  coApplicantOf     BookingCoApplicant[]
+  company            Company              @relation(fields: [companyId], references: [id])
+  mergedInto         Applicant?           @relation("applicantMergeChain", fields: [mergedIntoId], references: [id])
+  mergedFrom         Applicant[]          @relation("applicantMergeChain")
+  consents           ApplicantConsent[]
+  survivorOfMerges   ApplicantMerge[]     @relation("mergeSurvivor")
+  absorbedInMerge    ApplicantMerge?      @relation("mergeAbsorbed")
+  inquiries          Inquiry[]
+  communicationLogs  CommunicationLog[]
+  addresses          ApplicantAddress[]
+  documents          ApplicantDocument[]
+  primaryBookings    Booking[]            @relation("bookingPrimaryApplicant")
+  coApplicantOf      BookingCoApplicant[]
+  generatedDocuments GeneratedDocument[]
+  documentDispatches DocumentDispatch[]
 
   @@index([companyId, primaryPhoneNormalized])
   @@index([companyId, emailNormalized])
@@ -1146,23 +1153,25 @@ model Booking {
   createdAt              DateTime      @default(now()) @map("created_at")
   updatedAt              DateTime      @updatedAt @map("updated_at")
 
-  company          Company              @relation(fields: [companyId], references: [id])
-  unit             Unit                 @relation(fields: [unitId], references: [id])
-  primaryApplicant Applicant            @relation("bookingPrimaryApplicant", fields: [primaryApplicantId], references: [id])
-  coApplicants     BookingCoApplicant[]
-  costLines        BookingCostLine[]
-  paymentPlans     PaymentPlan[]
-  installments     Installment[]
-  ledgerEntries    LedgerEntry[]
-  receipts         Receipt[]
-  transfersFrom    Transfer[]           @relation("transferFrom")
-  transfersTo      Transfer[]           @relation("transferTo")
-  cancellations    Cancellation[]
-  refunds          Refund[]
-  paymentVouchers  PaymentVoucher[]
-  extraCharges     ExtraCharge[]
-  tdsDeductions    TdsDeduction[]
-  interestAccruals InterestAccrual[]
+  company            Company              @relation(fields: [companyId], references: [id])
+  unit               Unit                 @relation(fields: [unitId], references: [id])
+  primaryApplicant   Applicant            @relation("bookingPrimaryApplicant", fields: [primaryApplicantId], references: [id])
+  coApplicants       BookingCoApplicant[]
+  costLines          BookingCostLine[]
+  paymentPlans       PaymentPlan[]
+  installments       Installment[]
+  ledgerEntries      LedgerEntry[]
+  receipts           Receipt[]
+  transfersFrom      Transfer[]           @relation("transferFrom")
+  transfersTo        Transfer[]           @relation("transferTo")
+  cancellations      Cancellation[]
+  refunds            Refund[]
+  paymentVouchers    PaymentVoucher[]
+  extraCharges       ExtraCharge[]
+  tdsDeductions      TdsDeduction[]
+  interestAccruals   InterestAccrual[]
+  generatedDocuments GeneratedDocument[]
+  documentDispatches DocumentDispatch[]
 
   @@unique([companyId, bookingNumber])
   @@index([companyId, status])
@@ -1648,4 +1657,118 @@ model InterestAccrual {
   @@index([companyId, bookingId])
   @@index([companyId, installmentId, periodEnd])
   @@map("interest_accruals")
+}
+
+// ─── Phase 4 UI layer: generated documents, dispatch, booking drafts ──
+//
+// These are consumers of the ledger core, not part of it — no DB append-only
+// triggers here (unlike ledger_entries etc.); immutability of generated PDFs
+// and dispatch attempts is enforced at the service layer (no update methods).
+
+enum GeneratedDocumentType {
+  STATEMENT
+  RECEIPT
+  ALLOTMENT_LETTER
+  DEMAND_LETTER
+  REMINDER_LETTER
+}
+
+/// A generated PDF artifact. Stored via the Phase 2 UploadService (uuid+ext,
+/// magic-byte validated) and never regenerated on read — the same booking's
+/// statement viewed twice returns the SAME stored bytes. A reprint (e.g. of a
+/// receipt) creates a NEW row with isDuplicate=true and sourceDocumentId
+/// pointing at the original; it does not overwrite or regenerate the original.
+model GeneratedDocument {
+  id               String                @id @default(uuid()) @db.Uuid
+  companyId        String                @map("company_id") @db.Uuid
+  bookingId        String?               @map("booking_id") @db.Uuid
+  applicantId      String?               @map("applicant_id") @db.Uuid
+  // Which receipt this PDF represents, for documentType=RECEIPT (a booking has
+  // many receipts, so bookingId alone can't identify one). Scalar + DB-level
+  // FK, no Prisma relation — same policy as the Phase 4 ledger core.
+  receiptId        String?               @map("receipt_id") @db.Uuid
+  documentType     GeneratedDocumentType @map("document_type")
+  templateId       String?               @map("template_id") @db.Uuid
+  storedName       String                @map("stored_name") @db.VarChar(255)
+  originalName     String                @map("original_name") @db.VarChar(255)
+  mimeType         String                @map("mime_type") @db.VarChar(100)
+  sizeBytes        Int                   @map("size_bytes")
+  isDuplicate      Boolean               @default(false) @map("is_duplicate")
+  sourceDocumentId String?               @map("source_document_id") @db.Uuid
+  createdById      String?               @map("created_by_id") @db.Uuid
+  createdAt        DateTime              @default(now()) @map("created_at")
+
+  company        Company             @relation(fields: [companyId], references: [id])
+  booking        Booking?            @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  applicant      Applicant?          @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  sourceDocument GeneratedDocument?  @relation("documentReprint", fields: [sourceDocumentId], references: [id])
+  reprints       GeneratedDocument[] @relation("documentReprint")
+  dispatches     DocumentDispatch[]
+
+  @@index([companyId, bookingId])
+  @@index([companyId, applicantId])
+  @@map("generated_documents")
+}
+
+enum DispatchChannel {
+  EMAIL
+  SMS
+}
+
+enum DispatchStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+/// One row per SEND ATTEMPT, immutable once created (service layer never
+/// updates a row after creation except the status transition performed by the
+/// dispatch processor). A failed send is retried by creating a NEW row with
+/// attemptOfDispatchId pointing at the original — never by mutating the
+/// failed row — preserving a full attempt history per document.
+model DocumentDispatch {
+  id                  String          @id @default(uuid()) @db.Uuid
+  companyId           String          @map("company_id") @db.Uuid
+  generatedDocumentId String?         @map("generated_document_id") @db.Uuid
+  bookingId           String?         @map("booking_id") @db.Uuid
+  applicantId         String?         @map("applicant_id") @db.Uuid
+  recipientAddress    String          @map("recipient_address") @db.VarChar(255)
+  channel             DispatchChannel
+  templateSnapshot    String          @map("template_snapshot") @db.Text
+  status              DispatchStatus  @default(QUEUED)
+  providerMessageId   String?         @map("provider_message_id") @db.VarChar(255)
+  errorMessage        String?         @map("error_message") @db.Text
+  attemptOfDispatchId String?         @map("attempt_of_dispatch_id") @db.Uuid
+  createdById         String?         @map("created_by_id") @db.Uuid
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+
+  company           Company            @relation(fields: [companyId], references: [id])
+  generatedDocument GeneratedDocument? @relation(fields: [generatedDocumentId], references: [id])
+  booking           Booking?           @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  applicant         Applicant?         @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  attemptOf         DocumentDispatch?  @relation("dispatchRetry", fields: [attemptOfDispatchId], references: [id])
+  retries           DocumentDispatch[] @relation("dispatchRetry")
+
+  @@index([companyId, bookingId])
+  @@index([companyId, applicantId])
+  @@map("document_dispatches")
+}
+
+/// Persisted wizard state so a partially-filled booking form can be resumed
+/// (e.g. the next day) rather than lost. Freeform JSON keyed by wizard step;
+/// never itself posts to the ledger — only BookingService.createBooking does.
+model BookingDraft {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  createdById String   @map("created_by_id") @db.Uuid
+  label       String?  @db.VarChar(255)
+  draftData   Json     @map("draft_data")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, createdById])
+  @@map("booking_drafts")
 }

@@ -11,3 +11,4 @@ export * from './company.dto';
 export * from './inventory';
 export * from './presales';
 export * from './finance';
+export * from './documents';

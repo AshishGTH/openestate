@@ -608,3 +608,78 @@ this is a log, not a design doc.
   `apps/api/test/postsales-property.test.ts`) needed no changes — CI now
   always sets the var explicitly, so the guard's "no override" branch never
   fires there; it still protects a stray local `CI=true` run.
+
+### Phase 4-UI — PDF/letters, dispatch, booking/receipt UI, reports
+
+- **PDF library: `pdfmake`, not `@react-pdf/renderer`.** Table-heavy,
+  mostly-static documents (receipts, statements, demand letters) map
+  directly onto pdfmake's declarative `docDefinition` (content arrays,
+  `table`/`columns` layout primitives) without needing JSX/React just to
+  describe a page. `@react-pdf/renderer` earns its keep for
+  component-composition-heavy documents; none of Phase 4's five document
+  types need that. Stays consistent: every generated PDF (receipt,
+  statement, allotment/demand/reminder letter) goes through the single
+  `PdfService.render(docDefinition)` in `apps/api/src/pdf/pdf.service.ts`.
+- **pdfmake's Node `PdfPrinter` needed its real constructor args, not the
+  1-arg call that "worked" until first render.** `require('pdfmake/js/Printer')`
+  has no published types (`@types/pdfmake` only types the browser bundle),
+  so the initial ambient `.d.ts` was hand-guessed from usage patterns found
+  online — wrong on two counts, both root-caused by reading
+  `pdfmake@0.3.11/js/Printer.js` directly: (1) `createPdfKitDocument` is
+  `async` (it internally awaits `resolveUrls()`), so callers must `await`
+  it rather than treating the return value as a stream; (2) `resolveUrls()`
+  unconditionally calls `this.urlResolver.resolve(...)` for every font
+  variant, so a `new PdfPrinter(fonts)` call with only the first of 4
+  constructor params leaves `urlResolver` undefined and crashes on the
+  first render. Fixed by passing pdfmake's own shipped
+  `pdfmake/js/URLResolver` + `pdfmake/js/virtual-fs` (they only do real
+  network I/O for `http(s)://` URLs — a no-op for our local font paths and
+  fully-local template content) as the 2nd–3rd constructor args, and
+  correcting the ambient `.d.ts` to match. `apps/api/test/postsales-pdf.test.ts`
+  is DB-independent (pure `docDefinition → Buffer`) specifically so this
+  class of bug gets caught by the fast, always-run test tier, not only by
+  a slower integration test that happens to exercise PDF generation.
+- **"Never regenerated on read" applies per document type, not globally.**
+  RECEIPT PDFs are idempotent-lookup-or-create (`DocumentService.generateReceiptPdf`
+  reuses the stored artifact); a reprint is a **new**, separately-stored,
+  watermarked (`DUPLICATE`) artifact via `reprintReceiptPdf`, never an
+  overwrite. STATEMENT and the three letter types are always-fresh-snapshot
+  (`generateStatementPdf`/`generateLetterPdf` always render+store a new
+  row) because their content (running balance, current dues) is only
+  correct as of generation time — treating them as idempotent would let a
+  stale statement silently keep being served.
+- **Merge-field registry (`packages/shared/src/documents.ts`) fails at
+  test-time, not render-time.** `MERGE_FIELD_REGISTRY` is the single
+  source of truth per `GeneratedDocumentType`; `validateTemplateMergeFields`
+  walks a template body for `{{token}}` placeholders and throws on any
+  token not in that type's registry entry — callable from a master-data
+  admin screen or a unit test on template content, without needing a real
+  booking/applicant to render against.
+- **Dispatch rows reuse the append-only *discipline*, not the DB-level
+  append-only *trigger*.** Unlike `ledger_entries` et al.,
+  `document_dispatches` has no `forbid_financial_mutation`-style trigger —
+  `DispatchProcessor` legitimately `UPDATE`s a row's status QUEUED→SENT|FAILED.
+  What's append-only is the retry path: `DispatchService.retry()` always
+  inserts a **new** row with `attemptOfDispatchId` pointing at the original
+  rather than resetting the original back to QUEUED, so the full attempt
+  history stays visible. Enforced at the service layer (a FAILED-only
+  guard raises `ConflictException` otherwise), not the database.
+- **Postsales reports use `SYSTEM_PRISMA` (RLS-bypassing), same as the
+  Phase 3 reports module — sales_exec role-scoping is a service-level
+  filter (`ReportScope.scopeToCreatedById`), not RLS.** RLS still draws the
+  hard company-tenant boundary (every report query includes an explicit
+  `companyId` filter); scoping *within* one company by who created the
+  booking is a business rule about visibility, not tenant isolation, and
+  belongs at the service layer where the ownership semantics actually
+  live. `postsales-reports.test.ts` proves both layers independently: a
+  cross-exec fetch is filtered out of list endpoints and 404s on direct
+  fetch-by-id.
+- **CSV export streams via chunked transfer encoding by construction, not
+  by a special code path.** `streamCsv` (`apps/api/src/reports/csv-stream.util.ts`)
+  never sets `Content-Length` and writes each row with its own `res.write()`
+  call — Node's HTTP layer emits `Transfer-Encoding: chunked` automatically
+  once those two conditions hold, so there's no separate "streaming mode"
+  to fall out of sync with the buffered path. Verified against a real
+  `http.Server` (not a mocked `res`) in `postsales-reports.test.ts`,
+  asserting the actual response headers rather than the util's internal
+  call pattern.

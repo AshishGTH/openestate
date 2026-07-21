@@ -66,6 +66,9 @@ const TENANT_SCOPED_MODELS = new Set([
   'TdsCertificate',
   'InterestAccrual',
   'PaymentPlanMilestone',
+  'GeneratedDocument',
+  'DocumentDispatch',
+  'BookingDraft',
 ]);
 
 const READ_OPS = new Set([
