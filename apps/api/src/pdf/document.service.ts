@@ -49,6 +49,7 @@ export class DocumentService {
     return this.store(companyId, buffer, {
       documentType: GENERATED_DOCUMENT_TYPE.RECEIPT,
       bookingId: ctx.__bookingId,
+      applicantId: ctx.__applicantId,
       receiptId,
       originalName: `${ctx.receiptNumber}.pdf`,
       createdById: actorId,
@@ -69,6 +70,7 @@ export class DocumentService {
     const stored = await this.store(companyId, buffer, {
       documentType: GENERATED_DOCUMENT_TYPE.RECEIPT,
       bookingId: ctx.__bookingId,
+      applicantId: ctx.__applicantId,
       receiptId,
       originalName: `${ctx.receiptNumber}-DUPLICATE.pdf`,
       isDuplicate: true,
@@ -90,7 +92,7 @@ export class DocumentService {
     companyId: string,
     receiptId: string,
     isDuplicate: boolean,
-  ): Promise<ReceiptPdfContext & { __bookingId: string }> {
+  ): Promise<ReceiptPdfContext & { __bookingId: string; __applicantId: string }> {
     const receipt = await this.systemPrisma.receipt.findFirst({
       where: { id: receiptId, companyId },
       include: {
@@ -102,6 +104,7 @@ export class DocumentService {
 
     return {
       __bookingId: receipt.bookingId,
+      __applicantId: receipt.booking.primaryApplicantId,
       receiptNumber: receipt.receiptNumber,
       receiptDate: receipt.receiptDate.toISOString().slice(0, 10),
       bookingNumber: receipt.booking.bookingNumber,
@@ -170,6 +173,7 @@ export class DocumentService {
     return this.store(companyId, buffer, {
       documentType: GENERATED_DOCUMENT_TYPE.STATEMENT,
       bookingId,
+      applicantId: booking.primaryApplicantId,
       originalName: `statement-${booking.bookingNumber}-${ctx.statementDate}.pdf`,
       createdById: actorId,
     });
@@ -209,6 +213,7 @@ export class DocumentService {
     return this.store(companyId, buffer, {
       documentType,
       bookingId,
+      applicantId: booking.primaryApplicantId,
       templateId,
       originalName: `${documentType.toLowerCase()}-${booking.bookingNumber}.pdf`,
       createdById: actorId,

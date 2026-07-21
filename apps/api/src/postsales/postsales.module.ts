@@ -4,6 +4,9 @@ import { InventoryModule } from '../inventory/inventory.module';
 import { BookingController } from './booking.controller';
 import { ReceiptController } from './receipt.controller';
 import { RefundController } from './refund.controller';
+import { BookingDraftController } from './booking-draft.controller';
+import { BookingDraftService } from './booking-draft.service';
+import { PlanHistoryController } from './plan-history.controller';
 import { NumberSequenceService } from './number-sequence.service';
 import { LedgerService } from './ledger.service';
 import { BookingService } from './booking.service';
@@ -18,7 +21,7 @@ import { RefundService } from './refund.service';
 
 @Module({
   imports: [InventoryModule],
-  controllers: [BookingController, ReceiptController, RefundController],
+  controllers: [BookingController, ReceiptController, RefundController, BookingDraftController, PlanHistoryController],
   providers: [
     ClockProvider,
     NumberSequenceService,
@@ -33,6 +36,7 @@ import { RefundService } from './refund.service';
     TransferService,
     CancellationService,
     RefundService,
+    BookingDraftService,
   ],
   exports: [LedgerService, BookingService, ReceiptService, InterestService],
 })
