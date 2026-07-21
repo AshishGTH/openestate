@@ -308,15 +308,21 @@ this is a log, not a design doc.
   `layout_plan | brochure | photo | document` — validated via zod
   before touching any file path. Storage names are `uuid + ext`,
   never derived from user input. Images are re-encoded through `sharp`.
-- **sharp Docker verification deferred.** `sharp` 0.35 uses
-  optional platform-specific packages (`@img/sharp-linux-x64`,
-  `@img/sharp-libvips-linux-x64`) that pnpm installs only for the
-  target platform. Verified that these packages exist in sharp's
-  `optionalDependencies`. Docker build + container-level verification
-  requires a Docker-capable environment; deferred until Docker is
-  available (dev machine currently has no Docker). The Dockerfile's
-  multi-stage build with `pnpm deploy` must copy sharp's native
-  binaries correctly.
+- **sharp verified inside Docker container.** `sharp` 0.35 with
+  `vips` 8.18.3 loads and processes images correctly inside the
+  `node:20-slim` runtime container. The `pnpm deploy --prod` step
+  in the Dockerfile installs platform-specific optional packages
+  (`@img/sharp-linux-x64`, `@img/sharp-libvips-linux-x64`)
+  automatically. Verified by creating a 10x10 PNG, reading its
+  metadata, and confirming correct output inside `docker run`.
+
+### Phase 2 verification
+
+- **Docker Desktop path on this machine.**
+  `C:\Users\Ashis\AppData\Local\Programs\DockerDesktop\resources\bin`.
+  Not on PATH in Git Bash or PowerShell by default; invoke via full
+  path or prepend to `$env:PATH` at session start. Future sessions
+  should use this path rather than assuming `docker` is on PATH.
 - **Import enumerates skipped rows, never silently skips.** The
   `ImportResult` type includes `skipped: Array<{ row, unitNumber,
   reason }>` alongside `createdCount`. Callers always see which rows
