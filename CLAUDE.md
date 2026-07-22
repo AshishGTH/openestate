@@ -869,3 +869,36 @@ this is a log, not a design doc.
   test) — a controller-method-direct-call test alone proves the handler
   logic is right but not that the route exists or that the DTO accepts
   what the frontend actually sends.
+- **Post-Phase-5 audit: `apps/web/src/pages/postsales/` grepped for
+  direct `fetch`/`axios`/`window.fetch` calls bypassing the shared
+  `api()` client (the same class of gap that let the `handlePay` bug
+  through) — audited clean.** No page constructs a request outside
+  `lib/api.ts`'s `api()`/`downloadFile()`. Also checked the narrower,
+  actual-root-cause pattern (`useApiMutation<..., { id: string; ...other
+  fields }>` — an `id` combined with additional body fields, which is
+  what broke `pay()`): no other occurrence exists. The three remaining
+  `useApiMutation<unknown, { id: string }>` call sites in this directory
+  (`Brokers.tsx`'s deactivate/reactivate, `BrokerDetail.tsx`'s approve)
+  are safe because their corresponding controller methods
+  (`BrokerController.deactivate/reactivate`, `CommissionPaymentController.approve`)
+  take no `@Body()` DTO at all, so the extra `id` key is inert rather
+  than rejected — verified by reading each controller method, not
+  assumed from the shape alone.
+- **Phase 6 note, recorded ahead of that phase's own Decisions entries:**
+  Phase 6 introduces portal users (customer, broker) — the first actors
+  in this codebase who are hostile-by-default from a security standpoint,
+  not merely under-privileged. Every staff-facing phase so far (0–5)
+  could treat RLS as an internal-hygiene backstop behind a permission
+  guard that was already the real gate, because every staff actor is
+  presumed at least benign-if-mistaken. A portal user is a different
+  threat model: the client is untrusted by construction, so **RLS
+  (keyed off `applicant_id`/`broker_id`, not just `company_id`) becomes
+  the primary line of defense against IDOR, not a secondary one** —
+  guard-level checks in controllers are necessary but must be treated as
+  defense-in-depth, never as the sole reason a cross-applicant or
+  cross-broker read is blocked. This reframing is why Phase 6's plan
+  requires IDOR tests that hit the database through a **raw connection**,
+  the same discipline Phase 3's escalation-isolation test and Phase 4/5's
+  RLS tests already established for cross-*company* isolation — Phase 6
+  extends that same proof technique to cross-*applicant*/cross-*broker*
+  isolation within a single company.
