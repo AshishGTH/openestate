@@ -82,7 +82,7 @@ export class EscalationService {
         );
 
         if (eligible.length === 0) {
-          return { escalatedInquiryIds: [] as string[], managers: [] as Array<{ id: string; email: string; name: string }> };
+          return { escalatedInquiryIds: [] as string[], managers: [] as Array<{ id: string; email: string | null; name: string }> };
         }
 
         for (const inquiry of eligible) {
@@ -106,8 +106,12 @@ export class EscalationService {
       }),
     );
 
-    // Notification I/O happens outside the transaction.
+    // Notification I/O happens outside the transaction. Staff accounts
+    // always have email today (Phase 6 nullability targets portal-only
+    // users), but the column is nullable at the type level, so skip
+    // defensively rather than send to a null address.
     for (const manager of managers) {
+      if (!manager.email) continue;
       try {
         await this.provider.send({
           channel: 'EMAIL',

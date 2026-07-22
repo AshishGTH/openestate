@@ -902,3 +902,88 @@ this is a log, not a design doc.
   RLS tests already established for cross-*company* isolation — Phase 6
   extends that same proof technique to cross-*applicant*/cross-*broker*
   isolation within a single company.
+
+### Phase 6 — portal-auth (commit 1 of 4)
+
+- **`TokenService.createRefreshToken`/`rotateRefreshToken` gained an
+  optional `expiresInOverride` parameter — the approved plan's premise
+  that this "already takes TTL as a parameter" was inaccurate; the method
+  used a single TTL fixed in the constructor from `JWT_REFRESH_EXPIRES_IN`.**
+  Added the override rather than duplicating the method, so
+  `PortalAuthService` can issue the shorter `PORTAL_JWT_REFRESH_EXPIRES_IN`
+  (24h) refresh TTL through the same hashing/family/rotation code the
+  staff flow uses, with staff callers omitting the parameter and getting
+  the prior behaviour unchanged.
+- **`CsrfGuard` is generalized by URL path prefix, not a per-route
+  decorator.** Every portal route lives under `/api/v1/portal/`
+  (`PORTAL_PATH_PREFIX` in `apps/api/src/auth/csrf-cookie-names.ts`), so
+  the guard picks `openestate_portal_csrf` vs `openestate_csrf` from
+  `request.path` alone — no per-controller wiring needed as new portal
+  controllers (profile, tickets, dashboard) land in later commits. The
+  double-submit comparison logic itself is untouched.
+- **Portal's two named `@nestjs/throttler` buckets (`portal-auth`,
+  `portal-read`) are registered in `PortalAuthModule`'s own
+  `ThrottlerModule.forRoot`, not the root `AppModule`'s, and are NOT
+  `APP_GUARD`s.** `ThrottlerGuard` enforces every named throttler it can
+  see on every route it guards; registering these two globally would have
+  silently subjected all ~100+ existing staff routes to the tight
+  5-per-5-minute portal-auth bucket too.
+  `PortalAuthThrottlerGuard`/`PortalReadThrottlerGuard`
+  (`apps/api/src/portal-auth/portal-throttler.guard.ts`) each filter
+  `this.throttlers` down to their own named entry after `onModuleInit`,
+  then attach via `@UseGuards()` only on the specific routes that need
+  them — staff routes are structurally unreachable by either bucket. Both
+  use the package's in-memory storage (matching the existing staff
+  default bucket, not the Redis store CLAUDE.md's rules call for);
+  tracked in `docs/todo.md`, not silently done or silently skipped.
+- **Invite consumption re-issues credentials for an existing portal
+  `User` rather than always creating a new one.** If staff re-invites an
+  applicant/broker who already has an active portal account (e.g. a lost
+  password with no self-service reset attempted), `consumeInvite` looks
+  up an existing `User` by `applicantId`/`brokerId` and updates its
+  `passwordHash` instead of inserting a second row — `applicantId`/
+  `brokerId` have no DB uniqueness constraint, so a blind insert could
+  otherwise create duplicate accounts for the same applicant.
+- **`Role.isPortal` is now set `true` for the seeded `customer`/`broker`
+  roles.** The column existed since Phase 1 but nothing ever set it
+  (`prisma/seed.ts` always passed `isSystem: true` only) — this is Phase
+  6 activating a dormant field for its originally-intended purpose, not a
+  new addition.
+- **Boot-verified, not just typechecked.** Beyond `pnpm typecheck`, the
+  full `AppModule` was constructed via `NestFactory.create(...).init()`
+  against the real test Postgres/Redis (no `.listen()`) to confirm the DI
+  graph resolves — `PortalAuthModule`'s locally-scoped `ThrottlerModule`
+  and `AuthModule` reuse, `PortalTenantMiddleware` route registration, and
+  all portal routes mapped cleanly. Typechecking alone can't catch a
+  missing provider or a module-scoping mistake; NestJS only surfaces
+  those at actual instantiation time.
+- **Real bug caught by the IDOR test battery, not by review: `bookings`
+  and `booking_co_applicants`'s RESTRICTIVE portal policies were
+  mutually recursive (Postgres error `42P17`).** `bookings_portal_scope`'s
+  co-applicant branch queried `booking_co_applicants` (subject to ITS OWN
+  RLS); `booking_co_applicants_portal_scope`'s "I'm the primary/broker on
+  this booking" branches queried `bookings` back (subject to ITS RLS) —
+  each table's policy needed the other's, forever. Self-referencing
+  subqueries within ONE table's own policy are fine (Postgres handles
+  those without recursing); a cycle across TWO tables' policies is not.
+  Fixed by adding one narrow `SECURITY DEFINER` function,
+  `booking_has_co_applicant(booking_id, applicant_id)` — a single
+  parameterized existence check on `booking_co_applicants`, nothing else,
+  `REVOKE ALL ... FROM PUBLIC` then `GRANT EXECUTE` to `openestate_app`
+  only (not `openestate_system`, which already bypasses RLS directly and
+  has no need for a function whose only job is bypassing it) — and using
+  it in `bookings_portal_scope`'s co-applicant branch instead of a normal
+  subquery. That's the one edge of the cycle now bypassed;
+  `booking_co_applicants_portal_scope` still queries `bookings` normally
+  (RLS-enforced), which is safe because `bookings`' own policy no longer
+  queries `booking_co_applicants` as a normal read. **This function must
+  not be extended, and no second `SECURITY DEFINER` helper should be
+  added to patch some other RLS gap later** — any future recursion in
+  this policy set means the RLS design itself needs re-auditing, not
+  another ad hoc bypass. The regression test
+  (`apps/api/test/portal-rls.test.ts`) doesn't just prove the migration
+  applies without error — it asserts the actual row counts on both sides
+  of the former cycle (primary applicant reading their booking's
+  co-applicant list; a co-applicant reading the booking itself; an
+  unrelated applicant getting zero from both), which is the level of
+  proof that would have caught this bug before it shipped.

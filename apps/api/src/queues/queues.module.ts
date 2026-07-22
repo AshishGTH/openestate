@@ -10,6 +10,7 @@ export const COMMUNICATION_QUEUE = 'communication';
 export const ESCALATION_QUEUE = 'escalation';
 export const INTEREST_QUEUE = 'interest';
 export const DISPATCH_QUEUE = 'dispatch';
+export const PORTAL_QUEUE = 'portal';
 
 @Global()
 @Module({
@@ -26,6 +27,7 @@ export const DISPATCH_QUEUE = 'dispatch';
       { name: ESCALATION_QUEUE },
       { name: INTEREST_QUEUE },
       { name: DISPATCH_QUEUE },
+      { name: PORTAL_QUEUE },
     ),
   ],
   providers: [

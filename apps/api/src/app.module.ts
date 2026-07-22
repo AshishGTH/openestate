@@ -26,6 +26,8 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { CsrfGuard } from './auth/csrf.guard';
 import { TenantMiddleware } from './auth/tenant.middleware';
+import { PortalTenantMiddleware } from './auth/portal-tenant.middleware';
+import { PortalAuthModule } from './portal-auth/portal-auth.module';
 import { LOG_REDACTION_PATHS } from './common/logger/redaction';
 
 @Module({
@@ -66,6 +68,7 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     BrokerReportsModule,
     BrokersModule,
     CommissionModule,
+    PortalAuthModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
@@ -77,5 +80,10 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer.apply(TenantMiddleware).forRoutes('*');
+    // Runs AFTER TenantMiddleware for the same request (registration order)
+    // and re-establishes the AsyncLocalStorage store with the portal scope
+    // populated — see PortalTenantMiddleware's doc comment. Scoped only to
+    // portal routes; staff routes never see it.
+    consumer.apply(PortalTenantMiddleware).forRoutes('portal/*');
   }
 }

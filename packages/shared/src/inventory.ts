@@ -53,7 +53,7 @@ export function isSystemOnlyTarget(toStatus: UnitStatus): boolean {
 
 // ── Upload Categories ───────────────────────────────────────
 
-export const UPLOAD_CATEGORIES = ['layout_plan', 'brochure', 'photo', 'document'] as const;
+export const UPLOAD_CATEGORIES = ['layout_plan', 'brochure', 'photo', 'document', 'construction_progress'] as const;
 export type UploadCategory = (typeof UPLOAD_CATEGORIES)[number];
 
 export const uploadCategorySchema = z.enum(UPLOAD_CATEGORIES);

@@ -13,6 +13,8 @@ export {
   getCurrentCompanyId,
   getCurrentUserId,
   getCurrentIpAddress,
+  getCurrentPortalApplicantId,
+  getCurrentPortalBrokerId,
   runWithTenant,
 } from './tenant-context';
 export type { TenantStore, TenantTxStore } from './tenant-context';

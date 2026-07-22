@@ -25,6 +25,11 @@ export const PERMISSIONS = {
   ADMIN_CONFIG_READ: 'admin.config.read',
   ADMIN_CONFIG_UPDATE: 'admin.config.update',
   ADMIN_AUDIT_READ: 'admin.audit.read',
+  // Phase 6: portal-facing staff workflows.
+  ADMIN_CHANGE_REQUEST_APPROVE: 'admin.change-request.approve',
+  ADMIN_TICKET_RESPOND: 'admin.ticket.respond',
+  ADMIN_PORTAL_INVITE_SEND: 'admin.portal-invite.send',
+  ADMIN_CONSTRUCTION_UPDATE_MANAGE: 'admin.construction-update.manage',
 
   // ── Inventory ─────────────────────────────────────
   INVENTORY_PROJECT_READ: 'inventory.project.read',
@@ -144,6 +149,14 @@ export const PERMISSIONS = {
   PORTAL_DOCUMENT_UPLOAD: 'portal.document.upload',
   PORTAL_PAYMENT_SCHEDULE_READ: 'portal.payment-schedule.read',
   PORTAL_PROFILE_UPDATE: 'portal.profile.update',
+  // Phase 6.
+  PORTAL_CHANGE_REQUEST_CREATE: 'portal.change-request.create',
+  PORTAL_TICKET_CREATE: 'portal.ticket.create',
+  PORTAL_TICKET_READ: 'portal.ticket.read',
+  // Broker portal NOC action — deliberately distinct from staff's
+  // accounts.noc.approve; never granted to sales_manager/accounts.
+  PORTAL_NOC_ACTION: 'portal.noc.action',
+  PORTAL_CONSTRUCTION_UPDATE_READ: 'portal.construction-update.read',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

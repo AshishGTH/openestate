@@ -92,6 +92,14 @@ model Company {
   commissionLedgerEntries  CommissionLedgerEntry[]
   commissionPayments       CommissionPayment[]
   brokerNocs               BrokerNoc[]
+  portalInvites            PortalInvite[]
+  portalPasswordResets     PortalPasswordReset[]
+  applicantChangeRequests  ApplicantChangeRequest[]
+  ticketCategories         TicketCategory[]
+  tickets                  Ticket[]
+  ticketMessages           TicketMessage[]
+  constructionUpdates      ConstructionUpdate[]
+  constructionUpdateMedia  ConstructionUpdateMedia[]
 
   @@map("companies")
 }
@@ -101,7 +109,10 @@ model Company {
 model User {
   id                  String  @id @default(uuid()) @db.Uuid
   companyId           String  @map("company_id") @db.Uuid
-  email               String  @db.VarChar(255)
+  // Phase 6: nullable — a phone-only portal invite (Applicant.email is
+  // optional) creates a User with email = null, never a synthesized
+  // placeholder address. Staff creation still always supplies it.
+  email               String? @db.VarChar(255)
   passwordHash        String  @map("password_hash") @db.VarChar(255)
   name                String  @db.VarChar(255)
   phone               String? @db.VarChar(20)
@@ -116,6 +127,17 @@ model User {
   failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
   lockedUntil         DateTime? @map("locked_until")
   lastLoginAt         DateTime? @map("last_login_at")
+
+  // Phase 6: portal identity. Scalar + DB-level FK, no Prisma relation
+  // (Relation policy — same shape as Booking.interestRuleId). A portal
+  // User has EXACTLY ONE of these set (service-layer invariant, not a
+  // DB CHECK); both are null for every staff User, as today.
+  applicantId       String? @map("applicant_id") @db.Uuid
+  brokerId          String? @map("broker_id") @db.Uuid
+  // Phase 6: per-user notification opt-in/out, small non-relational
+  // blob — matches CompanyConfig.labelOverrides's JSON-column precedent.
+  // Only portal users populate it.
+  notificationPrefs Json?   @map("notification_prefs")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -137,6 +159,7 @@ model User {
   communicationLogsCreated CommunicationLog[]      @relation("commLogCreator")
 
   @@unique([companyId, email])
+  @@index([companyId, phone])
   @@map("users")
 }
 
@@ -269,6 +292,9 @@ model CompanyConfig {
   // back) or WRITE_OFF (company forgives it; a zero-amount audited entry
   // records the decision, reason required).
   commissionClawbackPolicy String   @default("RECOVER") @map("commission_clawback_policy") @db.VarChar(20)
+  // Phase 6: portal branding (logo + accent color shown in apps/portal).
+  logoUrl                  String?  @map("logo_url") @db.VarChar(500)
+  primaryColorHex          String?  @map("primary_color_hex") @db.VarChar(7)
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
 
@@ -2045,4 +2071,169 @@ model BrokerNoc {
 
   @@index([companyId, bookingId])
   @@map("broker_nocs")
+}
+
+// ─── Phase 6: customer portal and broker portal ────────────────
+// applicantId/brokerId/createdById/reviewedById/authorId etc. below are
+// scalar-only @db.Uuid FKs with DB-level constraints, no Prisma relation
+// — Relation policy (Phase 4 decisions): references pointing at
+// User/Applicant/Broker/Booking/masters stay scalar so those tables
+// don't accumulate a back-relation per consumer.
+
+/// Hashed, single-use portal invite tokens. Re-inviting creates a NEW
+/// row (never mutates an old one) so both a staff resend and an
+/// attempt-cap invalidation leave a clean trail. wrongAttempts +
+/// invalidatedReason implement the hard cap: updated via one atomic
+/// SQL UPDATE (service layer), never read-then-write.
+model PortalInvite {
+  id                String    @id @default(uuid()) @db.Uuid
+  companyId         String    @map("company_id") @db.Uuid
+  applicantId       String?   @map("applicant_id") @db.Uuid
+  brokerId          String?   @map("broker_id") @db.Uuid
+  channel           String    @db.VarChar(10) // EMAIL | SMS
+  tokenHash         String    @map("token_hash") @db.VarChar(64)
+  wrongAttempts     Int       @default(0) @map("wrong_attempts")
+  expiresAt         DateTime  @map("expires_at")
+  consumedAt        DateTime? @map("consumed_at")
+  invalidatedReason String?   @map("invalidated_reason") @db.VarChar(50)
+  createdById       String?   @map("created_by_id") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([tokenHash])
+  @@map("portal_invites")
+}
+
+/// Self-service password reset — same hashed/single-use/expiring shape
+/// as PortalInvite. Rows are created by PortalPasswordResetProcessor
+/// (async, off the request path), never by the request handler itself.
+model PortalPasswordReset {
+  id         String    @id @default(uuid()) @db.Uuid
+  companyId  String    @map("company_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @map("token_hash") @db.VarChar(64)
+  expiresAt  DateTime  @map("expires_at")
+  consumedAt DateTime? @map("consumed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([tokenHash])
+  @@map("portal_password_resets")
+}
+
+/// Customer profile-edit change requests. NOTHING ever writes to
+/// Applicant directly from the portal. fieldChanges snapshots the
+/// `from` value at submission time ({ fieldName: { from, to } }, JSON);
+/// approval re-validates every field's CURRENT value against that
+/// snapshot before applying anything (TOCTOU safety) — see
+/// ApplicantChangeRequestService.approve.
+model ApplicantChangeRequest {
+  id            String    @id @default(uuid()) @db.Uuid
+  companyId     String    @map("company_id") @db.Uuid
+  applicantId   String    @map("applicant_id") @db.Uuid
+  requestedById String    @map("requested_by_id") @db.Uuid
+  fieldChanges  Json      @map("field_changes")
+  status        String    @default("PENDING") @db.VarChar(20)
+  reviewedById  String?   @map("reviewed_by_id") @db.Uuid
+  reviewedAt    DateTime? @map("reviewed_at")
+  reviewNote    String?   @map("review_note") @db.VarChar(500)
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, applicantId, status])
+  @@map("applicant_change_requests")
+}
+
+/// 18th master (factory pattern, Phase 1) — support ticket categories.
+model TicketCategory {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @map("company_id") @db.Uuid
+  name      String  @db.VarChar(100)
+  sortOrder Int     @default(0) @map("sort_order")
+  isActive  Boolean @default(true) @map("is_active")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@map("ticket_categories")
+}
+
+model Ticket {
+  id          String    @id @default(uuid()) @db.Uuid
+  companyId   String    @map("company_id") @db.Uuid
+  raisedById  String    @map("raised_by_id") @db.Uuid
+  applicantId String?   @map("applicant_id") @db.Uuid
+  brokerId    String?   @map("broker_id") @db.Uuid
+  categoryId  String    @map("category_id") @db.Uuid
+  subject     String    @db.VarChar(255)
+  status      String    @default("OPEN") @db.VarChar(20)
+  slaByAt     DateTime? @map("sla_by_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  closedAt    DateTime? @map("closed_at")
+
+  company  Company         @relation(fields: [companyId], references: [id])
+  messages TicketMessage[]
+
+  @@index([companyId, applicantId])
+  @@index([companyId, brokerId])
+  @@map("tickets")
+}
+
+/// Thread messages. Append-only by SERVICE discipline (never
+/// UPDATE/DELETE a message), not a DB trigger — CLAUDE.md's "ledger,
+/// not mutation" principle is scoped to FINANCIAL records; a support
+/// thread isn't one.
+model TicketMessage {
+  id            String   @id @default(uuid()) @db.Uuid
+  companyId     String   @map("company_id") @db.Uuid
+  ticketId      String   @map("ticket_id") @db.Uuid
+  authorId      String   @map("author_id") @db.Uuid
+  authorIsStaff Boolean  @map("author_is_staff")
+  body          String   @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  ticket  Ticket  @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@map("ticket_messages")
+}
+
+/// Monthly construction-progress gallery — PROJECT-scoped (developers
+/// publish progress project/tower-wide; every buyer in that project
+/// sees the same update).
+model ConstructionUpdate {
+  id          String   @id @default(uuid()) @db.Uuid
+  companyId   String   @map("company_id") @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  title       String   @db.VarChar(255)
+  description String?  @db.Text
+  publishedAt DateTime @map("published_at")
+  createdById String?  @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  company Company                   @relation(fields: [companyId], references: [id])
+  media   ConstructionUpdateMedia[]
+
+  @@index([companyId, projectId])
+  @@map("construction_updates")
+}
+
+model ConstructionUpdateMedia {
+  id                   String   @id @default(uuid()) @db.Uuid
+  companyId            String   @map("company_id") @db.Uuid
+  constructionUpdateId String   @map("construction_update_id") @db.Uuid
+  storedName           String   @map("stored_name") @db.VarChar(255)
+  originalName         String   @map("original_name") @db.VarChar(255)
+  mimeType             String   @map("mime_type") @db.VarChar(100)
+  sizeBytes            Int      @map("size_bytes")
+  sortOrder            Int      @default(0) @map("sort_order")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  company Company            @relation(fields: [companyId], references: [id])
+  update  ConstructionUpdate @relation(fields: [constructionUpdateId], references: [id], onDelete: Cascade)
+
+  @@map("construction_update_media")
 }

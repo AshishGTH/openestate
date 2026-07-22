@@ -41,6 +41,7 @@ async function main() {
         name: ROLE_DISPLAY_NAMES[slug],
         slug,
         isSystem: true,
+        isPortal: slug === SYSTEM_ROLES.CUSTOMER || slug === SYSTEM_ROLES.BROKER,
       },
     });
     roleIds[slug] = role.id;
