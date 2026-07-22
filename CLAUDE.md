@@ -824,3 +824,48 @@ this is a log, not a design doc.
   cancellation (including its unit-status transition) rolls back too.
   This mechanism already existed for Phase 4; Phase 5 is its first
   cross-service consumer.
+- **Three real bugs were caught only by the manual browser click-through
+  before commit 3, not by any automated test** — recorded here because
+  they reveal a real gap in the test suite's shape, not just three
+  one-off typos. (1) `POST /bookings/:id/commission/accrue` — the plan's
+  own required endpoint — was never actually wired to a controller route;
+  `CommissionService.accrueForBooking` existed and was unit/integration
+  tested via direct calls, but nothing exercised it through HTTP, so a
+  missing route slipped past every test. Fixed by adding the endpoint
+  (mirrors `POST :id/interest/accrue`); regression-tested by calling
+  `BookingController.accrueCommission()` directly (`noc-cancellation.test.ts`),
+  which is the same "construct the controller, call the method" pattern
+  used everywhere else in this codebase for controller tests — a
+  reminder that this pattern verifies a route *handler* works, not that
+  the route is *registered*; only manual/e2e HTTP calls or a live server
+  catch a missing `@Post()`. (2) `BrokerReportsController.soldUnits`
+  400'd on `?brokerId=` — mixing a whole-object `@Query() dto` bound to
+  `.strict()` `reportDateRangeSchema` with a same-endpoint
+  `@Query('brokerId')` fails Zod's unrecognized-key check, because both
+  decorators validate against the SAME incoming query object. Fixed by
+  extending the schema (`soldUnitsQuerySchema`, exported from the
+  controller) instead of layering a second `@Query()` binding.
+  Regression-tested at the schema level (`commission-pure.test.ts`) —
+  deliberately NOT by calling the controller method directly, since
+  Nest's `ZodValidationPipe` runs before the method body and calling the
+  method directly bypasses it entirely, so only a schema-level
+  `.safeParse()` test (or a real HTTP round trip) actually reproduces
+  this bug. (3) `BrokerDetail.tsx`'s "Pay" button 400'd — `useApiMutation`
+  JSON-stringifies its whole `TBody` as the POST body, but `pay()`'s DTO
+  (`payCommissionPaymentSchema`) is `.strict()` and has no `id` field
+  (`id` is a URL param, not a body field); the existing `{id, ...}`-body
+  convention this hook uses elsewhere works only because those other
+  endpoints (`approve()`, `deactivate()`, etc.) have no `@Body()` DTO at
+  all, so the extra `id` key is silently ignored rather than rejected.
+  Fixed by calling `api()` directly for `pay()` with a body that omits
+  `id`, rather than changing the shared hook's contract (which other
+  pages rely on as-is). No frontend test suite exists in this repo to
+  regression-test against, so this class of bug — a strict backend DTO
+  vs. a generic frontend body-shape assumption — remains something only
+  the manual click-through step catches; noted here rather than silently
+  patched. **General lesson for future phases:** a new HTTP endpoint or
+  query/body shape needs at least one test that goes through the actual
+  validation pipe (an HTTP-level test, or a schema-level `.safeParse()`
+  test) — a controller-method-direct-call test alone proves the handler
+  logic is right but not that the route exists or that the DTO accepts
+  what the frontend actually sends.

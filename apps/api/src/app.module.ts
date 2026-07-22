@@ -18,6 +18,7 @@ import { PostsalesModule } from './postsales/postsales.module';
 import { PdfModule } from './pdf/pdf.module';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { PostsalesReportsModule } from './reports/postsales-reports.module';
+import { BrokerReportsModule } from './reports/broker-reports.module';
 import { BrokersModule } from './brokers/brokers.module';
 import { CommissionModule } from './commission/commission.module';
 import { QueuesModule } from './queues/queues.module';
@@ -62,6 +63,7 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     PdfModule,
     DispatchModule,
     PostsalesReportsModule,
+    BrokerReportsModule,
     BrokersModule,
     CommissionModule,
   ],

@@ -186,6 +186,90 @@ export function buildStatementDocDefinition(ctx: StatementPdfContext): TDocument
   };
 }
 
+// ── BROKER STATEMENT ─────────────────────────────────────────
+
+export interface BrokerStatementPdfEntry {
+  date: string;
+  bookingNumber: string;
+  type: string;
+  reason: string;
+  debitFormatted: string;
+  creditFormatted: string;
+  balanceFormatted: string;
+}
+
+export interface BrokerStatementPdfContext {
+  brokerName: string;
+  brokerPhone: string;
+  reraAgentNo?: string;
+  statementDate: string;
+  entries: BrokerStatementPdfEntry[];
+  closingBalanceFormatted: string;
+  companyName: string;
+  companyAddress: string;
+}
+
+/**
+ * Mirrors buildStatementDocDefinition's shape exactly (typed table of
+ * ledger entries, opening/closing balance) rather than routing through
+ * LetterTemplate/merge fields — a broker statement is a ledger table, the
+ * same document category as the booking statement, not a merge-field
+ * letter (allotment/demand/reminder). See CLAUDE.md's Phase 5 decisions.
+ */
+export function buildBrokerStatementDocDefinition(ctx: BrokerStatementPdfContext): TDocumentDefinitions {
+  const entryRows: TableCell[][] = ctx.entries.map((e) => [
+    { text: e.date, style: 'tableCell' },
+    { text: e.bookingNumber, style: 'tableCell' },
+    { text: e.type, style: 'tableCell' },
+    { text: e.reason, style: 'tableCell' },
+    { text: e.debitFormatted, style: 'tableCell', alignment: 'right' },
+    { text: e.creditFormatted, style: 'tableCell', alignment: 'right' },
+    { text: e.balanceFormatted, style: 'tableCell', alignment: 'right' },
+  ]);
+
+  const content: Content[] = [
+    ...letterhead(ctx.companyName, ctx.companyAddress),
+    { text: 'BROKER COMMISSION STATEMENT', style: 'docTitle' },
+    {
+      columns: [
+        { stack: [{ text: 'Broker', style: 'label' }, { text: ctx.brokerName, style: 'value' }] },
+        { stack: [{ text: 'Phone', style: 'label' }, { text: ctx.brokerPhone, style: 'value' }] },
+        { stack: [{ text: 'RERA Agent No.', style: 'label' }, { text: ctx.reraAgentNo || '—', style: 'value' }] },
+        { stack: [{ text: 'As of', style: 'label' }, { text: ctx.statementDate, style: 'value' }] },
+      ],
+      columnGap: 12,
+      margin: [0, 0, 0, 12],
+    },
+    {
+      table: {
+        headerRows: 1,
+        widths: ['auto', 'auto', 'auto', '*', 'auto', 'auto', 'auto'],
+        body: [
+          [
+            { text: 'Date', style: 'tableHeader' },
+            { text: 'Booking No.', style: 'tableHeader' },
+            { text: 'Type', style: 'tableHeader' },
+            { text: 'Description', style: 'tableHeader' },
+            { text: 'Debit', style: 'tableHeader', alignment: 'right' },
+            { text: 'Credit', style: 'tableHeader', alignment: 'right' },
+            { text: 'Balance', style: 'tableHeader', alignment: 'right' },
+          ],
+          ...entryRows,
+        ],
+      },
+      layout: 'lightHorizontalLines',
+    },
+    { text: `Outstanding Commission: ${ctx.closingBalanceFormatted}`, style: 'value', margin: [0, 12, 0, 0] },
+  ];
+
+  return {
+    pageMargins: PAGE_MARGIN,
+    content,
+    styles: STYLES,
+    defaultStyle: { font: 'Roboto' },
+  };
+}
+
 // ── Merge-field-driven letters (allotment / demand / reminder) ─
 
 export interface LetterPdfContext {

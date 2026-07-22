@@ -14,6 +14,7 @@ const NAV_ITEMS = [
       { label: 'Cheque Queue', to: '/postsales/cheques', perm: PERMISSIONS.POSTSALES_CHEQUE_VERIFY },
       { label: 'Dues Dashboard', to: '/postsales/dues', perm: PERMISSIONS.REPORTS_OUTSTANDING_VIEW },
       { label: 'Reports', to: '/postsales/reports', perm: PERMISSIONS.REPORTS_COLLECTION_VIEW },
+      { label: 'Brokers', to: '/postsales/brokers', perm: PERMISSIONS.ADMIN_BROKER_READ },
     ],
   },
   {

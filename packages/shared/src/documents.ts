@@ -8,6 +8,7 @@ export const GENERATED_DOCUMENT_TYPE = {
   ALLOTMENT_LETTER: 'ALLOTMENT_LETTER',
   DEMAND_LETTER: 'DEMAND_LETTER',
   REMINDER_LETTER: 'REMINDER_LETTER',
+  BROKER_STATEMENT: 'BROKER_STATEMENT',
 } as const;
 export type GeneratedDocumentTypeValue =
   (typeof GENERATED_DOCUMENT_TYPE)[keyof typeof GENERATED_DOCUMENT_TYPE];
@@ -84,6 +85,19 @@ export const MERGE_FIELD_REGISTRY = {
     'dueDate',
     'overdueDays',
     'dueAmountFormatted',
+    'companyName',
+    'companyAddress',
+  ],
+  // Not currently rendered through resolveMergeFields — buildBrokerStatementDocDefinition
+  // (apps/api/src/pdf/document-templates.ts) is a typed ledger-table template, the
+  // same category as STATEMENT, not a merge-field letter. Listed here anyway
+  // so MERGE_FIELD_REGISTRY stays exhaustive over GeneratedDocumentTypeValue.
+  BROKER_STATEMENT: [
+    'brokerName',
+    'brokerPhone',
+    'reraAgentNo',
+    'statementDate',
+    'closingBalanceFormatted',
     'companyName',
     'companyAddress',
   ],

@@ -16,9 +16,11 @@ import { PdfService } from '../src/pdf/pdf.service';
 import {
   buildReceiptDocDefinition,
   buildStatementDocDefinition,
+  buildBrokerStatementDocDefinition,
   buildLetterDocDefinition,
   type ReceiptPdfContext,
   type StatementPdfContext,
+  type BrokerStatementPdfContext,
 } from '../src/pdf/document-templates';
 
 const pdf = new PdfService();
@@ -63,6 +65,20 @@ const FIXED_STATEMENT_CTX: StatementPdfContext = {
   companyAddress: '123 Test Street',
 };
 
+const FIXED_BROKER_STATEMENT_CTX: BrokerStatementPdfContext = {
+  brokerName: 'Test Broker',
+  brokerPhone: '9000012345',
+  reraAgentNo: 'UPRERAAGT12345',
+  statementDate: '2026-07-21',
+  entries: [
+    { date: '2026-06-01', bookingNumber: 'BKG/2026-27/000001', type: 'ACCRUAL', reason: 'Commission accrued on booking confirmation', debitFormatted: '₹40,000.00', creditFormatted: '', balanceFormatted: '₹40,000.00' },
+    { date: '2026-07-01', bookingNumber: 'BKG/2026-27/000001', type: 'PAYMENT', reason: 'Commission payment', debitFormatted: '', creditFormatted: '₹15,000.00', balanceFormatted: '₹25,000.00' },
+  ],
+  closingBalanceFormatted: '₹25,000.00',
+  companyName: 'Test Company',
+  companyAddress: '123 Test Street',
+};
+
 describe('PDF templates: structural snapshot per document type', () => {
   it('RECEIPT renders a valid, single-page, deterministic PDF', async () => {
     const doc = buildReceiptDocDefinition(FIXED_RECEIPT_CTX);
@@ -85,6 +101,15 @@ describe('PDF templates: structural snapshot per document type', () => {
   it('STATEMENT renders a valid, single-page, deterministic PDF', async () => {
     const buf1 = await pdf.render(buildStatementDocDefinition(FIXED_STATEMENT_CTX));
     const buf2 = await pdf.render(buildStatementDocDefinition(FIXED_STATEMENT_CTX));
+
+    assertValidSinglePagePdf(buf1);
+    expect(buf1.length).toBeGreaterThan(1000);
+    expect(buf1.length).toBe(buf2.length);
+  });
+
+  it('BROKER_STATEMENT renders a valid, single-page, deterministic PDF', async () => {
+    const buf1 = await pdf.render(buildBrokerStatementDocDefinition(FIXED_BROKER_STATEMENT_CTX));
+    const buf2 = await pdf.render(buildBrokerStatementDocDefinition(FIXED_BROKER_STATEMENT_CTX));
 
     assertValidSinglePagePdf(buf1);
     expect(buf1.length).toBeGreaterThan(1000);

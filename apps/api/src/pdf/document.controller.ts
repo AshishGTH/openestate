@@ -102,6 +102,22 @@ export class DocumentController {
     );
   }
 
+  @Post('brokers/:brokerId/documents/statement')
+  @RequirePermissions(PERMISSIONS.ACCOUNTS_COMMISSION_READ)
+  @ApiOperation({ summary: 'Generate a fresh broker commission statement PDF snapshot' })
+  generateBrokerStatement(@Param('brokerId') brokerId: string, @Req() req: Request) {
+    const u = req.user as JwtPayload;
+    return this.documents.generateBrokerStatementPdf(u.companyId, brokerId, u.sub);
+  }
+
+  @Get('brokers/:brokerId/documents')
+  @RequirePermissions(PERMISSIONS.ACCOUNTS_COMMISSION_READ)
+  @ApiOperation({ summary: 'List generated documents (statements) for a broker' })
+  listForBroker(@Param('brokerId') brokerId: string, @Req() req: Request) {
+    const u = req.user as JwtPayload;
+    return this.documents.listForBroker(u.companyId, brokerId);
+  }
+
   @Get('bookings/:bookingId/documents')
   @RequirePermissions(PERMISSIONS.POSTSALES_LETTER_READ)
   @ApiOperation({ summary: 'List generated documents for a booking' })
