@@ -5,6 +5,13 @@ export interface TenantStore {
   companyId: string;
   userId?: string;
   ipAddress?: string;
+  // Phase 6: set only for a customer/broker portal session — never
+  // both, never alongside a staff session. TenantMiddleware explicitly
+  // passes both as undefined for staff requests (not omitted) so a
+  // future refactor of the store-building code can't accidentally
+  // start forwarding a stale value.
+  portalApplicantId?: string;
+  portalBrokerId?: string;
 }
 
 export interface TenantTxStore {
@@ -25,6 +32,14 @@ export function getCurrentUserId(): string | undefined {
 
 export function getCurrentIpAddress(): string | undefined {
   return tenantContext.getStore()?.ipAddress;
+}
+
+export function getCurrentPortalApplicantId(): string | undefined {
+  return tenantContext.getStore()?.portalApplicantId;
+}
+
+export function getCurrentPortalBrokerId(): string | undefined {
+  return tenantContext.getStore()?.portalBrokerId;
 }
 
 export function runWithTenant<T>(store: TenantStore, fn: () => T): T {

@@ -13,3 +13,5 @@ export * from './presales';
 export * from './finance';
 export * from './documents';
 export * from './commission';
+export * from './portal-auth.dto';
+export * from './portal';

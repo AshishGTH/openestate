@@ -1,5 +1,11 @@
 import { Prisma, PrismaClient } from '@prisma/client';
-import { getCurrentCompanyId, tenantTxContext } from './tenant-context';
+import {
+  getCurrentCompanyId,
+  getCurrentPortalApplicantId,
+  getCurrentPortalBrokerId,
+  tenantContext,
+  tenantTxContext,
+} from './tenant-context';
 
 const TENANT_SCOPED_MODELS = new Set([
   'User',
@@ -77,6 +83,14 @@ const TENANT_SCOPED_MODELS = new Set([
   'CommissionLedgerEntry',
   'CommissionPayment',
   'BrokerNoc',
+  'PortalInvite',
+  'PortalPasswordReset',
+  'ApplicantChangeRequest',
+  'TicketCategory',
+  'Ticket',
+  'TicketMessage',
+  'ConstructionUpdate',
+  'ConstructionUpdateMedia',
 ]);
 
 const READ_OPS = new Set([
@@ -99,6 +113,32 @@ const WRITE_FILTER_OPS = new Set([
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Phase 6: JS-level portal-scope guard, deliberately scoped to
+ * DIRECT-COLUMN models only (see CLAUDE.md Phase 6 decisions) — not
+ * attempted for models reachable only via a joined bookingId
+ * (Installment, Receipt, PaymentPlan, LedgerEntry, ...), where RLS is
+ * the sole DB-adjacent enforcement. This is an additional
+ * defense-in-depth narrowing on top of RLS, not a replacement for it,
+ * and deliberately does NOT replicate RLS's co-applicant carve-out —
+ * it only needs to keep an obviously-wrong, unscoped company-wide read
+ * from ever being ATTEMPTED when a portal scope is active; RLS remains
+ * authoritative for the exact row set returned.
+ *
+ * `brokerIsSelf: true` means the model's OWN `id` is the scope (Broker
+ * reading its own row), not a foreign-key field.
+ */
+const PORTAL_SCOPED_MODELS: Record<string, { applicantField?: string; brokerField?: string; brokerIsSelf?: true }> = {
+  Booking: { applicantField: 'primaryApplicantId', brokerField: 'brokerId' },
+  CommissionLedgerEntry: { brokerField: 'brokerId' },
+  CommissionPayment: { brokerField: 'brokerId' },
+  BrokerNoc: { brokerField: 'brokerId' },
+  Broker: { brokerIsSelf: true },
+  GeneratedDocument: { applicantField: 'applicantId', brokerField: 'brokerId' },
+  ApplicantChangeRequest: { applicantField: 'applicantId' },
+  Ticket: { applicantField: 'applicantId', brokerField: 'brokerId' },
+};
 
 /**
  * Prisma client extension enforcing tenant isolation (defence-in-depth).
@@ -137,6 +177,7 @@ export function tenantExtension() {
             }
 
             injectCompanyId(operation, args, companyId);
+            injectPortalScope(model, operation, args);
 
             return query(args);
           },
@@ -178,22 +219,79 @@ function injectCompanyId(
 }
 
 /**
- * Sets `app.current_company_id` as a transaction-local variable via
- * Postgres `set_config(name, value, is_local)`. The function form
- * accepts parameterised binding (safe from injection). The third
- * argument `true` makes the setting transaction-scoped, equivalent to
- * SET LOCAL — it resets automatically when the transaction ends.
+ * Phase 6 defense-in-depth: for the DIRECT-COLUMN models in
+ * PORTAL_SCOPED_MODELS, narrows READ_OPS/WRITE_FILTER_OPS's `where`
+ * with an additional `AND` clause when a portal scope is active. A
+ * no-op for every other model, and a no-op entirely when no portal
+ * scope is set (staff/system queries are unaffected). See the
+ * PORTAL_SCOPED_MODELS doc comment for why this intentionally does NOT
+ * replicate RLS's co-applicant carve-out.
+ */
+function injectPortalScope(
+  model: string | undefined,
+  operation: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  args: Record<string, any>,
+): void {
+  if (!model || !(READ_OPS.has(operation) || WRITE_FILTER_OPS.has(operation))) return;
+
+  const config = PORTAL_SCOPED_MODELS[model];
+  if (!config) return;
+
+  const portalApplicantId = getCurrentPortalApplicantId();
+  const portalBrokerId = getCurrentPortalBrokerId();
+  if (!portalApplicantId && !portalBrokerId) return;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const scopeClauses: Record<string, any>[] = [];
+  if (portalApplicantId && config.applicantField) {
+    scopeClauses.push({ [config.applicantField]: portalApplicantId });
+  }
+  if (portalBrokerId && config.brokerField) {
+    scopeClauses.push({ [config.brokerField]: portalBrokerId });
+  }
+  if (portalBrokerId && config.brokerIsSelf) {
+    scopeClauses.push({ id: portalBrokerId });
+  }
+  if (scopeClauses.length === 0) return;
+
+  args.where = {
+    AND: [args.where ?? {}, { OR: scopeClauses }],
+  };
+}
+
+/**
+ * Sets `app.current_company_id`, `app.portal_applicant_id`, and
+ * `app.portal_broker_id` as transaction-local variables via Postgres
+ * `set_config(name, value, is_local)`. The function form accepts
+ * parameterised binding (safe from injection). The third argument
+ * `true` makes each setting transaction-scoped, equivalent to SET
+ * LOCAL — it resets automatically when the transaction ends.
+ *
+ * GUC hygiene is unconditional (Phase 6 decisions): all three are
+ * ALWAYS written, every call, never conditionally skipped — a staff
+ * session passes `undefined` for the portal args, which is written as
+ * `''`, not "left unset". `NULLIF(current_setting(...), '')` on the RLS
+ * side treats "never set" and "explicitly cleared to ''" identically,
+ * so this is safe by construction: there is no code path where a stale
+ * portal scope from a previous transaction on a pooled connection could
+ * silently persist into one that doesn't explicitly pass it.
  */
 export async function setTenantOnTx(
   tx: Prisma.TransactionClient,
   companyId: string,
+  portalApplicantId?: string,
+  portalBrokerId?: string,
 ): Promise<void> {
   if (!UUID_RE.test(companyId)) {
     throw new Error('Invalid company ID format');
   }
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (tx as any)
-    .$executeRaw`SELECT set_config('app.current_company_id', ${companyId}::text, true)`;
+  await (tx as any).$executeRaw`
+    SELECT set_config('app.current_company_id', ${companyId}::text, true),
+           set_config('app.portal_applicant_id', ${portalApplicantId ?? ''}::text, true),
+           set_config('app.portal_broker_id', ${portalBrokerId ?? ''}::text, true)
+  `;
 }
 
 export interface WithTenantTxOptions {
@@ -238,9 +336,18 @@ export async function withTenantTx<T>(
     return fn(existing.tx);
   }
 
+  // Picks up the ambient portal scope (if any) from the ENCLOSING
+  // runWithTenant call automatically — no changes needed at any of
+  // this function's ~50+ existing call sites across the codebase. A
+  // staff request's TenantStore always has both fields explicitly
+  // undefined (see tenant-context.ts), so this resolves to "write
+  // empty string" for staff, matching setTenantOnTx's unconditional
+  // hygiene contract.
+  const ambientStore = tenantContext.getStore();
+
   return prisma.$transaction(
     async (tx) => {
-      await setTenantOnTx(tx, companyId);
+      await setTenantOnTx(tx, companyId, ambientStore?.portalApplicantId, ambientStore?.portalBrokerId);
       return tenantTxContext.run({ tx, companyId }, () => fn(tx));
     },
     { timeout: options?.timeout ?? 10_000 },

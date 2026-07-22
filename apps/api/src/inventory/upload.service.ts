@@ -23,6 +23,7 @@ const SIZE_LIMITS: Record<UploadCategory, number> = {
   brochure: 10 * 1024 * 1024,
   photo: 5 * 1024 * 1024,
   document: 10 * 1024 * 1024,
+  construction_progress: 5 * 1024 * 1024,
 };
 
 export interface UploadResult {

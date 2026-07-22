@@ -165,6 +165,25 @@ export async function makeBroker(
   return b.id;
 }
 
+/**
+ * Phase 6: the `customer`/`broker` system role for a fixture company.
+ * `seedCompany` only creates a generic 'admin' role, so portal tests need
+ * this separately — `PortalAuthService` looks the role up by
+ * `(companyId, slug)`, and no permission rows are needed since these tests
+ * exercise services/raw connections directly, never `PermissionsGuard`.
+ */
+export async function makePortalRole(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  systemPrisma: any,
+  companyId: string,
+  roleSlug: 'customer' | 'broker',
+): Promise<string> {
+  const role = await systemPrisma.role.create({
+    data: { companyId, name: roleSlug, slug: roleSlug, isSystem: true, isPortal: true },
+  });
+  return role.id;
+}
+
 /** Flat-percent commission rule (company-wide, no project override) — the common case in tests. */
 export async function makeFlatCommissionRule(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -190,6 +209,14 @@ export async function makeFlatCommissionRule(
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function cleanupCompany(systemPrisma: any, companyId: string): Promise<void> {
   const tables = [
+    // Phase 6: portal rows — several RESTRICT onto users (raised_by_id,
+    // requested_by_id) and onto companies directly, so must go before both
+    // 'users' and the final companies delete below. ticket_messages/
+    // construction_update_media are CASCADE from their parents but listed
+    // explicitly anyway; tickets before ticket_categories because
+    // tickets_category_id_fkey is RESTRICT.
+    'ticket_messages', 'tickets', 'ticket_categories', 'applicant_change_requests',
+    'portal_password_resets', 'portal_invites', 'construction_update_media', 'construction_updates',
     // Phase 5: broker/commission rows — reference bookings/brokers/projects,
     // so must go before those are deleted below. Nothing references these.
     'commission_ledger_entries', 'broker_nocs', 'broker_booking_commissions', 'commission_payments',

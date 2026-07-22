@@ -52,9 +52,16 @@ export type TotpSetupResponse = z.infer<typeof totpSetupResponseSchema>;
 export interface JwtPayload {
   sub: string;
   companyId: string;
-  email: string;
+  // Nullable because a phone-only portal user (Phase 6) may have no
+  // email on file at all — never a synthesized placeholder address.
+  email: string | null;
   roleSlug: string;
   permissions: string[];
+  // Phase 6: set only on a portal (customer/broker) token — a superset
+  // field, never present on a staff token. Exactly one is set when
+  // either is set.
+  applicantId?: string;
+  brokerId?: string;
   iat?: number;
   exp?: number;
 }

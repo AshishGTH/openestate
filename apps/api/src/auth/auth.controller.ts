@@ -20,6 +20,7 @@ import {
 import type { JwtPayload } from '@openestate/shared';
 import { AuthService } from './auth.service';
 import { Public } from './guards/jwt-auth.guard';
+import { STAFF_CSRF_COOKIE } from './csrf-cookie-names';
 
 class LoginDto extends createZodDto(loginSchema) {}
 class TotpVerifyDto extends createZodDto(totpVerifySchema) {}
@@ -27,7 +28,7 @@ class ChangePasswordDto extends createZodDto(changePasswordSchema) {}
 class ForceChangePasswordDto extends createZodDto(forceChangePasswordSchema) {}
 
 const REFRESH_COOKIE = 'openestate_refresh';
-const CSRF_COOKIE = 'openestate_csrf';
+const CSRF_COOKIE = STAFF_CSRF_COOKIE;
 
 function setRefreshCookie(res: Response, token: string, expiresAt: Date) {
   res.cookie(REFRESH_COOKIE, token, {

@@ -85,6 +85,18 @@ const AUDITED_MODELS = new Set([
   'BrokerCommissionSlab',
   'CommissionPayment',
   'BrokerNoc',
+  // Phase 6: audit the staff-accountable portal ENTITIES. TicketMessage
+  // is NOT audited — same "it already IS the record of itself" reasoning
+  // as ledger/message-thread mechanism rows elsewhere. PortalPasswordReset
+  // is NOT audited — created by an async worker, not a staff/portal
+  // action, and its tokenHash is security-sensitive metadata, not a
+  // business fact.
+  'ApplicantChangeRequest',
+  'TicketCategory',
+  'Ticket',
+  'ConstructionUpdate',
+  'ConstructionUpdateMedia',
+  'PortalInvite',
 ]);
 
 const SENSITIVE_FIELDS = new Set([
@@ -98,6 +110,11 @@ const SENSITIVE_FIELDS = new Set([
   // even in ciphertext form.
   'panCiphertext',
   'pan_ciphertext',
+  // Phase 6: PortalInvite is audited (see AUDITED_MODELS) but its
+  // tokenHash must never land in the diff, same reasoning as
+  // passwordHash/totpSecret above.
+  'tokenHash',
+  'token_hash',
 ]);
 
 function sanitize(data: unknown): unknown {

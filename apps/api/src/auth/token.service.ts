@@ -27,12 +27,16 @@ export class TokenService {
   async createRefreshToken(
     userId: string,
     family?: string,
+    // Phase 6: lets a caller issue a shorter-lived refresh token (portal:
+    // 24h) without duplicating this method — staff callers omit it and get
+    // the configured JWT_REFRESH_EXPIRES_IN as before.
+    expiresInOverride?: string,
   ): Promise<{ raw: string; expiresAt: Date }> {
     const raw = randomUUID();
     const hash = this.hashToken(raw);
     const jti = randomUUID();
     const tokenFamily = family ?? randomUUID();
-    const expiresAt = this.computeExpiry(this.refreshExpiresIn);
+    const expiresAt = this.computeExpiry(expiresInOverride ?? this.refreshExpiresIn);
 
     await this.prisma.refreshToken.create({
       data: {
@@ -49,6 +53,7 @@ export class TokenService {
 
   async rotateRefreshToken(
     rawToken: string,
+    expiresInOverride?: string,
   ): Promise<{
     userId: string;
     newRaw: string;
@@ -86,7 +91,7 @@ export class TokenService {
     const newRaw = randomUUID();
     const newHash = this.hashToken(newRaw);
     const newJti = randomUUID();
-    const expiresAt = this.computeExpiry(this.refreshExpiresIn);
+    const expiresAt = this.computeExpiry(expiresInOverride ?? this.refreshExpiresIn);
 
     await this.prisma.refreshToken.create({
       data: {

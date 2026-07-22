@@ -3,8 +3,15 @@ import { Request, Response, NextFunction } from 'express';
 import { runWithTenant } from '@openestate/db';
 import type { JwtPayload } from '@openestate/shared';
 
+/**
+ * Portal counterpart to TenantMiddleware — populates portalApplicantId/
+ * portalBrokerId from the portal JWT so withTenantTx's unconditional GUC
+ * write (see CLAUDE.md Phase 6 decisions) carries the real scope instead
+ * of the staff empty-string default. Applied only to portal routes
+ * (app.module.ts), never to staff routes.
+ */
 @Injectable()
-export class TenantMiddleware implements NestMiddleware {
+export class PortalTenantMiddleware implements NestMiddleware {
   use(req: Request, _res: Response, next: NextFunction) {
     const user = (req as Request & { user?: JwtPayload }).user;
     if (user?.companyId) {
@@ -13,13 +20,8 @@ export class TenantMiddleware implements NestMiddleware {
           companyId: user.companyId,
           userId: user.sub,
           ipAddress: req.ip ?? req.socket.remoteAddress,
-          // Explicit, not omitted (Phase 6 GUC-hygiene decision): a
-          // staff request must never forward a portal scope, and this
-          // makes that an assignment a future refactor of this object
-          // literal can't accidentally drop, rather than relying on the
-          // keys simply never being written.
-          portalApplicantId: undefined,
-          portalBrokerId: undefined,
+          portalApplicantId: user.applicantId,
+          portalBrokerId: user.brokerId,
         },
         () => next(),
       );
