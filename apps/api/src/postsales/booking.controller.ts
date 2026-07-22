@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Post, Req } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
+import { withTenantTx, runWithTenant } from '@openestate/db';
 import {
   createBookingSchema,
   createPaymentPlanSchema,
@@ -10,10 +11,12 @@ import {
   interestWaiverSchema,
   createTransferSchema,
   cancellationSchema,
+  requestNocSchema,
   PERMISSIONS,
 } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
+import { TENANT_PRISMA } from '../database/database.module';
 import { BookingService } from './booking.service';
 import { PaymentPlanService } from './payment-plan.service';
 import { ExtraChargeService } from './extra-charge.service';
@@ -21,6 +24,8 @@ import { InterestService } from './interest.service';
 import { TransferService } from './transfer.service';
 import { CancellationService } from './cancellation.service';
 import { BrokerService } from '../brokers/broker.service';
+import { NocService } from '../brokers/noc.service';
+import { CommissionService } from '../commission/commission.service';
 
 class CreateBookingDto extends createZodDto(createBookingSchema) {}
 class AssignBrokerDto extends createZodDto(z.object({ brokerId: z.string().uuid() }).strict()) {}
@@ -29,6 +34,7 @@ class ExtraChargeDto extends createZodDto(extraChargeSchema) {}
 class InterestWaiverDto extends createZodDto(interestWaiverSchema) {}
 class CreateTransferDto extends createZodDto(createTransferSchema) {}
 class CancellationDto extends createZodDto(cancellationSchema) {}
+class RequestNocDto extends createZodDto(requestNocSchema) {}
 class DateBodyDto extends createZodDto(z.object({ date: z.coerce.date() }).strict()) {}
 class TemplateBodyDto extends createZodDto(z.object({ templateId: z.string().uuid() }).strict()) {}
 
@@ -36,6 +42,9 @@ class TemplateBodyDto extends createZodDto(z.object({ templateId: z.string().uui
 @Controller('bookings')
 export class BookingController {
   constructor(
+    @Inject(TENANT_PRISMA)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private readonly tenantPrisma: any,
     private readonly bookings: BookingService,
     private readonly plans: PaymentPlanService,
     private readonly extraCharges: ExtraChargeService,
@@ -43,6 +52,8 @@ export class BookingController {
     private readonly transfers: TransferService,
     private readonly cancellations: CancellationService,
     private readonly brokerService: BrokerService,
+    private readonly nocs: NocService,
+    private readonly commissions: CommissionService,
   ) {}
 
   @Post()
@@ -149,11 +160,42 @@ export class BookingController {
     return this.brokerService.assignToBooking(u.companyId, id, dto.brokerId);
   }
 
+  @Post(':id/noc/request')
+  @RequirePermissions(PERMISSIONS.POSTSALES_NOC_REQUEST)
+  @ApiOperation({ summary: 'Request a broker NOC for this booking (a cancellation prerequisite when a sourcing broker is set)' })
+  requestNoc(@Param('id') id: string, @Body() dto: RequestNocDto, @Req() req: Request) {
+    const u = req.user as JwtPayload;
+    return this.nocs.request(u.companyId, id, dto, u.sub);
+  }
+
+  /**
+   * Wraps the NOC gate, the frozen CancellationService.cancel(), and
+   * CommissionService.handleBookingCancelled() in ONE outer transaction —
+   * no changes to either frozen/existing service were needed for this: both
+   * open their own withTenantTx(tenantPrisma, companyId, ...) internally,
+   * and withTenantTx's AsyncLocalStorage-based nesting-reuse (see
+   * CLAUDE.md's Phase 5 decisions) makes them transparently join THIS
+   * transaction instead of opening their own. If handleBookingCancelled
+   * throws, the whole tx rolls back — including cancellationService.cancel()'s
+   * unit-status transition and any NOC auto-approval write.
+   */
   @Post(':id/cancel')
   @RequirePermissions(PERMISSIONS.POSTSALES_BOOKING_CANCEL)
-  @ApiOperation({ summary: 'Cancel/surrender (deduction from master, computes refundable)' })
+  @ApiOperation({ summary: 'Cancel/surrender (deduction from master, computes refundable; blocked without an approved broker NOC)' })
   cancel(@Param('id') id: string, @Body() dto: CancellationDto, @Req() req: Request) {
     const u = req.user as JwtPayload;
-    return this.cancellations.cancel(u.companyId, id, dto, u.sub);
+    return runWithTenant({ companyId: u.companyId }, () =>
+      withTenantTx(this.tenantPrisma, u.companyId, async (tx) => {
+        const booking = await tx.booking.findFirst({ where: { id, companyId: u.companyId } });
+        if (booking?.brokerId) {
+          await this.nocs.assertApprovedOrAutoApprove(tx, u.companyId, id, booking.brokerId, u.sub);
+        }
+        const result = await this.cancellations.cancel(u.companyId, id, dto, u.sub);
+        if (booking?.brokerId) {
+          await this.commissions.handleBookingCancelled(u.companyId, result.event, booking.brokerId, u.sub);
+        }
+        return result;
+      }),
+    );
   }
 }
