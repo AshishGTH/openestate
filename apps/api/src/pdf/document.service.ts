@@ -15,9 +15,11 @@ import { PdfService } from './pdf.service';
 import {
   buildReceiptDocDefinition,
   buildStatementDocDefinition,
+  buildBrokerStatementDocDefinition,
   buildLetterDocDefinition,
   type ReceiptPdfContext,
   type StatementPdfContext,
+  type BrokerStatementPdfContext,
 } from './document-templates';
 
 @Injectable()
@@ -179,6 +181,66 @@ export class DocumentService {
     });
   }
 
+  // ── BROKER STATEMENT (Phase 5 commit 3) ────────────────────
+
+  /** Always a fresh snapshot (the commission ledger is live), same discipline as generateStatementPdf. */
+  async generateBrokerStatementPdf(companyId: string, brokerId: string, actorId: string | null) {
+    const broker = await this.systemPrisma.broker.findFirst({ where: { id: brokerId, companyId } });
+    if (!broker) throw new NotFoundException('Broker not found');
+
+    const entries = await this.systemPrisma.commissionLedgerEntry.findMany({
+      where: { companyId, brokerId },
+      orderBy: [{ effectiveDate: 'asc' }, { createdAt: 'asc' }],
+    });
+    const bookingIds = [...new Set(entries.map((e: { bookingId: string }) => e.bookingId))];
+    const bookings = await this.systemPrisma.booking.findMany({ where: { companyId, id: { in: bookingIds } }, select: { id: true, bookingNumber: true } });
+    const bookingNumbers = new Map(bookings.map((b: { id: string; bookingNumber: string }) => [b.id, b.bookingNumber]));
+
+    let running = 0n;
+    const rows = entries.map(
+      (e: { effectiveDate: Date; bookingId: string; entryType: string; reason: string | null; signedAmountPaise: bigint }) => {
+        running += e.signedAmountPaise;
+        const debit = e.signedAmountPaise > 0n ? e.signedAmountPaise : 0n;
+        const credit = e.signedAmountPaise < 0n ? -e.signedAmountPaise : 0n;
+        return {
+          date: e.effectiveDate.toISOString().slice(0, 10),
+          bookingNumber: (bookingNumbers.get(e.bookingId) as string) ?? e.bookingId,
+          type: e.entryType,
+          reason: e.reason ?? '',
+          debitFormatted: debit > 0n ? formatInr(debit) : '',
+          creditFormatted: credit > 0n ? formatInr(credit) : '',
+          balanceFormatted: formatInr(running),
+        };
+      },
+    );
+
+    const ctx: BrokerStatementPdfContext = {
+      brokerName: broker.name,
+      brokerPhone: broker.phone,
+      reraAgentNo: broker.reraAgentNo ?? undefined,
+      statementDate: new Date().toISOString().slice(0, 10),
+      entries: rows,
+      closingBalanceFormatted: formatInr(running),
+      companyName: (await this.systemPrisma.company.findFirst({ where: { id: companyId } }))?.name ?? '',
+      companyAddress: '',
+    };
+
+    const buffer = await this.pdfService.render(buildBrokerStatementDocDefinition(ctx));
+    return this.store(companyId, buffer, {
+      documentType: GENERATED_DOCUMENT_TYPE.BROKER_STATEMENT,
+      brokerId,
+      originalName: `broker-statement-${broker.name.replace(/\s+/g, '-')}-${ctx.statementDate}.pdf`,
+      createdById: actorId,
+    });
+  }
+
+  async listForBroker(companyId: string, brokerId: string) {
+    return this.systemPrisma.generatedDocument.findMany({
+      where: { companyId, brokerId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   // ── Merge-field-driven letters ─────────────────────────────
 
   async generateLetterPdf(
@@ -297,6 +359,7 @@ export class DocumentService {
       bookingId?: string;
       applicantId?: string;
       receiptId?: string;
+      brokerId?: string;
       templateId?: string;
       originalName: string;
       isDuplicate?: boolean;
@@ -317,6 +380,7 @@ export class DocumentService {
             bookingId: opts.bookingId,
             applicantId: opts.applicantId,
             receiptId: opts.receiptId,
+            brokerId: opts.brokerId,
             documentType: opts.documentType,
             templateId: opts.templateId,
             storedName: uploaded.storageName,

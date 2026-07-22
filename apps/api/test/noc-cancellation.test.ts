@@ -89,6 +89,18 @@ describeIf('BookingController.cancel(): NOC gating + transactional atomicity', (
     return { bookingId: booking.id, unitId };
   }
 
+  it('BookingController.accrueCommission() delegates to CommissionService.accrueForBooking (regression: this endpoint was missing entirely until caught by manual click-through)', async () => {
+    const brokerId = await makeBroker(systemPrisma, fx.companyId);
+    await makeFlatCommissionRule(systemPrisma, fx.companyId, brokerId, 2);
+    const { bookingId } = await bookedWithBroker(L(20_00_000), brokerId);
+
+    const entry = await controller.accrueCommission(bookingId, fakeRequest(fx.companyId, fx.userId));
+    expect(entry.signedAmountPaise).toBe(L(40_000)); // 2% of 20,00,000
+
+    const entries = await systemPrisma.commissionLedgerEntry.findMany({ where: { companyId: fx.companyId, bookingId } });
+    expect(entries).toHaveLength(1);
+  });
+
   it('blocks cancellation when the booking has a sourcing broker and no APPROVED NOC exists', async () => {
     const brokerId = await makeBroker(systemPrisma, fx.companyId);
     await makeFlatCommissionRule(systemPrisma, fx.companyId, brokerId, 2);

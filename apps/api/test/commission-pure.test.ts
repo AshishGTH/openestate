@@ -15,6 +15,7 @@ import {
   COMMISSION_TYPE,
   type CommissionSlabLike,
 } from '@openestate/shared';
+import { soldUnitsQuerySchema } from '../src/reports/broker-reports.controller';
 
 const L = (rupees: number) => BigInt(rupees) * 100n;
 
@@ -122,5 +123,20 @@ describe('commissionMilestonesSchema (required change #6b)', () => {
 
   it('rejects an empty array', () => {
     expect(commissionMilestonesSchema.safeParse([]).success).toBe(false);
+  });
+});
+
+describe('soldUnitsQuerySchema (regression: 400 on ?brokerId=, caught by manual click-through)', () => {
+  it('accepts an optional brokerId alongside the base report query fields', () => {
+    const result = soldUnitsQuerySchema.safeParse({ brokerId: '11111111-1111-1111-1111-111111111111', format: 'json' });
+    expect(result.success).toBe(true);
+  });
+
+  it('still accepts no brokerId at all (company-wide sold-units)', () => {
+    expect(soldUnitsQuerySchema.safeParse({ format: 'csv' }).success).toBe(true);
+  });
+
+  it('still rejects a truly unrecognized key', () => {
+    expect(soldUnitsQuerySchema.safeParse({ bogusField: '1' }).success).toBe(false);
   });
 });

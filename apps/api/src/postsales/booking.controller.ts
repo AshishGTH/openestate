@@ -160,6 +160,14 @@ export class BookingController {
     return this.brokerService.assignToBooking(u.companyId, id, dto.brokerId);
   }
 
+  @Post(':id/commission/accrue')
+  @RequirePermissions(PERMISSIONS.POSTSALES_BOOKING_CREATE)
+  @ApiOperation({ summary: 'Accrue broker commission up to the current collection state (idempotent; no-ops if no sourcing broker)' })
+  accrueCommission(@Param('id') id: string, @Req() req: Request) {
+    const u = req.user as JwtPayload;
+    return this.commissions.accrueForBooking(u.companyId, id, u.sub);
+  }
+
   @Post(':id/noc/request')
   @RequirePermissions(PERMISSIONS.POSTSALES_NOC_REQUEST)
   @ApiOperation({ summary: 'Request a broker NOC for this booking (a cancellation prerequisite when a sourcing broker is set)' })

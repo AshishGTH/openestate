@@ -1710,6 +1710,11 @@ model GeneratedDocument {
   // many receipts, so bookingId alone can't identify one). Scalar + DB-level
   // FK, no Prisma relation — same policy as the Phase 4 ledger core.
   receiptId        String?               @map("receipt_id") @db.Uuid
+  // For documentType=BROKER_STATEMENT (Phase 5 commit 3). Added in a
+  // separate forward-only migration after the Phase 5 schema migration —
+  // GeneratedDocument is unfrozen Phase 4-UI, so a real Prisma relation
+  // (not scalar-only) matches booking/applicant's existing shape here.
+  brokerId         String?               @map("broker_id") @db.Uuid
   documentType     GeneratedDocumentType @map("document_type")
   templateId       String?               @map("template_id") @db.Uuid
   storedName       String                @map("stored_name") @db.VarChar(255)
@@ -1724,12 +1729,14 @@ model GeneratedDocument {
   company        Company             @relation(fields: [companyId], references: [id])
   booking        Booking?            @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   applicant      Applicant?          @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+  broker         Broker?             @relation(fields: [brokerId], references: [id], onDelete: Cascade)
   sourceDocument GeneratedDocument?  @relation("documentReprint", fields: [sourceDocumentId], references: [id])
   reprints       GeneratedDocument[] @relation("documentReprint")
   dispatches     DocumentDispatch[]
 
   @@index([companyId, bookingId])
   @@index([companyId, applicantId])
+  @@index([companyId, brokerId])
   @@map("generated_documents")
 }
 
@@ -1825,6 +1832,7 @@ model Broker {
   bookingCommissions BrokerBookingCommission[]
   ledgerEntries      CommissionLedgerEntry[]
   payments           CommissionPayment[]
+  generatedDocuments GeneratedDocument[]
 
   @@unique([companyId, phone])
   @@map("brokers")

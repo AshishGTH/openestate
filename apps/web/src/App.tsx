@@ -18,6 +18,8 @@ import ChequeQueue from './pages/postsales/ChequeQueue';
 import DuesDashboard from './pages/postsales/DuesDashboard';
 import Applicant360 from './pages/postsales/Applicant360';
 import ReportsPage from './pages/postsales/Reports';
+import BrokersPage from './pages/postsales/Brokers';
+import BrokerDetail from './pages/postsales/BrokerDetail';
 
 export default function App() {
   return (
@@ -44,6 +46,8 @@ export default function App() {
             <Route path="postsales/dues" element={<DuesDashboard />} />
             <Route path="postsales/applicants/:applicantId" element={<Applicant360 />} />
             <Route path="postsales/reports" element={<ReportsPage />} />
+            <Route path="postsales/brokers" element={<BrokersPage />} />
+            <Route path="postsales/brokers/:brokerId" element={<BrokerDetail />} />
           </Route>
         </Route>
       </Routes>
