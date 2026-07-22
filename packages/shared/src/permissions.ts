@@ -18,6 +18,10 @@ export const PERMISSIONS = {
   ADMIN_CUSTOM_FIELD_CREATE: 'admin.custom-field.create',
   ADMIN_CUSTOM_FIELD_UPDATE: 'admin.custom-field.update',
   ADMIN_CUSTOM_FIELD_DELETE: 'admin.custom-field.delete',
+  // Phase 5: broker + bank-detail + commission-rule CRUD.
+  ADMIN_BROKER_READ: 'admin.broker.read',
+  ADMIN_BROKER_CREATE: 'admin.broker.create',
+  ADMIN_BROKER_UPDATE: 'admin.broker.update',
   ADMIN_CONFIG_READ: 'admin.config.read',
   ADMIN_CONFIG_UPDATE: 'admin.config.update',
   ADMIN_AUDIT_READ: 'admin.audit.read',
@@ -105,13 +109,23 @@ export const PERMISSIONS = {
   POSTSALES_LETTER_GENERATE: 'postsales.letter.generate',
   POSTSALES_DISPATCH_SEND: 'postsales.dispatch.send',
   POSTSALES_DISPATCH_READ: 'postsales.dispatch.read',
+  // Phase 5: request an NOC — same holder as POSTSALES_BOOKING_CANCEL
+  // (the person who can cancel is the person who can ask a sourcing
+  // broker for no-objection).
+  POSTSALES_NOC_REQUEST: 'postsales.noc.request',
 
   // ── Accounts ───────────────────────────────────────
   ACCOUNTS_RECEIPT_VERIFY: 'accounts.receipt.verify',
   ACCOUNTS_PAYMENT_READ: 'accounts.payment.read',
   ACCOUNTS_PAYMENT_CREATE: 'accounts.payment.create',
   ACCOUNTS_COMMISSION_READ: 'accounts.commission.read',
+  // Phase 5: three-permission dual-control on CommissionPayment
+  // (REQUESTED → APPROVED → PAID) — create ≠ approve ≠ pay, matching the
+  // refund dual-control precedent.
+  ACCOUNTS_COMMISSION_CREATE: 'accounts.commission.create',
   ACCOUNTS_COMMISSION_APPROVE: 'accounts.commission.approve',
+  ACCOUNTS_COMMISSION_PAY: 'accounts.commission.pay',
+  ACCOUNTS_NOC_APPROVE: 'accounts.noc.approve',
 
   // ── Reports ────────────────────────────────────────
   REPORTS_SALES_VIEW: 'reports.sales.view',

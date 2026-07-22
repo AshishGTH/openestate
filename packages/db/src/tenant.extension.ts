@@ -69,6 +69,14 @@ const TENANT_SCOPED_MODELS = new Set([
   'GeneratedDocument',
   'DocumentDispatch',
   'BookingDraft',
+  'Broker',
+  'BrokerBankDetail',
+  'BrokerCommissionRule',
+  'BrokerCommissionSlab',
+  'BrokerBookingCommission',
+  'CommissionLedgerEntry',
+  'CommissionPayment',
+  'BrokerNoc',
 ]);
 
 const READ_OPS = new Set([

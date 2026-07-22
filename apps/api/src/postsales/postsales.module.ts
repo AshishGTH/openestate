@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ClockProvider } from '../common/clock.provider';
 import { InventoryModule } from '../inventory/inventory.module';
+import { BrokersModule } from '../brokers/brokers.module';
 import { BookingController } from './booking.controller';
 import { ReceiptController } from './receipt.controller';
 import { RefundController } from './refund.controller';
@@ -20,7 +21,7 @@ import { CancellationService } from './cancellation.service';
 import { RefundService } from './refund.service';
 
 @Module({
-  imports: [InventoryModule],
+  imports: [InventoryModule, BrokersModule],
   controllers: [BookingController, ReceiptController, RefundController, BookingDraftController, PlanHistoryController],
   providers: [
     ClockProvider,

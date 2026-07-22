@@ -18,6 +18,8 @@ import { PostsalesModule } from './postsales/postsales.module';
 import { PdfModule } from './pdf/pdf.module';
 import { DispatchModule } from './dispatch/dispatch.module';
 import { PostsalesReportsModule } from './reports/postsales-reports.module';
+import { BrokersModule } from './brokers/brokers.module';
+import { CommissionModule } from './commission/commission.module';
 import { QueuesModule } from './queues/queues.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
@@ -60,6 +62,8 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     PdfModule,
     DispatchModule,
     PostsalesReportsModule,
+    BrokersModule,
+    CommissionModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

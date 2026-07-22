@@ -20,8 +20,10 @@ import { ExtraChargeService } from './extra-charge.service';
 import { InterestService } from './interest.service';
 import { TransferService } from './transfer.service';
 import { CancellationService } from './cancellation.service';
+import { BrokerService } from '../brokers/broker.service';
 
 class CreateBookingDto extends createZodDto(createBookingSchema) {}
+class AssignBrokerDto extends createZodDto(z.object({ brokerId: z.string().uuid() }).strict()) {}
 class CreatePaymentPlanDto extends createZodDto(createPaymentPlanSchema) {}
 class ExtraChargeDto extends createZodDto(extraChargeSchema) {}
 class InterestWaiverDto extends createZodDto(interestWaiverSchema) {}
@@ -40,6 +42,7 @@ export class BookingController {
     private readonly interest: InterestService,
     private readonly transfers: TransferService,
     private readonly cancellations: CancellationService,
+    private readonly brokerService: BrokerService,
   ) {}
 
   @Post()
@@ -136,6 +139,14 @@ export class BookingController {
   transfer(@Param('id') id: string, @Body() dto: CreateTransferDto, @Req() req: Request) {
     const u = req.user as JwtPayload;
     return this.transfers.transfer(u.companyId, id, dto, u.sub);
+  }
+
+  @Post(':id/broker')
+  @RequirePermissions(PERMISSIONS.POSTSALES_BOOKING_CREATE)
+  @ApiOperation({ summary: 'Assign the sourcing broker for a booking (Booking.brokerId — a separate call, same pattern as plan instantiation)' })
+  assignBroker(@Param('id') id: string, @Body() dto: AssignBrokerDto, @Req() req: Request) {
+    const u = req.user as JwtPayload;
+    return this.brokerService.assignToBooking(u.companyId, id, dto.brokerId);
   }
 
   @Post(':id/cancel')

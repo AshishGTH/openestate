@@ -12,3 +12,4 @@ export * from './inventory';
 export * from './presales';
 export * from './finance';
 export * from './documents';
+export * from './commission';

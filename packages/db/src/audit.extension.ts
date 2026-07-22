@@ -72,6 +72,19 @@ const AUDITED_MODELS = new Set([
   'PaymentPlanMilestone',
   'GeneratedDocument',
   'DocumentDispatch',
+  // Phase 5: audit the high-level broker/commission ENTITIES (same split
+  // as Phase 4's ledger mechanism vs. entity distinction above).
+  // CommissionLedgerEntry is NOT audited — it IS the append-only
+  // financial record (DB-trigger-enforced), mirroring it would be pure
+  // noise, same reasoning as LedgerEntry. BrokerBookingCommission is NOT
+  // audited either — it's a system-computed snapshot (mechanism, like
+  // NumberSequence), never edited by a human.
+  'Broker',
+  'BrokerBankDetail',
+  'BrokerCommissionRule',
+  'BrokerCommissionSlab',
+  'CommissionPayment',
+  'BrokerNoc',
 ]);
 
 const SENSITIVE_FIELDS = new Set([
@@ -81,6 +94,10 @@ const SENSITIVE_FIELDS = new Set([
   'totp_secret',
   'recoveryCodes',
   'recovery_codes',
+  // Phase 5: never let a broker's encrypted PAN land in an audit diff,
+  // even in ciphertext form.
+  'panCiphertext',
+  'pan_ciphertext',
 ]);
 
 function sanitize(data: unknown): unknown {

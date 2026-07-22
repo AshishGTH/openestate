@@ -152,10 +152,48 @@ export async function makeApplicant(
   return a.id;
 }
 
+let brokerSeq = 0;
+export async function makeBroker(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  systemPrisma: any,
+  companyId: string,
+): Promise<string> {
+  const phone = `90000${String(10000 + brokerSeq++).slice(-5)}`;
+  const b = await systemPrisma.broker.create({
+    data: { companyId, name: `Broker ${brokerSeq}`, phone },
+  });
+  return b.id;
+}
+
+/** Flat-percent commission rule (company-wide, no project override) — the common case in tests. */
+export async function makeFlatCommissionRule(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  systemPrisma: any,
+  companyId: string,
+  brokerId: string,
+  flatPercent: number,
+  milestones?: number[],
+): Promise<string> {
+  const rule = await systemPrisma.brokerCommissionRule.create({
+    data: {
+      companyId,
+      brokerId,
+      commissionType: 'FLAT_PERCENT',
+      flatPercent,
+      milestonesJson: milestones ?? null,
+    },
+  });
+  return rule.id;
+}
+
 /** Delete all financial + inventory rows for a company (append-only override). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function cleanupCompany(systemPrisma: any, companyId: string): Promise<void> {
   const tables = [
+    // Phase 5: broker/commission rows — reference bookings/brokers/projects,
+    // so must go before those are deleted below. Nothing references these.
+    'commission_ledger_entries', 'broker_nocs', 'broker_booking_commissions', 'commission_payments',
+    'broker_commission_slabs', 'broker_commission_rules', 'broker_bank_details', 'brokers',
     // UI-layer rows first — they reference bookings/applicants/receipts.
     'document_dispatches', 'generated_documents', 'booking_drafts',
     // Financial rows next (incl. append-only tables) so master deletes below
