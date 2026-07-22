@@ -226,6 +226,17 @@ async function main() {
       sortOrder: 0,
     },
   });
+  await prisma.tdsRule.create({
+    data: {
+      companyId: company.id,
+      section: '194-H',
+      ratePercent: 5,
+      thresholdPaise: BigInt(15_000_00),
+      effectiveFrom: new Date('2019-09-01'),
+      description: 'TDS on commission or brokerage (Phase 5)',
+      sortOrder: 1,
+    },
+  });
 
   console.log('Seeding Phase 4 financial config...');
   // Supplier GST identity + cheque bounce charge on the company config.

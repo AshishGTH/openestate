@@ -17,73 +17,81 @@ model Company {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  users                  User[]
-  roles                  Role[]
-  config                 CompanyConfig?
-  customFieldDefs        CustomFieldDefinition[]
-  auditLogs              AuditLog[]
-  inquirySources         InquirySource[]
-  inquiryTypes           InquiryType[]
-  followUpTypes          FollowUpType[]
-  communicationTypes     CommunicationType[]
-  areaLocations          AreaLocation[]
-  projectTypes           ProjectType[]
-  documentTypes          DocumentType[]
-  letterTemplates        LetterTemplate[]
-  banks                  Bank[]
-  receiptTypes           ReceiptType[]
-  registrationTypes      RegistrationType[]
-  chargeTypes            ChargeType[]
-  gstRates               GstRate[]
-  tdsRules               TdsRule[]
-  interestRules          InterestRule[]
-  transferFeeRules       TransferFeeRule[]
-  paymentPlanTemplates   PaymentPlanTemplate[]
-  unitTypes              UnitType[]
-  plcTypes               PlcType[]
-  projects               Project[]
-  towers                 Tower[]
-  floors                 Floor[]
-  units                  Unit[]
-  unitPlcs               UnitPlc[]
-  unitCharges            UnitCharge[]
-  unitRateRevisions      UnitRateRevision[]
-  unitStatusChanges      UnitStatusChange[]
-  applicants             Applicant[]
-  applicantConsents      ApplicantConsent[]
-  applicantMerges        ApplicantMerge[]
-  inquiryTemperatures    InquiryTemperature[]
-  inquiries              Inquiry[]
-  inquiryAssignments     InquiryAssignment[]
-  projectAssignmentPools ProjectAssignmentPool[]
-  followUps              FollowUp[]
-  smsTemplates           SmsTemplate[]
-  communicationLogs      CommunicationLog[]
-  cancellationRules      CancellationRule[]
-  applicantAddresses     ApplicantAddress[]
-  applicantDocuments     ApplicantDocument[]
-  bookings               Booking[]
-  bookingCoApplicants    BookingCoApplicant[]
-  bookingCostLines       BookingCostLine[]
-  paymentPlans           PaymentPlan[]
-  installments           Installment[]
-  ledgerEntries          LedgerEntry[]
-  receipts               Receipt[]
-  receiptAllocations     ReceiptAllocation[]
-  chequeStatusEvents     ChequeStatusEvent[]
-  numberSequences        NumberSequence[]
-  transfers              Transfer[]
-  cancellations          Cancellation[]
-  refunds                Refund[]
-  paymentVouchers        PaymentVoucher[]
-  extraCharges           ExtraCharge[]
-  tdsDeductions          TdsDeduction[]
-  tdsCertificates        TdsCertificate[]
-  interestAccruals       InterestAccrual[]
-  paymentPlanMilestones  PaymentPlanMilestone[]
-  generatedDocuments     GeneratedDocument[]
-  documentDispatches     DocumentDispatch[]
-  bookingDrafts          BookingDraft[]
+  users                    User[]
+  roles                    Role[]
+  config                   CompanyConfig?
+  customFieldDefs          CustomFieldDefinition[]
+  auditLogs                AuditLog[]
+  inquirySources           InquirySource[]
+  inquiryTypes             InquiryType[]
+  followUpTypes            FollowUpType[]
+  communicationTypes       CommunicationType[]
+  areaLocations            AreaLocation[]
+  projectTypes             ProjectType[]
+  documentTypes            DocumentType[]
+  letterTemplates          LetterTemplate[]
+  banks                    Bank[]
+  receiptTypes             ReceiptType[]
+  registrationTypes        RegistrationType[]
+  chargeTypes              ChargeType[]
+  gstRates                 GstRate[]
+  tdsRules                 TdsRule[]
+  interestRules            InterestRule[]
+  transferFeeRules         TransferFeeRule[]
+  paymentPlanTemplates     PaymentPlanTemplate[]
+  unitTypes                UnitType[]
+  plcTypes                 PlcType[]
+  projects                 Project[]
+  towers                   Tower[]
+  floors                   Floor[]
+  units                    Unit[]
+  unitPlcs                 UnitPlc[]
+  unitCharges              UnitCharge[]
+  unitRateRevisions        UnitRateRevision[]
+  unitStatusChanges        UnitStatusChange[]
+  applicants               Applicant[]
+  applicantConsents        ApplicantConsent[]
+  applicantMerges          ApplicantMerge[]
+  inquiryTemperatures      InquiryTemperature[]
+  inquiries                Inquiry[]
+  inquiryAssignments       InquiryAssignment[]
+  projectAssignmentPools   ProjectAssignmentPool[]
+  followUps                FollowUp[]
+  smsTemplates             SmsTemplate[]
+  communicationLogs        CommunicationLog[]
+  cancellationRules        CancellationRule[]
+  applicantAddresses       ApplicantAddress[]
+  applicantDocuments       ApplicantDocument[]
+  bookings                 Booking[]
+  bookingCoApplicants      BookingCoApplicant[]
+  bookingCostLines         BookingCostLine[]
+  paymentPlans             PaymentPlan[]
+  installments             Installment[]
+  ledgerEntries            LedgerEntry[]
+  receipts                 Receipt[]
+  receiptAllocations       ReceiptAllocation[]
+  chequeStatusEvents       ChequeStatusEvent[]
+  numberSequences          NumberSequence[]
+  transfers                Transfer[]
+  cancellations            Cancellation[]
+  refunds                  Refund[]
+  paymentVouchers          PaymentVoucher[]
+  extraCharges             ExtraCharge[]
+  tdsDeductions            TdsDeduction[]
+  tdsCertificates          TdsCertificate[]
+  interestAccruals         InterestAccrual[]
+  paymentPlanMilestones    PaymentPlanMilestone[]
+  generatedDocuments       GeneratedDocument[]
+  documentDispatches       DocumentDispatch[]
+  bookingDrafts            BookingDraft[]
+  brokers                  Broker[]
+  brokerBankDetails        BrokerBankDetail[]
+  brokerCommissionRules    BrokerCommissionRule[]
+  brokerCommissionSlabs    BrokerCommissionSlab[]
+  brokerBookingCommissions BrokerBookingCommission[]
+  commissionLedgerEntries  CommissionLedgerEntry[]
+  commissionPayments       CommissionPayment[]
+  brokerNocs               BrokerNoc[]
 
   @@map("companies")
 }
@@ -237,23 +245,32 @@ model CustomFieldDefinition {
 // ─── Company Config ────────────────────────────────────────────
 
 model CompanyConfig {
-  companyId               String   @id @map("company_id") @db.Uuid
-  labelOverrides          Json     @default("{}") @map("label_overrides")
-  enabledModules          Json     @default("[\"presales\",\"postsales\",\"accounts\"]") @map("enabled_modules")
-  currency                String   @default("INR") @db.VarChar(3)
-  timezone                String   @default("Asia/Kolkata") @db.VarChar(50)
-  fyStartMonth            Int      @default(4) @map("fy_start_month")
-  dateFormat              String   @default("DD-MM-YYYY") @map("date_format") @db.VarChar(20)
+  companyId                String   @id @map("company_id") @db.Uuid
+  labelOverrides           Json     @default("{}") @map("label_overrides")
+  enabledModules           Json     @default("[\"presales\",\"postsales\",\"accounts\"]") @map("enabled_modules")
+  currency                 String   @default("INR") @db.VarChar(3)
+  timezone                 String   @default("Asia/Kolkata") @db.VarChar(50)
+  fyStartMonth             Int      @default(4) @map("fy_start_month")
+  dateFormat               String   @default("DD-MM-YYYY") @map("date_format") @db.VarChar(20)
   // Supplier-side GST identity — source of truth for the CGST/SGST-vs-IGST
   // split (Phase 4). gstStateCode is the 2-char GST state code (e.g. "09"
   // for UP, "27" for Maharashtra); the first two chars of a GSTIN.
-  companyGstin            String?  @map("company_gstin") @db.VarChar(15)
-  gstStateCode            String?  @map("gst_state_code") @db.VarChar(2)
+  companyGstin             String?  @map("company_gstin") @db.VarChar(15)
+  gstStateCode             String?  @map("gst_state_code") @db.VarChar(2)
   // Flat charge (paise) applied when a cheque bounces (Phase 4). A receipt
   // or refund cheque bounce posts a BOUNCE_CHARGE debit of this amount.
-  chequeBounceChargePaise BigInt   @default(0) @map("cheque_bounce_charge_paise")
-  createdAt               DateTime @default(now()) @map("created_at")
-  updatedAt               DateTime @updatedAt @map("updated_at")
+  chequeBounceChargePaise  BigInt   @default(0) @map("cheque_bounce_charge_paise")
+  // Phase 5: which event triggers broker-commission accrual — ON_BOOKING
+  // (full commission at booking confirmation) or ON_COLLECTION_MILESTONE
+  // (partitioned across configured collection-percent breakpoints).
+  commissionAccrualTrigger String   @default("ON_BOOKING") @map("commission_accrual_trigger") @db.VarChar(30)
+  // Phase 5: what happens to ALREADY-PAID commission when its booking is
+  // cancelled — RECOVER (post a CLAWBACK_RECOVERY debit, broker owes it
+  // back) or WRITE_OFF (company forgives it; a zero-amount audited entry
+  // records the decision, reason required).
+  commissionClawbackPolicy String   @default("RECOVER") @map("commission_clawback_policy") @db.VarChar(20)
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
   company Company @relation(fields: [companyId], references: [id])
 
@@ -1145,6 +1162,11 @@ model Booking {
   // Interest rule for overdue installments (Phase 4). Null = no delay interest.
   // Scalar + DB-level FK (no Prisma relation).
   interestRuleId         String?       @map("interest_rule_id") @db.Uuid
+  // Sourcing broker (Phase 5). Null = unsourced booking, no commission/NOC
+  // gating at all. Scalar + DB-level FK (no Prisma relation), same policy
+  // as interestRuleId above — set by a Phase 5 controller-layer call after
+  // the booking exists, never by BookingService itself.
+  brokerId               String?       @map("broker_id") @db.Uuid
   bookingDate            DateTime      @map("booking_date") @db.Date
   allotmentDate          DateTime?     @map("allotment_date") @db.Date
   registrationDate       DateTime?     @map("registration_date") @db.Date
@@ -1671,6 +1693,7 @@ enum GeneratedDocumentType {
   ALLOTMENT_LETTER
   DEMAND_LETTER
   REMINDER_LETTER
+  BROKER_STATEMENT
 }
 
 /// A generated PDF artifact. Stored via the Phase 2 UploadService (uuid+ext,
@@ -1771,4 +1794,247 @@ model BookingDraft {
 
   @@index([companyId, createdById])
   @@map("booking_drafts")
+}
+
+// ─── Phase 5: brokers and commissions ──────────────────────────
+
+model Broker {
+  id            String    @id @default(uuid()) @db.Uuid
+  companyId     String    @map("company_id") @db.Uuid
+  name          String    @db.VarChar(255)
+  phone         String    @db.VarChar(20)
+  email         String?   @db.VarChar(255)
+  reraAgentNo   String?   @map("rera_agent_no") @db.VarChar(50)
+  // PAN encrypted at rest via the new PanEncryptionService (AES-256-GCM,
+  // PAN_ENCRYPTION_KEY) — same shape as Applicant's dormant PAN columns
+  // (Phase 4), but Applicant's are still unused; see docs/todo.md.
+  panCiphertext String?   @map("pan_ciphertext") @db.Text
+  panMasked     String?   @map("pan_masked") @db.VarChar(15)
+  panKeyVersion Int       @default(1) @map("pan_key_version") @db.SmallInt
+  isActive      Boolean   @default(true) @map("is_active")
+  // Non-null only while inactive. Consumed by NocService's auto-approval
+  // path (Phase 5 §6) — an inactive broker's cancellations don't wait on
+  // a human NOC.
+  deactivatedAt DateTime? @map("deactivated_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  company            Company                   @relation(fields: [companyId], references: [id])
+  bankDetails        BrokerBankDetail[]
+  commissionRules    BrokerCommissionRule[]
+  bookingCommissions BrokerBookingCommission[]
+  ledgerEntries      CommissionLedgerEntry[]
+  payments           CommissionPayment[]
+
+  @@unique([companyId, phone])
+  @@map("brokers")
+}
+
+model BrokerBankDetail {
+  id            String   @id @default(uuid()) @db.Uuid
+  companyId     String   @map("company_id") @db.Uuid
+  brokerId      String   @map("broker_id") @db.Uuid
+  accountHolder String   @map("account_holder") @db.VarChar(255)
+  accountNumber String   @map("account_number") @db.VarChar(30)
+  ifsc          String   @db.VarChar(11)
+  bankName      String   @map("bank_name") @db.VarChar(255)
+  isPrimary     Boolean  @default(true) @map("is_primary")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  broker  Broker  @relation(fields: [brokerId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, brokerId])
+  @@map("broker_bank_details")
+}
+
+/// One rule per (company, broker, optional project override — null =
+/// company-wide default for that broker). commissionType discriminates
+/// which of the amount fields apply, same pattern as
+/// CancellationRule.deductionType (plain string, not a Postgres enum,
+/// since this is admin-configured rule shape, not a fixed ledger-write
+/// set). Deliberately has NO effective-dating (unlike GstRate/TdsRule) —
+/// edits apply immediately to future accruals only, because
+/// BrokerBookingCommission (below) snapshots the computed total at first
+/// accrual and never re-reads the rule after that; effective-dating would
+/// solve a problem the snapshot already solves. Rules/slabs are edited in
+/// place, mirroring PaymentPlanTemplate/PaymentPlanMilestone.
+model BrokerCommissionRule {
+  id             String   @id @default(uuid()) @db.Uuid
+  companyId      String   @map("company_id") @db.Uuid
+  brokerId       String   @map("broker_id") @db.Uuid
+  projectId      String?  @map("project_id") @db.Uuid
+  commissionType String   @map("commission_type") @db.VarChar(20) // FLAT_PERCENT | FLAT_AMOUNT | SLAB
+  flatPercent    Decimal? @map("flat_percent") @db.Decimal(5, 2)
+  flatPaise      BigInt?  @map("flat_paise")
+  // Collection-percent breakpoints for ON_COLLECTION_MILESTONE accrual
+  // mode, e.g. [25, 50, 100]. Validated by a zod schema at save time
+  // (monotonic ascending integers in (0, 100], no duplicates) — see
+  // packages/shared/src/commission.ts.
+  milestonesJson Json?    @map("milestones_json")
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  company Company                @relation(fields: [companyId], references: [id])
+  broker  Broker                 @relation(fields: [brokerId], references: [id], onDelete: Cascade)
+  slabs   BrokerCommissionSlab[]
+
+  @@index([companyId, brokerId, projectId])
+  @@map("broker_commission_rules")
+}
+
+/// Half-open bracket [fromPaise, toPaise) — fromPaise inclusive, toPaise
+/// exclusive, so a value landing exactly on a boundary always matches the
+/// HIGHER bracket. toPaise = null means unbounded top (must be exactly
+/// one such slab per rule, the one with the highest seq). Matched, not
+/// marginal: the whole basis amount is charged at ONE matched slab's
+/// rate, not split across brackets like income tax.
+model BrokerCommissionSlab {
+  id          String  @id @default(uuid()) @db.Uuid
+  companyId   String  @map("company_id") @db.Uuid
+  ruleId      String  @map("rule_id") @db.Uuid
+  seq         Int
+  fromPaise   BigInt  @map("from_paise")
+  toPaise     BigInt? @map("to_paise")
+  ratePercent Decimal @map("rate_percent") @db.Decimal(5, 2)
+
+  company Company              @relation(fields: [companyId], references: [id])
+  rule    BrokerCommissionRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@unique([ruleId, seq])
+  @@map("broker_commission_slabs")
+}
+
+/// The commission basis for one booking, computed ONCE (against
+/// agreedPricePaise and the applicable flat/slab rule) at the first
+/// accrual call and never re-evaluated. Every subsequent
+/// ON_COLLECTION_MILESTONE accrual for this booking partitions
+/// totalCommissionPaise (via the shared `allocate` largest-remainder
+/// helper) rather than recomputing against a possibly-since-edited rule —
+/// this is what actually protects in-flight bookings from a later rule
+/// edit (see BrokerCommissionRule's doc comment).
+model BrokerBookingCommission {
+  id                   String   @id @default(uuid()) @db.Uuid
+  companyId            String   @map("company_id") @db.Uuid
+  bookingId            String   @unique @map("booking_id") @db.Uuid
+  brokerId             String   @map("broker_id") @db.Uuid
+  ruleId               String   @map("rule_id") @db.Uuid // provenance only — never re-read for math
+  totalCommissionPaise BigInt   @map("total_commission_paise")
+  computedAt           DateTime @default(now()) @map("computed_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  broker  Broker  @relation(fields: [brokerId], references: [id])
+
+  @@map("broker_booking_commissions")
+}
+
+enum CommissionEntryType {
+  ACCRUAL
+  TDS_WITHHELD
+  PAYMENT
+  CLAWBACK_REVERSAL
+  CLAWBACK_RECOVERY
+  CLAWBACK_WRITEOFF
+}
+
+/// Broker's own append-only sub-ledger — structurally identical to the
+/// booking LedgerEntry (same forbid_financial_mutation trigger, same
+/// app.allow_financial_mutation escape hatch) but keyed by brokerId.
+/// broker.outstanding = SUM(signedAmountPaise): positive = company owes
+/// the broker, negative = broker owes the company back (post-clawback).
+/// bookingId is scalar-only (no Prisma relation), same "relation policy"
+/// as the Phase 4 ledger core — it points at the frozen Booking table.
+model CommissionLedgerEntry {
+  id                String              @id @default(uuid()) @db.Uuid
+  companyId         String              @map("company_id") @db.Uuid
+  brokerId          String              @map("broker_id") @db.Uuid
+  bookingId         String              @map("booking_id") @db.Uuid
+  entryType         CommissionEntryType @map("entry_type")
+  signedAmountPaise BigInt              @map("signed_amount_paise")
+  // Which milestone this accrual corresponds to (ON_COLLECTION_MILESTONE
+  // mode only — null under ON_BOOKING mode or for non-ACCRUAL entries).
+  // The idempotency check for milestone accrual is
+  // WHERE bookingId=? AND milestonePercent=?, run inside the same
+  // withTenantTx as the insert.
+  milestonePercent  Int?                @map("milestone_percent")
+  reversalOfEntryId String?             @map("reversal_of_entry_id") @db.Uuid
+  reason            String?             @db.VarChar(500)
+  effectiveDate     DateTime            @map("effective_date") @db.Date
+  createdById       String?             @map("created_by_id") @db.Uuid
+  createdAt         DateTime            @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  broker  Broker  @relation(fields: [brokerId], references: [id])
+
+  @@index([companyId, brokerId])
+  @@index([companyId, bookingId])
+  @@map("commission_ledger_entries")
+}
+
+enum CommissionPaymentStatus {
+  REQUESTED
+  APPROVED
+  PAID
+  REJECTED
+}
+
+/// REQUESTED → APPROVED → PAID | REJECTED, mirroring RefundStatus's shape
+/// exactly. Ledger entries (PAYMENT, TDS_WITHHELD) post ONLY at pay() —
+/// deliberately unlike RefundService (which posts at approve()), because
+/// a refund's obligation is newly-recognized at approval while a broker's
+/// commission was already accrued earlier; request/approve here are pure
+/// dispute/authorization sign-off with no ledger effect. See
+/// CommissionPaymentService.pay() for the full TDS-withholding-timing
+/// rationale (194-H vs 194-IA asymmetry) and CLAUDE.md's Decisions log.
+model CommissionPayment {
+  id               String                  @id @default(uuid()) @db.Uuid
+  companyId        String                  @map("company_id") @db.Uuid
+  brokerId         String                  @map("broker_id") @db.Uuid
+  amountPaise      BigInt                  @map("amount_paise") // gross, pre-TDS
+  status           CommissionPaymentStatus @default(REQUESTED)
+  mode             ReceiptMode?
+  bankId           String?                 @map("bank_id") @db.Uuid
+  instrumentNumber String?                 @map("instrument_number") @db.VarChar(50)
+  approvedById     String?                 @map("approved_by_id") @db.Uuid
+  approvedAt       DateTime?               @map("approved_at")
+  paidAt           DateTime?               @map("paid_at")
+  createdById      String?                 @map("created_by_id") @db.Uuid
+  createdAt        DateTime                @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+  broker  Broker  @relation(fields: [brokerId], references: [id])
+
+  @@index([companyId, brokerId])
+  @@map("commission_payments")
+}
+
+enum NocStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+}
+
+/// Broker no-objection-certificate for a cancellation. Mirrors
+/// RefundStatus's shape (schema.prisma, Refund model). bookingId is
+/// scalar-only (no Prisma relation — points at the frozen Booking table,
+/// same relation policy as CommissionLedgerEntry.bookingId).
+/// reason = "broker_inactive_auto_approved" (approvedById null) marks the
+/// auto-approval path for an inactive broker's sourced bookings.
+model BrokerNoc {
+  id            String    @id @default(uuid()) @db.Uuid
+  companyId     String    @map("company_id") @db.Uuid
+  bookingId     String    @map("booking_id") @db.Uuid
+  brokerId      String    @map("broker_id") @db.Uuid
+  status        NocStatus @default(REQUESTED)
+  reason        String?   @db.VarChar(500)
+  requestedById String?   @map("requested_by_id") @db.Uuid
+  approvedById  String?   @map("approved_by_id") @db.Uuid
+  approvedAt    DateTime? @map("approved_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([companyId, bookingId])
+  @@map("broker_nocs")
 }

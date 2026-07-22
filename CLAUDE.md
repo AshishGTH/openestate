@@ -683,3 +683,144 @@ this is a log, not a design doc.
   `http.Server` (not a mocked `res`) in `postsales-reports.test.ts`,
   asserting the actual response headers rather than the util's internal
   call pattern.
+
+### Phase 5 — brokers and commissions
+
+- **`Booking.brokerId` is a new nullable scalar column on the frozen
+  `Booking` table (Decision A), not a separate join table.** Mirrors
+  `Booking.interestRuleId`'s existing shape exactly (Phase 4: nullable
+  scalar FK to an optional master, no Prisma relation, populated by a
+  controller-layer call after the booking exists — `BookingService.createBooking`
+  itself never writes it). Chosen over a `BrokerBookingSourcing` join table
+  because it's the shape `BookingCancelledEvent`'s own doc comment already
+  anticipated ("Broker attribution is added in Phase 5 when bookings carry
+  a `brokerId`") and keeps every broker-attribution query a single join.
+  Populated via `POST /bookings/:id/broker` (new, on the unfrozen
+  `BookingController`), the same two-step pattern as
+  `POST /bookings/:id/plan/from-template`.
+- **First-ever PAN encryption service, scoped to `Broker` only.**
+  `Applicant.panCiphertext`/`panMasked`/`panKeyVersion` have existed since
+  Phase 4 but no encryption service was ever built for them — the columns
+  are, and remain, always null. `PanEncryptionService`
+  (`apps/api/src/common/pan-encryption.service.ts`) is modeled directly on
+  `TotpService`'s identical AES-256-GCM implementation
+  (`apps/api/src/auth/totp.service.ts`) and keyed on the already-declared
+  `PAN_ENCRYPTION_KEY` env var, but wired only to the new
+  `Broker.panCiphertext` — retrofitting `Applicant` is `docs/todo.md`, not
+  silent scope creep. Reads the key directly from `process.env` rather
+  than Nest's `ConfigService`, deliberately: every Phase 4/5 service in
+  this codebase is constructed directly in integration tests
+  (`new XxxService(...)`, no DI container), and this keeps
+  `PanEncryptionService` constructible the same zero-argument way.
+- **Commission slab matching: half-open `[fromPaise, toPaise)`, matched
+  (not marginal).** A value landing exactly on a boundary always matches
+  the HIGHER bracket — one rule, applied uniformly, rather than a
+  case-by-case "which bracket owns the boundary" judgment call. The whole
+  basis amount is charged at ONE matched slab's rate (real-estate
+  brokerage convention), never split across brackets like income tax.
+  Slabs must be contiguous and gapless with exactly one unbounded
+  (`toPaise = null`) top slab — validated at rule-save time
+  (`validateSlabContiguity`, `packages/shared/src/commission.ts`), not a
+  DB constraint, so the rejection message can name the exact gap.
+- **`BrokerBookingCommission` snapshots the total commission ONCE per
+  booking, at first accrual — never re-read from the rule after.** Chosen
+  over the two alternatives considered (a second column on `Booking`, or a
+  field on the first ledger entry): a dedicated table avoids a *second*
+  migration touch to the frozen `Booking` table beyond the
+  already-approved `brokerId`, and avoids conflating a ledger row's
+  `signedAmountPaise` (a movement) with an unrelated "total basis" fact.
+  This is *why* `BrokerCommissionRule`/`BrokerCommissionSlab` deliberately
+  have **no effective-dating** (unlike `GstRate`/`TdsRule`) — a rule edit
+  applies to future accruals only because the snapshot already protects
+  every in-flight booking's math from it; effective-dating would solve a
+  problem the snapshot solves more directly. Milestone breakpoints
+  (`BrokerCommissionRule.milestonesJson`) are read live at each accrual
+  call, not frozen — editing the breakpoint list mid-stream is a
+  deliberate, benign exception to the "never re-read the rule" rule, since
+  only the dollar-amount computation needed freezing.
+- **`CommissionPayment` is a `REQUESTED → APPROVED → PAID | REJECTED`
+  state machine (mirrors `RefundStatus`'s shape), but ledger entries post
+  ONLY at `pay()`, not at `approve()` — the opposite of `RefundService`.**
+  A refund's obligation is *newly recognized* at approval (nothing in the
+  customer ledger reflected it before); a broker's commission was already
+  accrued earlier via `CommissionService.accrueForBooking`, so
+  `request()`/`approve()` on a payment are pure dispute/authorization
+  sign-off with no ledger effect — the ledger only moves when cash
+  actually leaves, which is also the only point TDS can be withheld
+  (there's nothing to withhold from a payment that hasn't happened yet).
+  Three permissions, not two: `ACCOUNTS_COMMISSION_CREATE` ≠
+  `ACCOUNTS_COMMISSION_APPROVE` ≠ `ACCOUNTS_COMMISSION_PAY`, matching the
+  refund dual-control precedent.
+- **Commission TDS (194-H) is a settled deduction, final at `pay()` — no
+  receivable, no certificate step. This is the OPPOSITE shape from 194-IA
+  on the customer side, and it's a real asymmetry, not an oversight.**
+  For 194-IA (`ReceiptService`, frozen — not touched by this phase), the
+  **company is the deductee**: a buyer withholds tax *from* the company,
+  so the company is owed a certificate (Form 16B) before it can claim
+  credit — hence `TDS_RECEIVABLE` stays outstanding until a
+  `TdsCertificate` zeroes it via `TDS_CERT_ADJUSTMENT`. For 194-H, the
+  **company is the deductor**: it withholds tax *from the broker* and
+  later files its own return and issues Form 16A *to* the broker: from
+  the broker's ledger (`CommissionLedgerEntry`), there is nothing to
+  receive or certify — the moment `pay()` runs, gross minus TDS is a
+  completed, known fact, hence `TDS_WITHHELD` (not `TDS_RECEIVABLE`).
+  Also unlike 194-IA's client-supplied `dto.tdsDeductedPaise` (the buyer
+  self-reports what they withheld), 194-H's amount is **server-computed**
+  (`percentOf(amountPaise, rule.ratePercent)` against a `TdsRule` where
+  `section = '194-H'`) — the company controls the payment, so it computes
+  its own deduction. This paragraph is intentionally duplicated as a code
+  comment on `CommissionPaymentService.pay()`, so a maintainer who only
+  ever reads `ReceiptService`'s TDS code still finds out why the two
+  treatments differ.
+- **A `CommissionPayment` can settle accrual across several bookings at
+  once (a broker paid periodically), so `pay()` allocates the gross amount
+  oldest-outstanding-booking-first** (same idea as the receipt-entry UI's
+  oldest-dues-first allocation) **and splits TDS proportionally across
+  those per-booking allocations via `allocate`** (largest-remainder — no
+  last-paise loss), posting one `PAYMENT` + `TDS_WITHHELD` pair per
+  affected booking. This was tightened during implementation: an initial
+  version attributed the whole payment to "the broker's single
+  most-recently-accrued booking," which silently corrupted
+  `handleBookingCancelled`'s per-booking outstanding calculation for any
+  broker paid across more than one booking in a single `CommissionPayment`
+  — caught by hand-tracing the numbers before writing the reconciliation
+  test, not by the test itself.
+- **Clawback on cancellation always reverses whatever's still
+  unpaid-accrued for the booking FIRST, then separately handles whatever
+  was already disbursed per the `commissionClawbackPolicy` — two
+  independent steps, not one branch on the booking's current sign.** The
+  plan approved before implementation branched on
+  `outstandingForBooking`'s sign alone (`> 0` → reverse; `<= 0` → apply
+  policy), which is correct for the two cases it was worked through by
+  hand (fully unpaid, or fully paid) but silently under-claws-back any
+  **partially paid** booking — the exact scenario the required
+  reconciliation test (`accrue → partial pay → cancel`) exercises: if
+  ₹57,000 of a ₹100,000 accrual was already disbursed and ₹40,000 is still
+  outstanding-unpaid, the sign-based branch would reverse the ₹40,000 and
+  stop, leaving the broker holding the ₹57,000 already paid even under
+  `RECOVER` policy. Corrected to: (1) if `outstandingForBooking != 0`,
+  always post `CLAWBACK_REVERSAL = -outstandingForBooking` (unearned
+  commission is never owed after cancellation, regardless of policy); (2)
+  if anything was actually disbursed (`netPaid > 0`, computed as
+  `-SUM(PAYMENT entries)` for that booking), separately post either
+  `CLAWBACK_RECOVERY = -netPaid` (`RECOVER`) or a **zero-amount**
+  `CLAWBACK_WRITEOFF` with a mandatory `reason` (`WRITE_OFF` — a pure
+  audit marker; the money stays with the broker, nothing is posted to
+  move it). `CLAWBACK_WRITEOFF` with no `reason` is rejected at the
+  service level — a zero-amount entry with no explanation is
+  indistinguishable from a bug.
+- **Transactional atomicity between NOC-gating, the frozen
+  `CancellationService.cancel()`, and `CommissionService.handleBookingCancelled()`
+  needs zero changes to any frozen service.** `withTenantTx`
+  (`packages/db/src/tenant.extension.ts`) already detects, via
+  `AsyncLocalStorage`, when it's called while an outer `withTenantTx` for
+  the *same* `companyId` is already open, and reuses that transaction
+  instead of opening a new one. `BookingController.cancel()` (commit 2)
+  wraps NOC-gating + the cancellation call + the clawback call in one
+  outer `withTenantTx`; because `CancellationService.cancel()` and
+  `CommissionService.handleBookingCancelled()` both open their own
+  `withTenantTx` internally with the same `companyId`, they transparently
+  join the controller's transaction — if clawback throws, the
+  cancellation (including its unit-status transition) rolls back too.
+  This mechanism already existed for Phase 4; Phase 5 is its first
+  cross-service consumer.
