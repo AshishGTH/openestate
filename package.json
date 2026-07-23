@@ -14,7 +14,8 @@
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
     "seed": "pnpm --filter @openestate/db run seed",
-    "seed:demo": "pnpm --filter @openestate/db run seed:demo"
+    "seed:demo": "pnpm --filter @openestate/db run seed:demo",
+    "seed:portal-demo": "pnpm --filter @openestate/api run seed:portal-demo"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

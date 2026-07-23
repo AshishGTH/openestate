@@ -10,7 +10,8 @@
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "seed:portal-demo": "tsx scripts/portal-demo-seed.ts"
   },
   "dependencies": {
     "@nestjs/bullmq": "^11.0.4",
@@ -57,6 +58,7 @@
     "@types/pdfmake": "^0.3.3",
     "fast-check": "^4.9.0",
     "supertest": "^7.0.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }
