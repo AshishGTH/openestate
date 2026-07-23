@@ -987,3 +987,124 @@ this is a log, not a design doc.
   co-applicant list; a co-applicant reading the booking itself; an
   unrelated applicant getting zero from both), which is the level of
   proof that would have caught this bug before it shipped.
+
+### Phase 6 — customer-portal (commit 2 of 4)
+
+- **Real bug, caught by the co-applicant-visibility test: `PORTAL_SCOPED_MODELS`'s
+  JS-level guard for `Booking` denied a co-applicant their own booking.**
+  `Booking`'s entry only checked `primaryApplicantId = portalApplicantId`
+  — RLS's `bookings_portal_scope` grants access through THREE branches
+  (self, broker, co-applicant carve-out via `booking_has_co_applicant`),
+  but the JS mirror only replicated the first. For a co-applicant (not
+  primary), RLS would correctly return the row; the JS-level `AND
+  (primaryApplicantId = me)` clause then narrowed the Prisma-level result
+  to zero anyway — not a *safety margin*, an active **denial of
+  legitimate access**, the wrong failure direction for a "fail-safe can
+  only narrow" guard. Auditing all 7 `PORTAL_SCOPED_MODELS` entries
+  against their RLS policies found the same class of gap in
+  `GeneratedDocument` (misses the `booking_id`-reachable branch — a
+  co-applicant downloading a shared booking's demand letter would hit
+  it), not yet exercised by a failing test until one was added
+  specifically to cover it.
+  **Fix: removed `Booking` and `GeneratedDocument` from
+  `PORTAL_SCOPED_MODELS` entirely** — RLS is now the sole DB-adjacent
+  enforcement for both, the same "honest scoping" already used for the
+  `booking_id`-only tables (`Installment`, `Receipt`, `PaymentPlan`,
+  `LedgerEntry`). Replicating the fuller multi-branch predicate in JS was
+  rejected as the fix: it re-introduces the exact drift risk the
+  direct-column-only scoping was designed to avoid, and a PARTIAL
+  replica is worse than no replica — it fails in the direction that
+  denies real users rather than merely admitting a wider read RLS would
+  have blocked anyway.
+  **Tightened inclusion criterion for `PORTAL_SCOPED_MODELS`, recorded in
+  the code comment:** a model belongs there only if its portal RLS
+  predicate is a single direct-column equality (or two — one per portal
+  principal type, applicant and broker). Any model whose RLS predicate
+  has a subquery, `EXISTS`, or multi-hop branch (a co-applicant
+  carve-out, a booking-reachability check via `portal_can_access_booking`,
+  etc.) must not be mirrored there. The remaining six entries
+  (`CommissionLedgerEntry`, `CommissionPayment`, `BrokerNoc`, `Broker`,
+  `ApplicantChangeRequest`, `Ticket`) were individually re-checked against
+  this criterion and all satisfy it exactly.
+  **Test coverage for the class, not just the instance:** the
+  co-applicant-visibility positive test stays, and a `GeneratedDocument`
+  twin was added — a co-applicant downloads a shared booking's generated
+  document successfully — so both known instances of this bug class are
+  covered by a real failing-then-passing test, not just by inspection.
+
+- **Real bug, caught by manual browser testing (not by any of the 176
+  tests passing at the time): every tenant-scoped request in this
+  project's history ran without ambient tenant context, because
+  `TenantMiddleware`/`PortalTenantMiddleware` ran as Express middleware —
+  which executes BEFORE NestJS guards.** `req.user` is set by
+  `JwtAuthGuard`, itself a Guard; the middleware therefore always read
+  `req.user` as `undefined` and threw "Tenant context required" for any
+  ambient-context-dependent query. This was invisible for every STAFF
+  route across five prior phases only because staff services independently
+  self-wrap their own tenant context from `req.user.companyId` passed in
+  as a controller argument (see each phase's services) — they never
+  depended on ambient middleware/guard context at all. Phase 6's portal
+  services were deliberately designed to rely SOLELY on ambient context
+  (the plan's own stated reason: "no changes needed at any of this
+  function's ~50+ existing call sites"), which is exactly what exposed the
+  bug the moment a real HTTP request hit `GET /portal/profile` in a
+  browser. The failure direction was fail-closed (a thrown 500, not a
+  silent wrong-tenant read) — bad UX, not a security hole.
+
+  **First fix attempt — a `TenantContextGuard` (`APP_GUARD`, registered
+  explicitly after `JwtAuthGuard`) calling
+  `AsyncLocalStorage.enterWith()` — was ALSO wrong, caught by adding a
+  debug trace rather than by any test.** Guards run after Middleware and
+  before Interceptors/Pipes/the handler, so this fixed the *ordering* bug:
+  a debug log confirmed the guard correctly saw a populated `req.user`.
+  But `tenantExtension()`'s `$allOperations` check (`getCurrentCompanyId()`
+  reading `tenantContext.getStore()`) still threw "Tenant context
+  required" — for a DIFFERENT reason. A second debug trace, placed inside
+  `withTenantTx`'s `prisma.$transaction()` callback, proved
+  `tenantContext.getStore()` was `undefined` there even though
+  `tenantTxContext` (a separate ALS, established via `.run()` INSIDE that
+  same callback) was correctly populated. Conclusion:
+  `AsyncLocalStorage.enterWith()`'s "mutate the store for the rest of the
+  current execution" semantics do not reliably survive whatever internal
+  async boundary Prisma's `$transaction()` schedules its callback through
+  — plausibly because that boundary is a resource whose own parent
+  context was captured at a point not chained from the guard's later
+  mutation (a known class of `enterWith()` pitfall: it changes an
+  already-active resource's store, it does not establish a new resource
+  whose descendants are guaranteed to inherit it the way `.run()`'s
+  explicit wrap does). This was NOT hit by `portal-rls.test.ts`'s original
+  guard test, which used `$queryRawUnsafe` (bypasses
+  `tenantExtension()`'s `$allModels` hook entirely) instead of a real
+  model query — a proof that looked complete but wasn't; rewritten to use
+  `tx.applicant.findFirst()` instead.
+
+  **Final fix — `TenantContextInterceptor`, a global `APP_INTERCEPTOR`,
+  wraps `next.handle()` inside `runWithTenant()` (`AsyncLocalStorage.run()`)
+  via `new Observable(subscriber => runWithTenant(store, () =>
+  next.handle().subscribe(subscriber)))`.** Interceptors run after ALL
+  guards regardless of registration order (Nest's pipeline is fixed:
+  Middleware → Guards → Interceptors → Pipes → Handler), so the
+  `req.user`-populated-by-`JwtAuthGuard` guarantee still holds. Calling
+  `next.handle()` *inside* `.run()`'s callback matters: Nest's
+  `next.handle()` synchronously kicks off pipe validation and the
+  controller method (up to its first `await`) the moment it's called — it
+  is not lazily deferred until some later `.subscribe()` — so any async
+  resource the handler creates synchronously (including
+  `prisma.$transaction()`) captures the `.run()`-established store as its
+  parent context. `TenantMiddleware`/`PortalTenantMiddleware` and
+  `TenantContextGuard` are both deleted; `apps/api/src/auth/guards/`
+  no longer has a tenant-context file.
+
+  **New standing rule, going forward: every phase's test additions must
+  include at least one through-the-wire `supertest` request per new
+  controller.** Direct service/controller-method-call tests (the
+  overwhelming majority of this codebase's test suite) cannot prove
+  pipeline behavior — ordering, context propagation across async
+  boundaries like `prisma.$transaction()`, and route registration are all
+  invisible to a test that constructs a service with `new` and calls a
+  method directly. This is the same lesson Phase 5's `soldUnits` /
+  `accrueCommission` / `BrokerDetail.tsx` bugs already taught for route
+  registration and DTO-shape mismatches; Phase 6 commit 2 is the case
+  where it applied to ambient async context specifically. `test/e2e-portal.test.ts`
+  is this rule's home for the portal surface — new portal controllers land
+  their through-the-wire proof there.

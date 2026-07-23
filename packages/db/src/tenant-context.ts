@@ -45,3 +45,24 @@ export function getCurrentPortalBrokerId(): string | undefined {
 export function runWithTenant<T>(store: TenantStore, fn: () => T): T {
   return tenantContext.run(store, fn);
 }
+
+/**
+ * Establishes the tenant store for the REST of the current async chain,
+ * without wrapping it in a callback — for use from a NestJS Guard, which
+ * only returns a boolean and has no callback to wrap around the
+ * downstream interceptors/pipes/controller.
+ *
+ * Uses AsyncLocalStorage.enterWith rather than .run(): `run()` needs a
+ * function to wrap, so the store would only be visible for the duration
+ * of that synchronous call and then be gone. `enterWith()` instead
+ * mutates the CURRENT execution's async context in place — Node's
+ * documented pattern for exactly this "framework code runs before the
+ * handler it doesn't control" case. Because each incoming HTTP request
+ * starts its own async execution chain, this only ever affects that one
+ * request's continuations, never other concurrent requests on the same
+ * process (see TenantContextGuard in apps/api for the call site and the
+ * bug this replaced — CLAUDE.md Phase 6 commit 2 decisions).
+ */
+export function enterTenantContext(store: TenantStore): void {
+  tenantContext.enterWith(store);
+}

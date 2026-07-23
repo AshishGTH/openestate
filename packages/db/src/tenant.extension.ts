@@ -120,22 +120,30 @@ const UUID_RE =
  * attempted for models reachable only via a joined bookingId
  * (Installment, Receipt, PaymentPlan, LedgerEntry, ...), where RLS is
  * the sole DB-adjacent enforcement. This is an additional
- * defense-in-depth narrowing on top of RLS, not a replacement for it,
- * and deliberately does NOT replicate RLS's co-applicant carve-out —
- * it only needs to keep an obviously-wrong, unscoped company-wide read
- * from ever being ATTEMPTED when a portal scope is active; RLS remains
- * authoritative for the exact row set returned.
+ * defense-in-depth narrowing on top of RLS, not a replacement for it.
+ *
+ * Inclusion criterion (tightened after a real bug — Phase 6 commit 2,
+ * see CLAUDE.md Decisions log): a model belongs here ONLY if its portal
+ * RLS predicate is a single direct-column equality (or two, one per
+ * portal principal type — applicant and broker). Any model whose RLS
+ * predicate has a subquery, EXISTS, or multi-hop branch (a co-applicant
+ * carve-out, a booking-reachability check, etc.) must NOT be mirrored
+ * here — RLS is the sole enforcement for those. Mirroring a complex
+ * predicate PARTIALLY (matching only its simple branches) doesn't just
+ * under-narrow safely, it actively DENIES access RLS legitimately
+ * grants through the branch that got left out — Booking and
+ * GeneratedDocument were both removed from this map for exactly that
+ * reason, not for the "no unscoped company-wide read" reasoning that
+ * still applies to every model still listed below.
  *
  * `brokerIsSelf: true` means the model's OWN `id` is the scope (Broker
  * reading its own row), not a foreign-key field.
  */
 const PORTAL_SCOPED_MODELS: Record<string, { applicantField?: string; brokerField?: string; brokerIsSelf?: true }> = {
-  Booking: { applicantField: 'primaryApplicantId', brokerField: 'brokerId' },
   CommissionLedgerEntry: { brokerField: 'brokerId' },
   CommissionPayment: { brokerField: 'brokerId' },
   BrokerNoc: { brokerField: 'brokerId' },
   Broker: { brokerIsSelf: true },
-  GeneratedDocument: { applicantField: 'applicantId', brokerField: 'brokerId' },
   ApplicantChangeRequest: { applicantField: 'applicantId' },
   Ticket: { applicantField: 'applicantId', brokerField: 'brokerId' },
 };

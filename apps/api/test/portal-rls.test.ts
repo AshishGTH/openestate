@@ -7,9 +7,9 @@
  * Requires DATABASE_URL_TEST + DATABASE_URL_TEST_SYSTEM.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import type { Request, Response } from 'express';
+import { firstValueFrom, Observable } from 'rxjs';
 import { runWithTenant, withTenantTx } from '@openestate/db';
-import { TenantMiddleware } from '../src/auth/tenant.middleware';
+import { TenantContextInterceptor } from '../src/auth/interceptors/tenant-context.interceptor';
 import {
   makeClients,
   seedCompany,
@@ -235,29 +235,50 @@ describeIf('Phase 6 portal RLS (IDOR, GUC hygiene, performance)', () => {
     expect(strayCount).toBe(2);
   });
 
-  it('TenantMiddleware clears portal GUCs for a staff request all the way through to Postgres', async () => {
+  /**
+   * Proves TenantContextInterceptor's mechanism itself is sound GIVEN a
+   * populated req.user — it does NOT prove req.user is actually populated
+   * by the time a real request reaches it (that ordering question can only
+   * be proven by a real HTTP request through the fully bootstrapped app;
+   * see test/e2e-portal.test.ts).
+   *
+   * Deliberately exercises a real MODEL query (tx.applicant.findFirst)
+   * inside a real withTenantTx()/prisma.$transaction() call — not a raw
+   * $queryRawUnsafe. An earlier version of this test used raw SQL to read
+   * back current_setting(), which passed even under a BROKEN mechanism
+   * (a Guard calling AsyncLocalStorage.enterWith()): raw queries bypass
+   * tenantExtension()'s $allOperations hook entirely, so that version
+   * never actually proved what mattered. A debug trace against the real
+   * bug showed tenantContext.getStore() was undefined by the time a model
+   * query ran inside prisma.$transaction()'s callback, even though
+   * enterWith() had been called moments earlier in the same request — see
+   * CLAUDE.md Phase 6 commit 2 decisions. Routing the model query through
+   * next.handle() inside runWithTenant() (what the interceptor actually
+   * does) is what this test must reproduce to be a real proof.
+   */
+  it('TenantContextInterceptor establishes ambient context that survives into a real prisma.$transaction() model query', async () => {
+    const interceptor = new TenantContextInterceptor();
     const req = {
       user: { sub: fx.userId, companyId: fx.companyId, email: null, roleSlug: 'admin', permissions: [] },
       ip: '127.0.0.1',
-    } as unknown as Request;
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const context = { switchToHttp: () => ({ getRequest: () => req }) } as any;
+    const handler = {
+      handle: () =>
+        new Observable((subscriber) => {
+          withTenantTx(tenantPrisma, fx.companyId, (tx) => tx.applicant.findFirst({ where: { id: applicantA } }))
+            .then((row) => {
+              subscriber.next(row);
+              subscriber.complete();
+            })
+            .catch((err) => subscriber.error(err));
+        }),
+    };
 
-    // TenantMiddleware.use() doesn't propagate next()'s return value (it
-    // matches Express's void-returning NextFunction contract), so the
-    // wrapping promise here — resolved/rejected from inside the `next`
-    // callback — is what the test actually awaits, not `.use()` itself.
-    let observed: string | undefined;
-    await new Promise<void>((resolve, reject) => {
-      new TenantMiddleware().use(req, {} as Response, () => {
-        withTenantTx(tenantPrisma, fx.companyId, async (tx) => {
-          const rows = await (tx as { $queryRawUnsafe: (q: string) => Promise<Array<{ v: string }>> }).$queryRawUnsafe(
-            `SELECT current_setting('app.portal_applicant_id', true) AS v`,
-          );
-          observed = rows[0].v;
-        }).then(resolve, reject);
-      });
-    });
+    const result = await firstValueFrom(interceptor.intercept(context, handler));
 
-    expect(observed).toBe('');
+    expect((result as { id: string }).id).toBe(applicantA);
   });
 
   it('coarse RLS performance regression: ~200-row portal-scoped ledger read stays under 500ms', async () => {

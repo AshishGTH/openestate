@@ -23,6 +23,7 @@ const SIMPLE_MASTERS = [
   { modelName: 'InterestRule', routePath: 'interest-rules', apiTag: 'Interest Rules' },
   { modelName: 'TransferFeeRule', routePath: 'transfer-fee-rules', apiTag: 'Transfer Fee Rules' },
   { modelName: 'PaymentPlanTemplate', routePath: 'payment-plan-templates', apiTag: 'Payment Plan Templates' },
+  { modelName: 'TicketCategory', routePath: 'ticket-categories', apiTag: 'Ticket Categories' },
 ] as const;
 
 const simpleMasterModules = SIMPLE_MASTERS.map((config) =>

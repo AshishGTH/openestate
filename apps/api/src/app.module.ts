@@ -1,7 +1,7 @@
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { HealthModule } from './health/health.module';
 import { DatabaseModule } from './database/database.module';
@@ -23,11 +23,11 @@ import { BrokersModule } from './brokers/brokers.module';
 import { CommissionModule } from './commission/commission.module';
 import { QueuesModule } from './queues/queues.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { TenantContextInterceptor } from './auth/interceptors/tenant-context.interceptor';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { CsrfGuard } from './auth/csrf.guard';
-import { TenantMiddleware } from './auth/tenant.middleware';
-import { PortalTenantMiddleware } from './auth/portal-tenant.middleware';
 import { PortalAuthModule } from './portal-auth/portal-auth.module';
+import { CustomerPortalModule } from './customer-portal/customer-portal.module';
 import { LOG_REDACTION_PATHS } from './common/logger/redaction';
 
 @Module({
@@ -69,21 +69,24 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     BrokersModule,
     CommissionModule,
     PortalAuthModule,
+    CustomerPortalModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    // Establishes ambient tenant/portal context for the rest of the
+    // request. Runs as a global INTERCEPTOR, not a guard — Nest's fixed
+    // pipeline order is middleware → guards → interceptors → pipes →
+    // handler, so interceptors always run after every guard regardless
+    // of registration order, guaranteeing req.user (set by JwtAuthGuard)
+    // is populated here. See TenantContextInterceptor's doc comment and
+    // CLAUDE.md Phase 6 commit 2 decisions for why this replaced both
+    // Express middleware (ran before guards — req.user never existed)
+    // AND a first attempt at a Guard using enterWith (context was lost
+    // across prisma.$transaction()'s internal async boundary).
+    { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    consumer.apply(TenantMiddleware).forRoutes('*');
-    // Runs AFTER TenantMiddleware for the same request (registration order)
-    // and re-establishes the AsyncLocalStorage store with the portal scope
-    // populated — see PortalTenantMiddleware's doc comment. Scoped only to
-    // portal routes; staff routes never see it.
-    consumer.apply(PortalTenantMiddleware).forRoutes('portal/*');
-  }
-}
+export class AppModule {}

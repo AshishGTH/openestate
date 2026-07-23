@@ -46,3 +46,29 @@ they're expected to land. Each entry should say *what*, *why deferred*, and
   scope. Unblocked by adding that dependency and wiring one shared
   Redis-backed storage instance for both the root and portal-auth
   throttler modules.
+
+## Portal (Phase 6)
+
+- **Staff services' self-wrapped `runWithTenant({companyId})` calls are now
+  redundant with `TenantContextInterceptor`'s ambient context, but stay
+  as-is this phase.** Before Phase 6 commit 2, staff services
+  (`ApplicantService`, `CommissionService`, `NocService`, `BookingService`,
+  etc.) each wrapped their own tenant context from the controller's
+  `req.user.companyId`, independently of any ambient middleware/guard
+  context — this pattern is *why* the middleware-before-guards bug (and
+  later the Guard-enterWith bug) went undetected for every staff route
+  across five prior phases: staff services never depended on ambient
+  context at all, only portal services (added in Phase 6, deliberately
+  designed to rely solely on ambient context) were exposed. Now that
+  `TenantContextInterceptor` reliably establishes ambient context for
+  every authenticated request, staff services' self-wrapping is harmless
+  but duplicate work. Removing ~50+ call sites' self-wrap in favor of pure
+  ambient context is a mechanical, low-risk cleanup — but it's also the
+  single change most likely to silently reintroduce a masked ordering bug
+  if done carelessly (a staff route that stops self-wrapping and
+  regresses to relying on ambient context alone would pass every existing
+  direct-call test while failing over real HTTP, the exact gap
+  through-the-wire supertests exist to catch). Unblocked by doing the
+  removal as its own phase/commit, with at least one through-the-wire
+  supertest added per touched controller before merging (the Phase 6
+  commit 2 standing rule — see CLAUDE.md decisions).
