@@ -240,6 +240,13 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     // Masters referenced by the financial rows above.
     'cancellation_rules', 'interest_rules', 'gst_rates', 'tds_rules', 'transfer_fee_rules',
     'payment_plan_milestones', 'payment_plan_templates', 'area_locations',
+    // Phase 3 presales rows — reference applicants/inquiries, so must go
+    // before 'applicants' below. Exposed by Phase 7's lead-inbound tests
+    // being the first to combine this (financial-harness) cleanup with
+    // real Inquiry rows — 'inquiries' was previously never populated by
+    // any test using this helper, so its absence here was never caught.
+    'communication_logs', 'follow_ups', 'inquiry_assignments', 'inquiries',
+    'applicant_consents', 'applicant_merges',
     'letter_templates', 'applicants', 'number_sequences', 'company_configs', 'users', 'roles',
   ];
   // Single transaction so the maintenance GUC (which lets us bypass the

@@ -32,6 +32,8 @@ import { PortalAuthModule } from './portal-auth/portal-auth.module';
 import { CustomerPortalModule } from './customer-portal/customer-portal.module';
 import { BrokersPortalModule } from './brokers-portal/brokers-portal.module';
 import { PluginsModule } from './plugins/plugins.module';
+import { WebhooksModule } from './webhooks/webhooks.module';
+import { LeadsModule } from './leads/leads.module';
 import { LOG_REDACTION_PATHS } from './common/logger/redaction';
 
 @Module({
@@ -64,6 +66,17 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
       { ttl: 60_000, limit: 100 },
       { name: 'portal-auth', ttl: 300_000, limit: 5 },
       { name: 'portal-read', ttl: 60_000, limit: 60 },
+      // Phase 7 commit 2: per-API-key limit, not a global constant — the
+      // resolver reads the LeadApiKeyGuard-populated req.leadApiKey (that
+      // guard runs first in the route's guard chain). Falls back to 60
+      // for any request that somehow reaches here without a resolved key
+      // (defense-in-depth; LeadApiKeyGuard already rejects those with a
+      // 401 before this throttler would matter).
+      {
+        name: 'lead-inbound',
+        ttl: 60_000,
+        limit: (context) => context.switchToHttp().getRequest().leadApiKey?.rateLimitPerMinute ?? 60,
+      },
     ]),
     DatabaseModule,
     HealthModule,
@@ -89,6 +102,8 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     CustomerPortalModule,
     BrokersPortalModule,
     PluginsModule,
+    WebhooksModule,
+    LeadsModule,
   ],
   providers: [
     // Filtered to the unnamed/'default' bucket only — see

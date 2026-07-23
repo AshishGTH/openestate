@@ -11,6 +11,7 @@ export const ESCALATION_QUEUE = 'escalation';
 export const INTEREST_QUEUE = 'interest';
 export const DISPATCH_QUEUE = 'dispatch';
 export const PORTAL_QUEUE = 'portal';
+export const WEBHOOK_QUEUE = 'webhook';
 
 @Global()
 @Module({
@@ -28,6 +29,7 @@ export const PORTAL_QUEUE = 'portal';
       { name: INTEREST_QUEUE },
       { name: DISPATCH_QUEUE },
       { name: PORTAL_QUEUE },
+      { name: WEBHOOK_QUEUE },
     ),
   ],
   providers: [

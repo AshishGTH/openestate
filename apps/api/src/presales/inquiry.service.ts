@@ -19,10 +19,25 @@ import type {
 } from '@openestate/shared';
 import { CLOCK } from '../common/clock.provider';
 import { AssignmentService } from './assignment.service';
+import { ApplicantService } from './applicant.service';
 
 export interface InquiryScope {
   /** When set, results are restricted to inquiries assigned to this user (sales_executive). */
   scopeToUserId?: string;
+}
+
+export interface LeadInput {
+  name: string;
+  phone: string;
+  email?: string;
+  projectId?: string;
+  note?: string;
+}
+
+export interface LeadCreateResult {
+  inquiryId: string;
+  applicantId: string;
+  duplicateApplicantIds: string[];
 }
 
 @Injectable()
@@ -36,6 +51,7 @@ export class InquiryService {
     @Inject(CLOCK)
     private readonly clock: Clock,
     private readonly assignmentService: AssignmentService,
+    private readonly applicantService: ApplicantService,
   ) {}
 
   async findAll(companyId: string, query: PaginationQuery, scope: InquiryScope) {
@@ -196,6 +212,70 @@ export class InquiryService {
         }
 
         return { ...inquiry, assignedToId, possibleDuplicateApplicantIds };
+      }),
+    );
+  }
+
+  /**
+   * Machine-driven lead intake (inbound lead API, §5) — auto-links to an
+   * existing applicant on a phone/email match instead of prompting a
+   * human (there isn't one), same "never silently skip a possible
+   * duplicate" discipline as the bulk-import path (Phase 3 decisions),
+   * NOT the interactive create()'s "always create new + surface
+   * possibleDuplicateApplicantIds for a human to resolve" behavior —
+   * those are deliberately different flows for deliberately different
+   * callers. What IS shared with every other dedup call site (create(),
+   * ApplicantService.create(), the plugin runtime's ctx.applicants) is
+   * the underlying duplicate lookup: ApplicantService.findDuplicates().
+   * Returns the shape @openestate/plugin-sdk's LeadCreateResult already
+   * committed to in Phase 7 commit 1.
+   */
+  async createFromLead(companyId: string, lead: LeadInput): Promise<LeadCreateResult> {
+    return runWithTenant({ companyId }, () =>
+      withTenantTx(this.tenantPrisma, companyId, async (tx) => {
+        const primaryPhoneNormalized = normalizePhone(lead.phone);
+        const emailNormalized = lead.email ? normalizeEmail(lead.email) : null;
+
+        const duplicates = await this.applicantService.findDuplicates(companyId, primaryPhoneNormalized, emailNormalized);
+        const duplicateApplicantIds = duplicates.map((d: { id: string }) => d.id);
+
+        let applicantId: string;
+        if (duplicates.length > 0) {
+          applicantId = duplicates[0].id;
+        } else {
+          const created = await tx.applicant.create({
+            data: {
+              companyId,
+              name: lead.name,
+              primaryPhone: lead.phone.trim(),
+              primaryPhoneNormalized,
+              email: lead.email,
+              emailNormalized,
+            },
+          });
+          applicantId = created.id;
+        }
+
+        const inquiry = await tx.inquiry.create({
+          data: {
+            companyId,
+            applicantId,
+            projectId: lead.projectId,
+            customFields: lead.note ? { leadNote: lead.note } : undefined,
+          },
+        });
+
+        if (lead.projectId) {
+          const assignedToId = await this.assignmentService.autoAssign(tx, companyId, lead.projectId);
+          if (assignedToId) {
+            await tx.inquiry.update({ where: { id: inquiry.id }, data: { assignedToId } });
+            await tx.inquiryAssignment.create({
+              data: { companyId, inquiryId: inquiry.id, toUserId: assignedToId, assignmentType: 'auto', actorId: null },
+            });
+          }
+        }
+
+        return { inquiryId: inquiry.id, applicantId, duplicateApplicantIds };
       }),
     );
   }
