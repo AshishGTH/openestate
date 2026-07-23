@@ -36,6 +36,12 @@ export const PERMISSIONS = {
   // separate keys the way booking/unit actions are.
   ADMIN_PLUGIN_READ: 'admin.plugin.read',
   ADMIN_PLUGIN_MANAGE: 'admin.plugin.manage',
+  // Phase 7 commit 2: webhook endpoint CRUD + delivery retry, and
+  // inbound-lead API key CRUD. Same 2-permission read/manage shape.
+  ADMIN_WEBHOOK_READ: 'admin.webhook.read',
+  ADMIN_WEBHOOK_MANAGE: 'admin.webhook.manage',
+  ADMIN_LEAD_API_KEY_READ: 'admin.lead-api-key.read',
+  ADMIN_LEAD_API_KEY_MANAGE: 'admin.lead-api-key.manage',
 
   // ── Inventory ─────────────────────────────────────
   INVENTORY_PROJECT_READ: 'inventory.project.read',

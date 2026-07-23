@@ -1641,3 +1641,157 @@ this is a log, not a design doc.
   not treated as a commit blocker, since the actual code under test in
   this phase is proven correct both in isolation and via every other
   passing file in the same runs.
+
+### Phase 7 — webhooks-and-leads (commit 2 of 3)
+
+- **`webhook-signing.ts` lives in `apps/api/src/common/`, NOT
+  `packages/shared`, despite the original plan placing it there.**
+  `packages/shared` is imported by `apps/web`/`apps/portal`'s Vite
+  builds via the `"import"` export condition (raw TS source, no
+  pre-build step — Phase 1 decisions), and Node's `crypto` module
+  (`createHmac`, `timingSafeEqual`) has no browser-safe equivalent —
+  adding it there would risk breaking the FE Vite bundle the moment
+  anything in the barrel re-export chain touched it. Both real
+  consumers (the delivery processor's outbound signing, the inbound
+  lead guard/plugin-fixture's verification) are apps/api-only, so there
+  was no actual FE/BE sharing need this file would have served by
+  living in packages/shared. Caught before it shipped, not after —
+  `pnpm --filter @openestate/shared build` failed immediately with
+  `Cannot find module 'node:crypto'`.
+- **Atomic `consecutiveFailures` update (addendum A3) runs BEFORE the
+  delivery's own terminal status flip (EXHAUSTED/SUCCESS), not after —
+  a real bug caught by this commit's own concurrency test, not by
+  review.** The processor originally did delivery-status-first,
+  counter-update-second (matching the order they're described in
+  prose). Two sequential `await`s to Postgres are never atomic
+  together; an observer (the admin UI polling delivery status, or a
+  test) that sees the terminal status has NO guarantee the counter
+  update alongside it has landed yet. The "one exhausted delivery
+  increments consecutiveFailures by exactly 1" and "success resets the
+  counter" tests both failed intermittently against the original
+  order (reading `consecutiveFailures: 0` right after observing
+  EXHAUSTED/SUCCESS) — fixed by swapping the order so the counter
+  commits first; by the time any observer can see the terminal
+  delivery status, the counter is guaranteed already correct.
+- **Real bug, caught by the SAME concurrency test, root-caused (not
+  worked around): both raw `$executeRawUnsafe` UPDATE statements
+  compared `id = $1` against a `uuid` column with an untyped parameter,
+  producing `ERROR: operator does not exist: uuid = text`.** Every
+  prior raw-SQL call site in this codebase that matches a `uuid` column
+  (`cleanupCompany`'s `DELETE ... WHERE company_id = $1::uuid`, Phase
+  6's invite atomic cap) already casts explicitly; this one didn't.
+  Before the delivery-status-ordering fix above, this failure happened
+  silently AFTER the delivery had already flipped to its terminal
+  status (masking itself as "the counter just didn't update" rather
+  than a hard error); reordering surfaced it as an outright exception
+  reaching BullMQ's error handler, which is what actually forced
+  root-causing it via a standalone script bypassing vitest's test
+  timeout entirely. Fixed by adding `::uuid` to both statements (and to
+  the test file's own copy of the "stray success" raw SQL). **Lesson
+  recorded, not just fixed:** any new `$executeRawUnsafe` comparing a
+  parameter against a `uuid`-typed column needs the same cast — nothing
+  catches this at compile time, only a real query against a real
+  Postgres schema does.
+- **Addendum A5 exposed a genuine SDK design gap, fixed by adding a new
+  `PluginContext.verifySignature()` primitive rather than working
+  around it.** The approved plan's addendum A5 called for a
+  signed-payload `lead-source` fixture plugin verifying a secret via
+  `ctx.secretHeader()`. Attempting to actually write that fixture
+  proved this doesn't work: `secretHeader()`'s `format` callback is
+  only ever invoked by `ScopedHttpClient` at the moment of an
+  OUTBOUND dispatch (addendum A1's whole design) — a `mapPayload` hook
+  verifying an INBOUND signature has no outbound HTTP call to
+  piggyback the resolution on, so calling `.format()` manually just
+  passes it a placeholder string instead of the real secret. Rather
+  than silently paper over this (e.g. having the fixture fake success),
+  added `verifySignature(fieldKey, rawBody, timestampMs, signature):
+  boolean` to `PluginContext` (`@openestate/plugin-sdk`) — the
+  local-verification counterpart to `secretHeader()`: same "only valid
+  for a field declared `secret: true`" rule, same "plaintext never
+  reaches a plugin-held variable" guarantee (the comparison happens
+  entirely inside `PluginRuntimeService`, using the SAME
+  `verifyWebhookSignature` function the outbound delivery path signs
+  with), but returns only a boolean instead of exposing a callback.
+  This is an ADDITIVE change to `PluginContext` (a new optional-shaped
+  method, not a removal or signature change) — a MINOR-compatible
+  extension per §3's versioning policy, made while Phase 7 is still
+  actively in progress and `CORE_PLUGIN_API_VERSION` has not been
+  described as frozen-for-real-third-parties yet. `ctx.leads` (commit
+  1's forward reference — "wired in commit 2, alongside
+  `InquiryService.createFromLead`'s extraction") is also wired now,
+  completing that placeholder.
+- **`InquiryService.createFromLead()` is a NEW method, not a rewire of
+  the existing `create()` — a deliberate, documented scope decision,
+  not what the original plan's prose literally suggested.** The plan
+  said the extraction would let "the inbound API's dedup behavior [be]
+  provably identical to the manual-entry path... one implementation,
+  two callers." Implementing this literally would have changed
+  `create()`'s frozen, tested Phase 3 behavior — always creating a new
+  applicant and surfacing `possibleDuplicateApplicantIds` for a human
+  to resolve — to `createFromLead`'s auto-link-on-match behavior
+  (correct for an unattended machine caller, wrong for an interactive
+  staff form). What IS actually shared between every dedup call site in
+  this codebase (`create()`, `ApplicantService.create()`, `ctx.
+  applicants.findDuplicates`, and now `createFromLead`) is the
+  underlying lookup, `ApplicantService.findDuplicates()` — that's the
+  real "one implementation" the plan's intent pointed at.
+  `createFromLead` reuses it and then does ITS OWN auto-link-or-create
+  sequence, matching the bulk-import path's existing "auto-link instead
+  of prompting" discipline (Phase 3 decisions) — the same "no human
+  present" reasoning applies.
+- **Inbound lead API auth/authorization is entirely `LeadApiKeyGuard`
+  plus `@Public()`** — `POST /leads/inbound` is a machine endpoint with
+  no JWT and no cookie session, so it's marked `@Public()` to make both
+  `JwtAuthGuard` and `CsrfGuard` no-op (both already respect
+  `IS_PUBLIC_KEY`); `PermissionsGuard` also passes through since the
+  route declares no `@RequirePermissions()`. `LeadApiKeyGuard` hashes
+  the presented `X-Api-Key` (SHA-256, same discipline as
+  `RefreshToken.tokenHash`) and is the entire authn/authz boundary.
+  `LeadInboundThrottlerGuard`'s per-key limit (§5's resolver-function
+  design) is declared SECOND in `@UseGuards()` specifically because it
+  reads `req.leadApiKey.rateLimitPerMinute`, which only exists after
+  `LeadApiKeyGuard` (declared first) populates it — guard execution
+  order matters here, not just presence. The `'lead-inbound'` bucket is
+  registered in the SAME single `app.module.ts`
+  `ThrottlerModule.forRoot([...])` call as every other named throttler
+  — never a second call (the exact Phase 6 commit 4 bug class).
+- **Real gap, caught while writing this commit's own tests, not by
+  review: the shared financial-harness's `cleanupCompany()` test helper
+  (`postsales-harness.ts`) never deleted `inquiries` (or
+  `communication_logs`/`follow_ups`/`inquiry_assignments`/
+  `applicant_consents`/`applicant_merges`) before deleting
+  `applicants`.** This table list was written for Phase 4/5 financial
+  fixtures and never needed Phase 3 presales rows before — Phase 7 is
+  the first suite to combine this harness's cleanup with real `Inquiry`
+  rows (`createFromLead`), which surfaced the gap immediately as an FK
+  violation on teardown. Fixed by inserting the missing presales tables
+  before `applicants` in the shared helper's list — an ADDITIVE fix
+  (existing entries/order untouched), so no other test file using this
+  helper is affected.
+- **Outbound webhook delivery's `ctx.http`-style SSRF guard was
+  deliberately NOT applied to `WebhookDeliveryProcessor`'s HTTP call.**
+  A `WebhookEndpoint.url` is staff-configured admin input (the same
+  trust level as, say, a configured SMS gateway URL), not a value a
+  plugin might construct dynamically from attacker-influenced data —
+  the trust boundary `ctx.http`'s SSRF hardening (addendum A2) defends
+  is specifically "a plugin choosing where its own HTTP call goes,"
+  which doesn't apply to an admin-typed endpoint URL. Stated explicitly
+  in the processor's own doc comment so a future reader doesn't assume
+  the omission was an oversight.
+- **256KB payload cap (addendum A4) enforced in `WebhookDeliveryService
+  .dispatchEvent()` at write time, before any `WebhookDelivery` row is
+  created** — rejecting at the fan-out call site (not per-endpoint,
+  not at the processor) means one oversized event never gets stored
+  once and retried up to 6 times per subscribed endpoint; the caller
+  gets a clear `BadRequestException` immediately instead of a silently
+  truncated or partially-delivered event.
+- **Replay (addendum A4) re-enqueues a fresh BullMQ job for the SAME
+  `WebhookDelivery` row rather than creating a new row** — a fresh job
+  gets its own fresh 6-attempt budget (BullMQ tracks attempts per-job,
+  not per-row), while `WebhookDeliveryAttempt` rows keep appending
+  (`attemptNumber` restarts at 1 for the new job, but old rows are
+  never deleted) so the full history stays visible across a replay,
+  same "never lose the audit trail" discipline as `DispatchService
+  .retry()`'s new-row-per-retry pattern for document dispatch (Phase
+  4-UI decisions) — just achieved differently here because BullMQ's own
+  attempt tracking is job-scoped, not something to fight.

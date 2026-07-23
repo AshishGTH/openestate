@@ -15,3 +15,4 @@ export * from './documents';
 export * from './commission';
 export * from './portal-auth.dto';
 export * from './portal';
+export * from './webhooks';

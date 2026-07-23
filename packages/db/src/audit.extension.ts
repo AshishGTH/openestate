@@ -101,6 +101,17 @@ const AUDITED_MODELS = new Set([
   // action, audited like any other admin config change. configCiphertext
   // is redacted below, same treatment as panCiphertext/tokenHash.
   'PluginInstallation',
+  // Phase 7 commit 2: WebhookEndpoint/LeadSourceApiKey are staff CRUD
+  // (audited, secrets redacted below). WebhookDelivery is audited for
+  // the same reason DocumentDispatch is — it mutates status
+  // (PENDING → SUCCESS|EXHAUSTED) as a record of a real event, not a
+  // pure per-attempt mechanism row. WebhookDeliveryAttempt is
+  // deliberately NOT audited — it IS the append-only attempt log itself
+  // (same reasoning as ChequeStatusEvent/LedgerEntry above); auditing it
+  // too would be redundant noise on redundant noise.
+  'WebhookEndpoint',
+  'WebhookDelivery',
+  'LeadSourceApiKey',
 ]);
 
 const SENSITIVE_FIELDS = new Set([
@@ -126,6 +137,12 @@ const SENSITIVE_FIELDS = new Set([
   // honest.
   'configCiphertext',
   'config_ciphertext',
+  // Phase 7 commit 2: webhook signing secret ciphertext and lead API key
+  // hash — same reasoning as configCiphertext/tokenHash above.
+  'secretCiphertext',
+  'secret_ciphertext',
+  'keyHash',
+  'key_hash',
 ]);
 
 function sanitize(data: unknown): unknown {

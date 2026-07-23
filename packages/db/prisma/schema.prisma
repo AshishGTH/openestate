@@ -101,6 +101,10 @@ model Company {
   constructionUpdates      ConstructionUpdate[]
   constructionUpdateMedia  ConstructionUpdateMedia[]
   pluginInstallations      PluginInstallation[]
+  webhookEndpoints         WebhookEndpoint[]
+  webhookDeliveries        WebhookDelivery[]
+  webhookDeliveryAttempts  WebhookDeliveryAttempt[]
+  leadSourceApiKeys        LeadSourceApiKey[]
 
   @@map("companies")
 }
@@ -2263,4 +2267,97 @@ model PluginInstallation {
 
   @@unique([companyId, pluginId])
   @@map("plugin_installations")
+}
+
+// ─── Phase 7 commit 2: webhooks + inbound leads ───────────────
+
+model WebhookEndpoint {
+  id        String  @id @default(uuid()) @db.Uuid
+  companyId String  @map("company_id") @db.Uuid
+  name      String  @db.VarChar(255)
+  url       String  @db.VarChar(500)
+  /// AES-256-GCM ciphertext of the HMAC signing secret (PluginSecretEncryptionService — reused, not a new key domain).
+  secretCiphertext String   @map("secret_ciphertext") @db.Text
+  secretKeyVersion Int      @map("secret_key_version")
+  eventTypes       String[] @map("event_types")
+  isActive            Boolean   @default(true) @map("is_active")
+  /// Atomically incremented by the delivery processor (addendum A3) — never read-then-write from application code.
+  consecutiveFailures Int       @default(0) @map("consecutive_failures")
+  disabledAt          DateTime? @map("disabled_at")
+  disabledReason       String?  @map("disabled_reason") @db.VarChar(255)
+  createdById         String?   @map("created_by_id") @db.Uuid
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  company    Company            @relation(fields: [companyId], references: [id])
+  deliveries WebhookDelivery[]
+
+  @@index([companyId])
+  @@map("webhook_endpoints")
+}
+
+/// The logical delivery of one event to one endpoint — status mutates as
+/// attempts progress (a delivery-tracking row, not a financial ledger).
+/// The per-attempt history itself is the append-only part (WebhookDeliveryAttempt).
+model WebhookDelivery {
+  id                String   @id @default(uuid()) @db.Uuid
+  companyId         String   @map("company_id") @db.Uuid
+  webhookEndpointId String   @map("webhook_endpoint_id") @db.Uuid
+  eventType         String   @map("event_type") @db.VarChar(100)
+  /// Capped at 256KB at write time (addendum A4) — an amplification-path guard, not enforced by the column type.
+  payload      Json
+  status       String    @default("PENDING") @db.VarChar(20) // PENDING | SUCCESS | EXHAUSTED
+  attemptCount Int       @default(0) @map("attempt_count")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  completedAt  DateTime? @map("completed_at")
+
+  company  Company                  @relation(fields: [companyId], references: [id])
+  endpoint WebhookEndpoint          @relation(fields: [webhookEndpointId], references: [id])
+  attempts WebhookDeliveryAttempt[]
+
+  @@index([companyId, webhookEndpointId])
+  @@index([companyId, status])
+  @@map("webhook_deliveries")
+}
+
+/// One row per actual HTTP attempt — append-only audit trail, never updated.
+model WebhookDeliveryAttempt {
+  id                String   @id @default(uuid()) @db.Uuid
+  companyId         String   @map("company_id") @db.Uuid
+  webhookDeliveryId String   @map("webhook_delivery_id") @db.Uuid
+  attemptNumber     Int      @map("attempt_number")
+  responseStatus    Int?     @map("response_status")
+  responseSnippet   String?  @map("response_snippet") @db.VarChar(1000)
+  errorMessage      String?  @map("error_message") @db.VarChar(500)
+  latencyMs         Int?     @map("latency_ms")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  company  Company         @relation(fields: [companyId], references: [id])
+  delivery WebhookDelivery @relation(fields: [webhookDeliveryId], references: [id])
+
+  @@index([companyId, webhookDeliveryId])
+  @@map("webhook_delivery_attempts")
+}
+
+model LeadSourceApiKey {
+  id        String @id @default(uuid()) @db.Uuid
+  companyId String @map("company_id") @db.Uuid
+  name      String @db.VarChar(255)
+  keyPrefix String @map("key_prefix") @db.VarChar(12)
+  /// SHA-256 of the full key — same discipline as RefreshToken.tokenHash. Never the raw key.
+  keyHash            String    @map("key_hash") @db.VarChar(64)
+  scopes             String[]
+  /// Dot-path field mapping against the raw inbound JSON body — see CLAUDE.md Phase 7 decisions §5.
+  fieldMapping       Json      @map("field_mapping")
+  rateLimitPerMinute Int       @default(60) @map("rate_limit_per_minute")
+  isActive           Boolean   @default(true) @map("is_active")
+  lastUsedAt         DateTime? @map("last_used_at")
+  createdById        String?   @map("created_by_id") @db.Uuid
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([keyHash])
+  @@index([companyId])
+  @@map("lead_source_api_keys")
 }

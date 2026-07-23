@@ -7,12 +7,15 @@ import {
   type PluginContext,
   type SecretHeaderSpec,
   type SecretRef,
+  type NormalizedLead,
 } from '@openestate/plugin-sdk';
 import { ApplicantService } from '../presales/applicant.service';
 import { CompanyService } from '../company/company.service';
+import { InquiryService } from '../presales/inquiry.service';
 import { PluginSecretEncryptionService } from './plugin-secret-encryption.service';
 import { createScopedHttpClient } from './plugin-http-client';
 import { createScrubbingLogger } from './plugin-logger';
+import { verifyWebhookSignature } from '../common/webhook-signing';
 
 /** Which `PluginContext` field a given capability gates — the Proxy's
  * `get` trap throws `PluginCapabilityError` naming the capability when
@@ -45,6 +48,7 @@ export class PluginRuntimeService {
     private readonly secretEncryption: PluginSecretEncryptionService,
     private readonly applicantService: ApplicantService,
     private readonly companyService: CompanyService,
+    private readonly inquiryService: InquiryService,
   ) {}
 
   /** Decrypts a stored installation's config and builds its context in
@@ -90,6 +94,20 @@ export class PluginRuntimeService {
         }
         return { __secretHeaderSpec: true, fieldKey, format };
       },
+      // Local-verification counterpart to secretHeader() — see
+      // PluginContext.verifySignature's doc comment (@openestate/plugin-sdk)
+      // for why a lead-source plugin's mapPayload needs this instead of
+      // piggybacking on ctx.http's resolution point. The plaintext exists
+      // only inside verifyWebhookSignature's own call frame, here in the
+      // runtime — never assigned to a variable in plugin code.
+      verifySignature: (fieldKey: string, rawBody: string, timestampMs: number, signature: string): boolean => {
+        if (!secretFieldKeys.has(fieldKey)) {
+          throw new PluginCapabilityError(pluginId, `verifySignature:${fieldKey}`);
+        }
+        const plaintext = realSecrets.get(fieldKey);
+        if (plaintext === undefined) return false; // field declared secret but no value configured yet
+        return verifyWebhookSignature(plaintext, timestampMs, rawBody, signature);
+      },
     };
 
     if (capabilities.has('outbound-http')) {
@@ -106,11 +124,9 @@ export class PluginRuntimeService {
     if (capabilities.has('company.config')) {
       target.companyConfig = { getTerminology: () => this.companyService.getTerminology(companyId) };
     }
-    // 'leads.create' (ctx.leads) is wired in commit 2, alongside
-    // InquiryService.createFromLead's extraction — see CLAUDE.md Phase 7
-    // decisions. Declaring it in a manifest before then would leave
-    // ctx.leads throwing PluginCapabilityError same as an undeclared
-    // capability would; no real plugin declares it yet.
+    if (capabilities.has('leads.create')) {
+      target.leads = { create: (input: NormalizedLead) => this.inquiryService.createFromLead(companyId, input) };
+    }
 
     return new Proxy(target, {
       get(obj, prop) {

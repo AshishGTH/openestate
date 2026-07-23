@@ -184,3 +184,13 @@ they're expected to land. Each entry should say *what*, *why deferred*, and
   already idle) to confirm/refute connection-pool exhaustion as the
   mechanism, or reducing vitest's fork/pool concurrency for apps/api
   specifically and re-measuring.
+
+  **Recurred identically during Phase 7 commit 2's (webhooks-and-leads)
+  full-pipeline run** — `PROPERTY_NUM_RUNS=500`, a freshly-migrated/seeded
+  DB, yet another different FK (`receipt_allocations_installment_id_fkey`
+  again), same ~602s ceiling. 47 of 48 `apps/api` test files passed
+  (323 of 324 tests), including all 11 of this commit's new plugin/webhook/
+  lead test files. Further confirms this is environmental (this specific
+  local machine/Docker setup under full-suite load), not something that
+  reappears because of anything Phase 7 touches — commit 2 added zero
+  code to the Booking/Unit/Ledger/Receipt path.

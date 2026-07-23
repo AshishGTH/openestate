@@ -152,6 +152,21 @@ export interface PluginContext<TConfig = Record<string, unknown>> {
   /** Only valid for a fieldKey declared `secret: true` in configFields —
    * throws PluginCapabilityError otherwise. See SecretHeaderSpec. */
   secretHeader(fieldKey: string, format: (plaintext: string) => string): SecretHeaderSpec;
+  /** Verifies an HMAC-SHA256-signed inbound payload against a `secret:
+   * true` configFields value, WITHOUT ever giving plugin code the
+   * plaintext — the runtime resolves the secret and performs the
+   * comparison internally, returning only the boolean outcome. This is
+   * the local-verification counterpart to secretHeader() (which resolves
+   * a secret only at the moment of an OUTBOUND ctx.http dispatch): a
+   * plugin verifying an INBOUND signed payload — e.g. a `lead-source`
+   * plugin's mapPayload hook — has no outbound HTTP call to piggyback
+   * the resolution on, so it needs its own narrow primitive. Same rule
+   * as secretHeader(): only valid for a fieldKey declared `secret: true`,
+   * throws PluginCapabilityError otherwise. Signature format matches
+   * this codebase's own outbound webhook signing (HMAC-SHA256 over
+   * `${timestampMs}.${rawBody}`), so a plugin never re-implements HMAC
+   * verification itself. */
+  verifySignature(fieldKey: string, rawBody: string, timestampMs: number, signature: string): boolean;
 }
 
 export interface PluginLifecycle<TConfig = Record<string, unknown>> {

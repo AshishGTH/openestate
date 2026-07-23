@@ -92,6 +92,10 @@ const TENANT_SCOPED_MODELS = new Set([
   'ConstructionUpdate',
   'ConstructionUpdateMedia',
   'PluginInstallation',
+  'WebhookEndpoint',
+  'WebhookDelivery',
+  'WebhookDeliveryAttempt',
+  'LeadSourceApiKey',
 ]);
 
 const READ_OPS = new Set([

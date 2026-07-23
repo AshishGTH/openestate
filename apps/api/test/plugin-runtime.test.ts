@@ -51,7 +51,8 @@ describeIf('PluginRuntimeService (Phase 7 commit 1)', () => {
   beforeAll(async () => {
     ({ tenantPrisma, systemPrisma } = makeClients());
     fx = await seedCompany(systemPrisma);
-    runtime = new PluginRuntimeService(new PluginSecretEncryptionService(), new ApplicantService(tenantPrisma, systemPrisma), new CompanyService(tenantPrisma, systemPrisma));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    runtime = new PluginRuntimeService(new PluginSecretEncryptionService(), new ApplicantService(tenantPrisma, systemPrisma), new CompanyService(tenantPrisma, systemPrisma), null as any);
   });
 
   afterAll(async () => {
