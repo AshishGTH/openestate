@@ -31,6 +31,7 @@ import { CsrfGuard } from './auth/csrf.guard';
 import { PortalAuthModule } from './portal-auth/portal-auth.module';
 import { CustomerPortalModule } from './customer-portal/customer-portal.module';
 import { BrokersPortalModule } from './brokers-portal/brokers-portal.module';
+import { PluginsModule } from './plugins/plugins.module';
 import { LOG_REDACTION_PATHS } from './common/logger/redaction';
 
 @Module({
@@ -87,6 +88,7 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     PortalAuthModule,
     CustomerPortalModule,
     BrokersPortalModule,
+    PluginsModule,
   ],
   providers: [
     // Filtered to the unnamed/'default' bucket only — see

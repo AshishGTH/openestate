@@ -1475,3 +1475,169 @@ this is a log, not a design doc.
   customer/broker roles, rather than hand-writing raw rows — the same
   "reuse the real service, don't reimplement its invariants" discipline
   every other fixture-builder in this test suite already follows.
+
+### Phase 7 — plugin-core (commit 1 of 3)
+
+- **Package-boundary isolation, not a sandbox — the trust model is
+  stated explicitly, not silently assumed.** `packages/plugin-sdk` has
+  zero runtime dependency on `@openestate/db`/`@nestjs/*`; no
+  `plugins/*` package may depend on `@openestate/db` either, so there is
+  no import path to `runWithTenant`/`PrismaClient` from plugin code at
+  all — a plugin hook cannot syntactically reach the primitive Phase 6's
+  guardrail exists to police, which is a stronger guarantee than a
+  reactive check. This defends against the "composition, not components"
+  bug class the phase brief called out (middleware-before-guards,
+  ALS-shadowing, `@Global()` leakage) by removing the dangerous
+  primitive from plugin code's reachable surface entirely. It is
+  explicitly NOT a sandbox against adversarial code — first-party
+  plugins ship as reviewed npm workspace packages inside this repo, the
+  same review bar as any other module. See `docs/todo.md`'s new
+  "Plugins (Phase 7)" entry for the concrete, honest limit this leaves
+  (no worker-thread/process isolation, so a genuine infinite loop in a
+  hook still blocks the event loop) and what would be needed to move
+  that trust boundary later.
+- **Capability gating via a `Proxy`, not plain object fields.**
+  `PluginRuntimeService.buildContext()` builds `PluginContext` as a
+  `Proxy` whose `get` trap throws `PluginCapabilityError` (naming the
+  specific undeclared capability) when a hook touches `ctx.http`/
+  `ctx.leads`/`ctx.applicants`/`ctx.companyConfig` without declaring the
+  matching capability in its manifest — a specific, directly-testable
+  assertion instead of an incidental `undefined is not a function`.
+  `companyId` is captured as a closure variable at context-construction
+  time; every attached method (`ctx.applicants.findDuplicates`, etc.) is
+  a thin wrapper around the real service called with that fixed
+  `companyId` — the plugin hook itself never touches tenant-context
+  machinery.
+- **Secret handling: opaque `SecretRef`/`SecretHeaderSpec` handles are
+  the PRIMARY defense, substring redaction is a backstop only —
+  required change from plan review, implemented exactly as specified.**
+  A `secret: true` config field's value in `ctx.config` is never
+  plaintext — it's `{ __secretRef: true, fieldKey }`. To actually use a
+  secret, plugin code calls `ctx.secretHeader(fieldKey, format)`, which
+  returns a `SecretHeaderSpec`; `ScopedHttpClient` resolves it to real
+  plaintext only inside `resolveSecretHeaders()`, immediately before the
+  socket write — the plaintext exists only transiently inside the
+  plugin-authored `format` callback the runtime itself invokes, never
+  assigned to a variable in the hook's main body where an incidental
+  `logger.debug(...)` could catch it. `createScrubbingLogger`'s
+  exact-substring redaction (built from the installation's real secret
+  values at context-construction time) stays as a documented backstop,
+  explicitly not the primary defense — it would miss base64/truncated/
+  HMAC/URL-encoded derived forms, which is exactly why the handle design
+  was required over the original substring-only plan.
+- **SSRF hardening: resolve-once-then-PIN, not resolve-then-reconnect —
+  closes the DNS-rebinding TOCTOU a naive validate-then-separately-
+  resolve implementation would leave open.** `createScopedHttpClient`
+  calls `dns.lookup(hostname)` exactly once per hop, validates the
+  returned IP against private/loopback/link-local/CGNAT/multicast/
+  reserved ranges (`isPublicIp`, both IPv4 and IPv6, including
+  IPv4-mapped `::ffff:a.b.c.d`) BEFORE connecting, then pins the actual
+  `http`/`https` request to that already-validated IP via Node's
+  `lookup` request option — the original hostname is untouched in the
+  `hostname` option, so it still drives the `Host` header and TLS SNI
+  for virtual-hosted HTTPS. A belt-and-suspenders check also re-verifies
+  the socket's actual `lookup` event address matches. Only `http`/
+  `https` schemes; redirects capped at 1 hop, each hop re-validated from
+  scratch (never trusted blindly); a single `AbortController` 10s
+  deadline covers the whole flow including the one allowed redirect, not
+  reset per hop; response capped at 1MB.
+- **`PluginRegistryService` is the single source of truth for both
+  version-gating and the orphaned-installation question (addendum A6) —
+  `getActive(pluginId): Plugin | undefined` is the one method every
+  dispatch and admin path checks.** Version mismatch (registered but
+  `coreApiVersion` range fails against `CORE_PLUGIN_API_VERSION`) and
+  orphaned (pluginId never registered at all, e.g. after a core
+  downgrade or package removal) are treated identically at the
+  dispatch/enable level — `getActive()` returns `undefined` for both,
+  so no dispatch path can drift between handling them differently — but
+  distinguished in admin-facing messaging via `getStatus()`
+  (`'active' | 'version-mismatch' | 'not-found'`) and
+  `getVersionMismatchInfo()`. Neither case mutates an existing
+  `PluginInstallation` row (preserves the admin's config for if the
+  plugin becomes available again).
+- **Real gap found and fixed while writing this addendum's own required
+  test coverage, not by review: `PluginAdminService.list()`/
+  `getDetail()` only enumerated `registry.listAll()`, so a truly
+  orphaned installation (pluginId never registered at all, as opposed to
+  registered-but-version-mismatched) was invisible to admin GET
+  entirely — contradicting the plan's own stated promise ("Admin UI
+  shows it as 'Not available in this build'"). Worse, `disable()`/
+  `uninstall()` called `requireKnownPlugin()` (throws 404) BEFORE
+  checking whether an installation existed, so an admin could never
+  clean up a broken installation's row through the API at all — a real
+  dead end, not just a cosmetic gap.** Fixed by: `list()` now unions
+  `registry.listAll()` with any installation rows whose pluginId isn't
+  in that list, surfacing orphaned entries with a degraded
+  `orphanedSummary()` (placeholder name/kind/version, `status:
+  'not-found'`); `getDetail()` uses a new non-throwing
+  `findKnownPlugin()` and returns the same degraded shape instead of
+  404ing when an installation row exists for an unregistered pluginId
+  (still 404s if there's neither a registry entry NOR an installation —
+  genuinely unknown, not orphaned); `disable()`/`uninstall()` now use
+  `findKnownPlugin()` too and simply skip hook invocation when the
+  plugin is undefined (the existing `registry.getActive()` guard on
+  those hook calls already made this safe — the fix removes an
+  unnecessary earlier throw, it doesn't change hook-safety logic).
+  `install()`/`enable()` are unchanged — addendum A6 explicitly wants
+  those to 409 via `requireActivePlugin()`, and they still do. Covered
+  by `plugin-admin.test.ts`'s "orphaned installation" and
+  "version-gate-failing" describe blocks.
+- **`PluginSecretEncryptionService` gets REAL key versioning this time,
+  unlike `PanEncryptionService`'s never-wired-up `panKeyVersion`
+  (Phase 5 decisions).** `PLUGIN_SECRET_ENCRYPTION_KEYS` is a
+  comma-separated `version:hexkey` list; `encrypt()` always uses the
+  highest version as current, `decrypt(ciphertext, keyVersion)` looks up
+  the specific version the row was encrypted under.
+  `PluginInstallation.secretKeyVersion` is populated and read back on
+  every decrypt, and `scripts/rotate-plugin-secrets.ts` (new, mirrors
+  `portal-demo-seed.ts`'s `tsx` convention) re-encrypts every row under
+  the current key — this script IS the rotation runbook. A separate key
+  from PAN/TOTP, same reasoning as Phase 1's TOTP-vs-PAN key split:
+  plugin secrets are a distinct rotation/trust domain.
+- **`invoke()`'s timeout+catch-all wrapper is the one place every hook
+  call goes through — no plugin exception or hung promise can propagate
+  past it.** `Promise.race([fn(), timeout])` catches ANY throw
+  (including non-`Error` throws, e.g. a plugin that does
+  `throw 'a string'`) and converts it to a structured
+  `PluginExecutionError { pluginId, hook, companyId, message }` rather
+  than letting it crash the calling request or BullMQ worker job. Tested
+  directly against both a throwing hook and a never-resolving one
+  (`plugin-runtime.test.ts`).
+- **Explicit DI-array plugin registration (`PLUGIN_REGISTRATIONS`
+  token), not filesystem scanning of `plugins/*` at boot.** Chosen for
+  testability (a test constructs `new PluginRegistryService([...])`
+  directly with fixture plugins, no filesystem/dynamic-`import()`
+  involved) and to avoid bundling complications; `plugins.module.ts`'s
+  `FIRST_PARTY_PLUGINS` array is empty this commit (`generic-sales`
+  registers there in commit 3).
+- **Through-the-wire supertest for the new controller, per the standing
+  rule since Phase 6 commit 2 — proves the guard chain (permission
+  guard AND `CsrfGuard` on POST) actually gates `/admin/plugins/*`, not
+  just that the route is mounted.** `e2e-plugins.test.ts` deliberately
+  doesn't attempt a full install→enable happy path against a real
+  registered plugin — the registry is intentionally empty until
+  commit 3's `generic-sales` — instead it proves the 200/403/404/409
+  paths through the real HTTP pipeline. The full happy path is commit
+  3's `generic-sales` end-to-end test plus the required manual
+  click-through.
+- **Pipeline verification found a real, but unrelated and pre-existing,
+  flakiness in `postsales-property.test.ts` (frozen Phase 4 code) —
+  documented, not silently worked around.** Across four full
+  `pnpm test` attempts on freshly-recreated test databases, that one
+  file's `afterAll` cleanup failed with a foreign-key violation every
+  time under the full ~42-file concurrent suite, but passed cleanly in
+  96s every time run in isolation — and the SPECIFIC constraint that
+  failed differed between attempts (`bookings_unit_id_fkey`, then later
+  `receipt_allocations_installment_id_fkey`), which rules out a
+  deterministic ordering bug in `cleanupCompany` (verified correct on
+  inspection) in favor of resource contention on this local machine's
+  Docker setup. Every other package and all other 41 apps/api test files
+  — including all 5 new plugin test files (64 tests) — passed cleanly in
+  every one of those same runs. Full reasoning and reproduction steps in
+  `docs/todo.md`'s new "Full-suite (`pnpm test`) contention failure"
+  entry. Consistent with this codebase's existing precedent (Phase 6
+  commit 4's `makeApplicant()` phone-collision note) for a failure class
+  that only reproduces under full concurrent-suite load: documented and
+  not treated as a commit blocker, since the actual code under test in
+  this phase is proven correct both in isolation and via every other
+  passing file in the same runs.
