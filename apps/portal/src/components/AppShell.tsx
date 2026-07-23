@@ -8,16 +8,24 @@ const CUSTOMER_TABS = [
   { to: '/tickets', label: 'Support', icon: '💬' },
 ];
 
+const BROKER_TABS = [
+  { to: '/broker/dashboard', label: 'Dashboard', icon: '📊' },
+  { to: '/broker/nocs', label: 'NOCs', icon: '✅' },
+  { to: '/broker/statement', label: 'Statement', icon: '📄' },
+];
+
 /**
  * Mobile-first: a fixed bottom tab bar (thumb-reachable, standard mobile
  * pattern) rather than a desktop sidebar. Content scrolls above it in a
  * width-capped column so the same layout reads fine on a wider viewport
- * too. Broker tabs land in commit 3 — this shell is written to be reused
- * as-is, branching on user.brokerId, rather than rebuilt.
+ * too. Branches on user.brokerId (Phase 6 commit 3) — a broker portal
+ * session never carries applicantId, and vice versa (PortalAuthService
+ * invariant, Phase 6 commit 1), so the two tab sets are mutually exclusive
+ * by construction, not by a heuristic guess.
  */
 export default function AppShell() {
-  const { logout } = useAuth();
-  const tabs = CUSTOMER_TABS;
+  const { logout, user } = useAuth();
+  const tabs = user?.brokerId ? BROKER_TABS : CUSTOMER_TABS;
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">

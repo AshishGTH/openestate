@@ -19,7 +19,8 @@ export default function Login() {
     );
   }
 
-  if (user) return <Navigate to="/profile" replace />;
+  // "/" branches to the right home tab for either portal principal — see App.tsx's PortalHome.
+  if (user) return <Navigate to="/" replace />;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -1108,3 +1108,122 @@ this is a log, not a design doc.
   where it applied to ambient async context specifically. `test/e2e-portal.test.ts`
   is this rule's home for the portal surface — new portal controllers land
   their through-the-wire proof there.
+
+### Phase 6 — broker-portal (commit 3 of 4)
+
+- **`NocService.approve()`/`reject()` are reused UNCHANGED from the Phase 5
+  staff `NocController` for the broker portal's NOC action** — no
+  brokerId parameter added, no portal-specific branch. Both already
+  route through `withTenantTx`/`tenantPrisma`, and `BrokerNoc` is a
+  direct-column `PORTAL_SCOPED_MODELS` entry (`brokerField: 'brokerId'`,
+  Phase 6 commit 1) — with the ambient `portalBrokerId` a broker portal
+  request carries, `tenant.extension.ts`'s `injectPortalScope` narrows
+  both the `findFirst` lookup and the `update` write to the ambient
+  broker's own NOCs automatically. A foreign broker's `nocId` 404s before
+  any write happens — proven end-to-end over real HTTP in
+  `test/e2e-broker-portal.test.ts`, not just by direct-call tests.
+  `PortalBrokerNocController` (`apps/api/src/brokers-portal/`) is a thin
+  wrapper: list (new `NocService.listForBroker`, resolving booking
+  numbers via a follow-up query since `BrokerNoc` has no Prisma relation
+  to `Booking`), approve, reject.
+
+- **Real bug #1, caught by `broker-portal.test.ts`'s IDOR test, not by
+  review: `NocService.approve()`/`reject()`'s own self-wrapped
+  `runWithTenant({ companyId })` was silently STRIPPING the ambient
+  portal scope, turning the narrowing above into a no-op — broker A
+  could approve broker B's NOC.** These methods have self-wrapped with a
+  bare `runWithTenant({ companyId })` since Phase 5, matching the
+  established "staff services self-wrap their own tenant context"
+  pattern (see Phase 6 commit 2's decisions on why that pattern is
+  harmless for STAFF-only call sites — they never depend on ambient
+  context at all). But `AsyncLocalStorage.run()` with a NEW store value
+  does not merge with the enclosing store — it SHADOWS it for the
+  duration of the callback. When these same methods became ALSO
+  broker-portal-facing in this commit, the self-wrap started shadowing
+  the ambient `portalBrokerId` that `TenantContextInterceptor` had just
+  established, replacing it with a companyId-only store that has no
+  portal scope at all. `injectPortalScope` then saw no portal context and
+  correctly no-op'd — but "correctly no-op'd" here means "correctly
+  stopped enforcing broker-scoping entirely," an IDOR, not a safe
+  fallback. **Fixed with `NocService.runScoped()`**: reuses the ambient
+  tenant context when one is already active for the target `companyId`
+  (`getCurrentCompanyId() === companyId`) instead of unconditionally
+  shadowing it; falls back to `runWithTenant({ companyId })` only when
+  there is no ambient context at all (preserving `noc-cancellation.test.ts`'s
+  and `phase5-rls.test.ts`'s existing direct-`new NocService(...)`-call
+  contract unchanged). Applied uniformly to `request()`/`approve()`/`reject()`
+  even though only the latter two are portal-exposed in this commit, so
+  a future portal exposure of `request()` doesn't reintroduce the same
+  bug silently. **This is a real, general hazard for any service method
+  that both self-wraps `runWithTenant({ companyId })` for staff use AND
+  is reused from a portal-facing call site — audit any future dual-purpose
+  reuse of an existing staff service for this exact pattern before wiring
+  it to a portal controller.**
+
+- **Real bug #2, found immediately after fixing bug #1 (a
+  `PrismaClientValidationError`, not a silent bypass this time) — a
+  latent defect in `tenant.extension.ts`'s `injectPortalScope` itself,
+  present since Phase 6 commit 1 but never exercised until this commit's
+  NOC approve/reject were the first WRITE_FILTER_OPS call on a
+  `PORTAL_SCOPED_MODELS` entry ever run with an ACTIVE portal scope.**
+  `injectPortalScope` wrapped the entire `where` clause in a fresh
+  `{ AND: [originalWhere, { OR: scopeClauses }] }` — this buries any
+  top-level unique field (`id`) one level deep inside `AND[0]`, but
+  Prisma's `update()`/`delete()` require at least one unique field to be
+  a TOP-LEVEL key of `where`, not nested inside an `AND` array; the query
+  threw `PrismaClientValidationError: Argument 'where' of type
+  BrokerNocWhereUniqueInput needs at least one of 'id' arguments`. Every
+  prior portal-facing WRITE_FILTER_OPS-shaped call in Phase 6 commit 2
+  (e.g. `ApplicantChangeRequestService.approve()`) happened to be
+  staff-only (self-wraps with no portal fields, so `injectPortalScope`
+  no-ops early), so this defect in the injection helper itself shipped
+  silently until now. **Fixed at the root, in `injectPortalScope`, not in
+  `NocService`**: the scope clause is now merged as an ADDITIONAL
+  top-level `AND` key (`{ ...existingWhere, AND: [...existingAndArray,
+  { OR: scopeClauses }] }`) rather than wrapping the whole `where` fresh —
+  `id`/`companyId` (already injected by `injectCompanyId` just before)
+  stay top-level, any pre-existing `AND` array on the caller's own where
+  is preserved and extended rather than overwritten. This fix applies to
+  every `PORTAL_SCOPED_MODELS` entry, not just `BrokerNoc` — any future
+  portal-facing `update()`/`delete()` on `CommissionPayment`, `Broker`,
+  `ApplicantChangeRequest`, or `Ticket` is now covered by the same fix,
+  proactively, without needing its own bug report first.
+
+- **Broker dashboard and statement-list services deliberately do NOT
+  reuse `BrokerReportsService` (Phase 5) or `DocumentService.listForBroker()`
+  as-is.** `BrokerReportsService` is `SYSTEM_PRISMA`-based (RLS-bypassing)
+  and only 2 of its 5 methods (`soldUnits`, `customerDetail`) take a
+  `brokerId` scoping parameter — `commissionSummary`/`dues`/`summary` are
+  company-wide with no per-broker filter, and reusing them from a portal
+  dashboard would leak every broker's commission figures to whichever
+  broker happened to load the page. `PortalBrokerDashboardService` (new,
+  `apps/api/src/brokers-portal/`) is a small, independent,
+  `TENANT_PRISMA`/`withTenantTx` implementation instead: an explicit
+  `brokerId` filter on every query (same "belt and suspenders" style as
+  `PortalPropertyService.getMyProperties`'s explicit `applicantId`
+  filter) plus RLS/`PORTAL_SCOPED_MODELS` as backstop. Likewise,
+  `DocumentService.listForBrokerPortal()` (new) is a `withTenantTx`
+  sibling to the existing `listForBroker()` (staff, `SYSTEM_PRISMA`),
+  not a reuse — mirrors `listForPortal()`'s existing applicant-portal
+  shape exactly. `DocumentService.getDocumentBytesForPortal()` (Phase 6
+  commit 2) needed NO changes at all for broker downloads — it was
+  already broker-safe via `generated_documents_portal_scope`'s existing
+  broker branch.
+
+- **`BrokersPortalModule` is a separate module from `CustomerPortalModule`
+  (Phase 6 commit 2), despite both being "portal" modules.** Keeps
+  `CustomerPortalModule`'s name accurate (it would otherwise need
+  renaming or become a dumping ground for two unrelated portal
+  principals), and this module's controllers depend on `BrokersModule`
+  (for `NocService`) and `PdfModule` (for `DocumentService`), neither of
+  which `CustomerPortalModule` imports.
+
+- **`test/e2e-broker-portal.test.ts` is a separate file from
+  `test/e2e-portal.test.ts`**, not an extension of it — the fixtures are
+  broker-shaped (broker `User` rows, broker role/permissions, a
+  broker-sourced booking) rather than applicant-shaped, and the two would
+  otherwise share nothing but bootstrap boilerplate. Both follow the same
+  standing rule from Phase 6 commit 2 (every new controller gets a
+  through-the-wire supertest) and the same session-caching discipline
+  for the shared `portal-auth` 5-requests/5-minutes-per-IP throttle
+  bucket.

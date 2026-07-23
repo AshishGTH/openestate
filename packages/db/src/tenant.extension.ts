@@ -229,11 +229,29 @@ function injectCompanyId(
 /**
  * Phase 6 defense-in-depth: for the DIRECT-COLUMN models in
  * PORTAL_SCOPED_MODELS, narrows READ_OPS/WRITE_FILTER_OPS's `where`
- * with an additional `AND` clause when a portal scope is active. A
+ * with an additional AND'd condition when a portal scope is active. A
  * no-op for every other model, and a no-op entirely when no portal
  * scope is set (staff/system queries are unaffected). See the
  * PORTAL_SCOPED_MODELS doc comment for why this intentionally does NOT
  * replicate RLS's co-applicant carve-out.
+ *
+ * Merges the scope clause as an ADDITIONAL top-level `AND` key (spreading
+ * the rest of `args.where` unchanged) rather than wrapping the whole
+ * `where` inside a fresh `{ AND: [originalWhere, scopeClause] }` — the
+ * latter buries any top-level unique field (e.g. `id`) one level deep
+ * inside `AND[0]`, and Prisma's `update()`/`delete()` require at least
+ * one unique field to be a TOP-LEVEL key of `where`, not nested inside
+ * an `AND` array. This was a real bug (a `PrismaClientValidationError`,
+ * not a silent bypass — caught immediately, but only because
+ * NocService.approve()/reject() were the first WRITE_FILTER_OPS call on
+ * a PORTAL_SCOPED_MODELS entry ever exercised with an ACTIVE portal
+ * scope — every prior portal-facing write in Phase 6 commit 2 happened
+ * to run through non-unique `updateMany`-shaped services or with no
+ * portal scope active at all, so the bug shipped undetected until
+ * broker-portal.test.ts's IDOR test forced the real code path). Spreads
+ * `...args.where` first so `id`/`companyId` (already injected by
+ * injectCompanyId above) stay top-level; any pre-existing `AND` array on
+ * the caller's own where is preserved and extended, never overwritten.
  */
 function injectPortalScope(
   model: string | undefined,
@@ -263,8 +281,13 @@ function injectPortalScope(
   }
   if (scopeClauses.length === 0) return;
 
+  const existingWhere = args.where ?? {};
+  const existingAnd = existingWhere.AND;
+  const existingAndArray = existingAnd ? (Array.isArray(existingAnd) ? existingAnd : [existingAnd]) : [];
+
   args.where = {
-    AND: [args.where ?? {}, { OR: scopeClauses }],
+    ...existingWhere,
+    AND: [...existingAndArray, { OR: scopeClauses }],
   };
 }
 

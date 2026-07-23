@@ -355,8 +355,10 @@ export class DocumentService {
 
   /** Portal-scoped list (RLS-restricted), filtered to the 3 self-service
    * document types the customer portal exposes (statement, receipt,
-   * demand letter) — allotment/reminder letters and broker statements stay
-   * staff-only surfaces. */
+   * demand letter) — allotment/reminder letters stay staff-only surfaces.
+   * Broker statements have their own portal-scoped list, listForBrokerPortal
+   * below (Phase 6 commit 3), rather than being folded into this one — the
+   * two portal principals (applicant, broker) never share a document type. */
   async listForPortal(companyId: string, applicantId: string) {
     return withTenantTx(this.tenantPrisma, companyId, (tx) =>
       tx.generatedDocument.findMany({
@@ -364,6 +366,21 @@ export class DocumentService {
           applicantId,
           documentType: { in: [GENERATED_DOCUMENT_TYPE.STATEMENT, GENERATED_DOCUMENT_TYPE.RECEIPT, GENERATED_DOCUMENT_TYPE.DEMAND_LETTER] },
         },
+        orderBy: { createdAt: 'desc' },
+      }),
+    );
+  }
+
+  /** Broker-portal counterpart to listForPortal — same withTenantTx/RLS
+   * discipline, explicit brokerId filter, restricted to BROKER_STATEMENT
+   * (the only document type the broker portal exposes). Download reuses
+   * getDocumentBytesForPortal unchanged (already broker-safe — see
+   * generated_documents_portal_scope's broker branch, CLAUDE.md Phase 6
+   * commit 2 decisions). */
+  async listForBrokerPortal(companyId: string, brokerId: string) {
+    return withTenantTx(this.tenantPrisma, companyId, (tx) =>
+      tx.generatedDocument.findMany({
+        where: { brokerId, documentType: GENERATED_DOCUMENT_TYPE.BROKER_STATEMENT },
         orderBy: { createdAt: 'desc' },
       }),
     );
