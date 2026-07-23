@@ -15,8 +15,9 @@ export default function InviteConsume() {
   const [submitting, setSubmitting] = useState(false);
   const [done, setDone] = useState(false);
 
-  if (user) return <Navigate to="/profile" replace />;
-  if (done) return <Navigate to="/profile" replace />;
+  // "/" branches to the right home tab for either portal principal — see App.tsx's PortalHome.
+  if (user) return <Navigate to="/" replace />;
+  if (done) return <Navigate to="/" replace />;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,8 +35,8 @@ export default function InviteConsume() {
       setAccessToken(res.accessToken);
       setDone(true);
       // Full reload so AuthProvider re-runs its refresh check and picks up
-      // the new session cookie cleanly.
-      window.location.href = '/profile';
+      // the new session cookie cleanly; "/" branches to the right home tab.
+      window.location.href = '/';
     } catch (err) {
       setError((err as Error).message);
     } finally {

@@ -28,6 +28,7 @@ import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { CsrfGuard } from './auth/csrf.guard';
 import { PortalAuthModule } from './portal-auth/portal-auth.module';
 import { CustomerPortalModule } from './customer-portal/customer-portal.module';
+import { BrokersPortalModule } from './brokers-portal/brokers-portal.module';
 import { LOG_REDACTION_PATHS } from './common/logger/redaction';
 
 @Module({
@@ -70,6 +71,7 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     CommissionModule,
     PortalAuthModule,
     CustomerPortalModule,
+    BrokersPortalModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
