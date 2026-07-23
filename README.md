@@ -59,6 +59,24 @@ pnpm --filter @openestate/db generate
 pnpm dev
 ```
 
+**Portal click-through fixture.** To exercise the customer/broker portal
+(`apps/portal`) from a known state instead of hand-building bookings,
+documents, and tickets one at a time, run the demo seed first
+(`pnpm seed`, creates the `demo-realty` company + admin login), then:
+
+```bash
+pnpm seed:portal-demo
+```
+
+This provisions — and, on every rerun, resets and recreates — a fixed
+customer/broker fixture: a customer with a booking, a payment plan, a
+receipt, a receipt + statement PDF, and an open support ticket; and a
+broker with a booking, accrued commission, a `REQUESTED` NOC ready to
+approve in the portal, and a commission statement PDF. It prints both
+logins (phone + password) on completion. Safe to rerun any time you want
+a clean slate — it deletes only its own fixed-identifier rows, never
+your other data.
+
 ## Architecture
 
 ```mermaid
