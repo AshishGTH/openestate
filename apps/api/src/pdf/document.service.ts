@@ -335,6 +335,40 @@ export class DocumentService {
     return { buffer, mimeType: doc.mimeType, originalName: doc.originalName };
   }
 
+  /**
+   * Portal counterpart to getDocumentBytes(). The lookup goes through the
+   * TENANT client under withTenantTx instead of the RLS-bypassing system
+   * client — generated_documents_portal_scope (Phase 6 RLS) is what
+   * actually restricts this to documents the ambient portal scope can see,
+   * the same "RLS is the primary IDOR defense" discipline as every other
+   * portal read. Never regenerates: same stored bytes as the staff path.
+   */
+  async getDocumentBytesForPortal(companyId: string, id: string): Promise<{ buffer: Buffer; mimeType: string; originalName: string }> {
+    const doc = await withTenantTx(this.tenantPrisma, companyId, (tx) =>
+      tx.generatedDocument.findFirst({ where: { id } }),
+    );
+    if (!doc) throw new NotFoundException('Document not found');
+    const filePath = this.uploadService.pathFor('document', doc.storedName);
+    const buffer = await fs.promises.readFile(filePath);
+    return { buffer, mimeType: doc.mimeType, originalName: doc.originalName };
+  }
+
+  /** Portal-scoped list (RLS-restricted), filtered to the 3 self-service
+   * document types the customer portal exposes (statement, receipt,
+   * demand letter) — allotment/reminder letters and broker statements stay
+   * staff-only surfaces. */
+  async listForPortal(companyId: string, applicantId: string) {
+    return withTenantTx(this.tenantPrisma, companyId, (tx) =>
+      tx.generatedDocument.findMany({
+        where: {
+          applicantId,
+          documentType: { in: [GENERATED_DOCUMENT_TYPE.STATEMENT, GENERATED_DOCUMENT_TYPE.RECEIPT, GENERATED_DOCUMENT_TYPE.DEMAND_LETTER] },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+    );
+  }
+
   async listForBooking(companyId: string, bookingId: string) {
     return this.systemPrisma.generatedDocument.findMany({
       where: { companyId, bookingId },

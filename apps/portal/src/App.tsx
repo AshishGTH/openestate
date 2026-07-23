@@ -1,31 +1,36 @@
-import { useQuery } from '@tanstack/react-query';
-
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
-
-async function fetchHealth() {
-  const res = await fetch(`${API_URL}/api/v1/health`);
-  if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
-  return res.json();
-}
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import ProtectedRoute from './components/ProtectedRoute';
+import AppShell from './components/AppShell';
+import Login from './pages/Login';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
+import InviteConsume from './pages/InviteConsume';
+import Profile from './pages/Profile';
+import Property from './pages/Property';
+import Account from './pages/Account';
+import Tickets from './pages/Tickets';
+import TicketDetail from './pages/TicketDetail';
 
 export default function App() {
-  const { data, isLoading, isError } = useQuery({ queryKey: ['health'], queryFn: fetchHealth });
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <div className="rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
-        <h1 className="text-xl font-semibold text-slate-900">OpenEstate — Portal</h1>
-        <p className="mt-2 text-sm text-slate-500">
-          Customer and broker portal shell, role-routed. Login, my-property, account, and broker
-          dashboard land in Phase 6.
-        </p>
-        <div className="mt-4 rounded-md bg-slate-100 p-3 text-sm">
-          <span className="font-medium">API health:</span>{' '}
-          {isLoading && 'checking…'}
-          {isError && <span className="text-red-600">unreachable</span>}
-          {data && <span className="text-emerald-600">{JSON.stringify(data)}</span>}
-        </div>
-      </div>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/invite/:inviteId" element={<InviteConsume />} />
+
+        <Route element={<ProtectedRoute />}>
+          <Route element={<AppShell />}>
+            <Route index element={<Navigate to="/profile" replace />} />
+            <Route path="profile" element={<Profile />} />
+            <Route path="property" element={<Property />} />
+            <Route path="account" element={<Account />} />
+            <Route path="tickets" element={<Tickets />} />
+            <Route path="tickets/:id" element={<TicketDetail />} />
+          </Route>
+        </Route>
+      </Routes>
+    </BrowserRouter>
   );
 }

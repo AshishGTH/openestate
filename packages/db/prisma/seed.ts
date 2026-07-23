@@ -161,6 +161,10 @@ async function main() {
       model: 'paymentPlanTemplate',
       items: ['Construction-Linked Plan', 'Down Payment Plan', 'Flexi Plan', 'Subvention Plan'],
     },
+    {
+      model: 'ticketCategory',
+      items: ['Payment Query', 'Construction Update', 'Documentation', 'General Query', 'Complaint'],
+    },
   ];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
