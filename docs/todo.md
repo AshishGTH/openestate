@@ -30,45 +30,76 @@ they're expected to land. Each entry should say *what*, *why deferred*, and
 
 ## Auth / rate limiting (Phase 1, widened in Phase 6)
 
-- **Redis-backed `ThrottlerStorage` for both the staff default bucket and
-  Phase 6's `portal-auth`/`portal-read` buckets.** CLAUDE.md's security
-  rules call for `@nestjs/throttler` + a Redis store; the staff
-  `ThrottlerModule.forRoot([{ ttl, limit }])` in `app.module.ts` has used
-  the package's default in-memory storage since Phase 1 — fine for a
-  single-instance deploy, but it means rate-limit state isn't shared across
-  replicas and resets on restart. Phase 6's two new named buckets
-  (`PortalAuthModule`'s own `ThrottlerModule.forRoot`, see
-  `apps/api/src/portal-auth/portal-auth.module.ts`) knowingly match this
-  same in-memory behaviour rather than silently diverging from the
-  established staff pattern. Fixing both together needs a new dependency
-  (`@nestjs/throttler-storage-redis` or equivalent) plus touching the
-  frozen Phase 1 `ThrottlerModule.forRoot` call — out of Phase 6's approved
-  scope. Unblocked by adding that dependency and wiring one shared
-  Redis-backed storage instance for both the root and portal-auth
-  throttler modules.
+- **Redis-backed `ThrottlerStorage` for the default/`portal-auth`/
+  `portal-read` buckets.** CLAUDE.md's security rules call for
+  `@nestjs/throttler` + a Redis store; `app.module.ts`'s single
+  `ThrottlerModule.forRoot([...])` call (all three named buckets, see the
+  Phase 6 commit 4 decisions log entry for why there is now exactly ONE
+  call, not two) has used the package's default in-memory storage since
+  Phase 1 — fine for a single-instance deploy, but it means rate-limit
+  state isn't shared across replicas and resets on restart. Fixing this
+  needs a new dependency (`@nestjs/throttler-storage-redis` or
+  equivalent) plus touching the frozen Phase 1 `ThrottlerModule.forRoot`
+  call — out of Phase 6's approved scope. Unblocked by adding that
+  dependency and wiring one shared Redis-backed storage instance for the
+  single throttler registration.
 
 ## Portal (Phase 6)
 
-- **Staff services' self-wrapped `runWithTenant({companyId})` calls are now
-  redundant with `TenantContextInterceptor`'s ambient context, but stay
-  as-is this phase.** Before Phase 6 commit 2, staff services
-  (`ApplicantService`, `CommissionService`, `NocService`, `BookingService`,
-  etc.) each wrapped their own tenant context from the controller's
-  `req.user.companyId`, independently of any ambient middleware/guard
-  context — this pattern is *why* the middleware-before-guards bug (and
-  later the Guard-enterWith bug) went undetected for every staff route
-  across five prior phases: staff services never depended on ambient
-  context at all, only portal services (added in Phase 6, deliberately
-  designed to rely solely on ambient context) were exposed. Now that
-  `TenantContextInterceptor` reliably establishes ambient context for
-  every authenticated request, staff services' self-wrapping is harmless
-  but duplicate work. Removing ~50+ call sites' self-wrap in favor of pure
-  ambient context is a mechanical, low-risk cleanup — but it's also the
-  single change most likely to silently reintroduce a masked ordering bug
-  if done carelessly (a staff route that stops self-wrapping and
-  regresses to relying on ambient context alone would pass every existing
-  direct-call test while failing over real HTTP, the exact gap
-  through-the-wire supertests exist to catch). Unblocked by doing the
-  removal as its own phase/commit, with at least one through-the-wire
-  supertest added per touched controller before merging (the Phase 6
-  commit 2 standing rule — see CLAUDE.md decisions).
+- **Staff services' self-wrapped `runWithTenant({companyId})` calls are
+  redundant with `TenantContextInterceptor`'s ambient context for call
+  sites that are genuinely staff-only — but "harmless" was the wrong word
+  for the general case, and Phase 6 commit 4's decisions log entry
+  supersedes the earlier note below.** Before Phase 6 commit 2, staff
+  services (`ApplicantService`, `CommissionService`, `NocService`,
+  `BookingService`, etc.) each wrapped their own tenant context from the
+  controller's `req.user.companyId`, independently of any ambient
+  middleware/guard context — this pattern is *why* the
+  middleware-before-guards bug (and later the Guard-`enterWith` bug) went
+  undetected for every staff route across five prior phases: staff
+  services never depended on ambient context at all, only portal services
+  (added in Phase 6) were exposed. What Phase 6 commit 2 got wrong: it
+  concluded self-wrapping was *therefore* harmless in general. Phase 6
+  commit 4 found a real counter-example — `NocService.approve()`/
+  `reject()` became BOTH staff- and broker-portal-facing in commit 3, and
+  the self-wrap silently stripped the ambient `portalBrokerId`, producing
+  a fail-OPEN IDOR (a portal session briefly got staff-level DB
+  visibility, not just narrower access). The property "this self-wrap is
+  harmless" depends on which controllers call the method — today AND in
+  any future phase — which can't be verified by reading one file in
+  isolation. Two structural fixes now make this the runtime's job instead
+  of the reviewer's: `runWithTenant()` throws if a same-company call
+  would replace an active portal scope, and `runScoped()` (promoted to
+  `packages/db`, was private to `NocService`) is the blessed helper for
+  any future dual-purpose service. See CLAUDE.md Phase 6 commit 4
+  decisions for the full audit of every currently portal-reachable
+  service (all clean, only `NocService` needed the fix) and the
+  guardrail's test coverage.
+
+  Removing ~50+ staff-only call sites' self-wrap in favor of pure ambient
+  context remains a separate, not-yet-done cleanup — still low-risk now
+  that the guardrail exists as a backstop, but still requires a
+  through-the-wire supertest per touched controller before merging (the
+  Phase 6 commit 2 standing rule) to catch any that turn out to be
+  portal-reachable after all.
+
+- **`makeApplicant()`'s phone counter (`appSeq`,
+  `apps/api/test/helpers/postsales-harness.ts`) is per-process, not
+  globally unique, and `PortalAuthService.login()`'s identifier lookup is
+  deliberately company-unscoped.** Two e2e test files that both call
+  `makeApplicant()` early can generate the identical phone number for
+  their first applicant; under `pnpm test`'s default forked parallelism,
+  a login in one file can occasionally resolve to another file's user row
+  and then 500 when that row is deleted by the other file's `afterAll`
+  cleanup mid-test. Confirmed as the cause of a flake in
+  `e2e-portal-throttle.test.ts` (Phase 6 commit 4) that only reproduced
+  running the full e2e trio together, never in isolation — see CLAUDE.md
+  Phase 6 commit 4 decisions. Worked around locally in that one file
+  (high-entropy phone numbers instead of `makeApplicant()`); the harness
+  helper itself and `PortalAuthService.login`'s cross-company lookup are
+  unchanged. Unblocked by either seeding `appSeq` from
+  `process.hrtime.bigint()`/a random offset instead of `0`, or scoping
+  test login lookups by a company-specific identifier prefix — whichever
+  is chosen should also close the identical gap
+  `e2e-portal.test.ts`'s own comment already flagged for id-based
+  assertions.

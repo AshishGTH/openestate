@@ -44,9 +44,9 @@ export default function Property() {
 
       {data.map((p) => (
         <div key={p.bookingId} className="rounded-lg border border-slate-200 bg-white p-4">
-          <div className="flex items-center justify-between">
-            <span className="font-medium text-slate-900">{p.project.name}</span>
-            <span className="text-xs rounded-full bg-slate-100 text-slate-600 px-2 py-0.5">{p.status}</span>
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium text-slate-900 truncate min-w-0">{p.project.name}</span>
+            <span className="text-xs rounded-full bg-slate-100 text-slate-600 px-2 py-0.5 shrink-0">{p.status}</span>
           </div>
           <p className="text-sm text-slate-600 mt-1">
             {p.tower.name} · {p.floor.name} · Unit {p.unit.number}

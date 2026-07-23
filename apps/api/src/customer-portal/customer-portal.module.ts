@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PdfModule } from '../pdf/pdf.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PostsalesModule } from '../postsales/postsales.module';
+import { PortalAuthModule } from '../portal-auth/portal-auth.module';
 import { ApplicantChangeRequestService } from './applicant-change-request.service';
 import { PortalProfileService } from './portal-profile.service';
 import { PortalProfileController } from './portal-profile.controller';
@@ -17,7 +18,7 @@ import { ConstructionUpdateService } from './construction-update.service';
 import { ConstructionUpdateAdminController } from './construction-update-admin.controller';
 
 @Module({
-  imports: [PdfModule, InventoryModule, PostsalesModule],
+  imports: [PdfModule, InventoryModule, PostsalesModule, PortalAuthModule],
   controllers: [
     PortalProfileController,
     AdminChangeRequestController,

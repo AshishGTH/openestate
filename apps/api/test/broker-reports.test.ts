@@ -25,6 +25,8 @@ import {
 import { BrokerCommissionRuleService } from '../src/brokers/broker-commission-rule.service';
 import { CommissionService } from '../src/commission/commission.service';
 import { CommissionPaymentService } from '../src/commission/commission-payment.service';
+import { NotificationService } from '../src/notifications/notification.service';
+import { ConsoleCommunicationProvider } from '../src/queues/communication-provider';
 import { BrokerReportsService } from '../src/reports/broker-reports.service';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
@@ -67,7 +69,7 @@ describeIf('BrokerReportsService', () => {
     svc = buildServices(tenantPrisma, systemPrisma, SYSTEM_CLOCK);
     rules = new BrokerCommissionRuleService(tenantPrisma, systemPrisma);
     commission = new CommissionService(tenantPrisma, systemPrisma, rules);
-    payments = new CommissionPaymentService(tenantPrisma, systemPrisma, commission);
+    payments = new CommissionPaymentService(tenantPrisma, systemPrisma, commission, new NotificationService(systemPrisma, new ConsoleCommunicationProvider()));
     reports = new BrokerReportsService(systemPrisma);
     fxA = await seedCompany(systemPrisma);
     fxB = await seedCompany(systemPrisma);

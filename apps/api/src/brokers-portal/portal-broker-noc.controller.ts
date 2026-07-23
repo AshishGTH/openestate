@@ -1,10 +1,11 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import { rejectNocSchema, PERMISSIONS } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
+import { PortalReadThrottlerGuard } from '../portal-auth/portal-throttler.guard';
 import { NocService } from '../brokers/noc.service';
 
 class RejectNocDto extends createZodDto(rejectNocSchema) {}
@@ -24,6 +25,7 @@ class RejectNocDto extends createZodDto(rejectNocSchema) {}
  */
 @ApiTags('Portal Broker NOCs')
 @Controller('portal/broker/nocs')
+@UseGuards(PortalReadThrottlerGuard)
 export class PortalBrokerNocController {
   constructor(private readonly nocs: NocService) {}
 

@@ -12,7 +12,9 @@ import {
   CHEQUE_CLEARANCE_STATUS,
   INSTALLMENT_STATUS,
   RECEIPT_MODE,
+  NOTIFICATION_EVENT,
   formatReceiptNumber,
+  formatInr,
   type CreateReceiptDto,
   type ChequeEventDto,
   type TdsCertificateDto,
@@ -20,6 +22,7 @@ import {
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import { LedgerService } from './ledger.service';
 import { NumberSequenceService } from './number-sequence.service';
+import { NotificationService } from '../notifications/notification.service';
 
 const CHEQUE_LIKE = new Set<string>([RECEIPT_MODE.CHEQUE, RECEIPT_MODE.DD]);
 
@@ -33,9 +36,28 @@ export class ReceiptService {
     private readonly systemPrisma: PrismaClient,
     private readonly ledger: LedgerService,
     private readonly numbers: NumberSequenceService,
+    private readonly notifications: NotificationService,
   ) {}
 
   async createReceipt(companyId: string, dto: CreateReceiptDto, actorId: string | null) {
+    const { receipt, primaryApplicantId } = await this.createReceiptTx(companyId, dto, actorId);
+
+    // Fired AFTER the transaction commits — provider.send() is external
+    // I/O, never allowed inside withTenantTx (CLAUDE.md Phase 1 rule).
+    if (primaryApplicantId) {
+      await this.notifications.notify(
+        companyId,
+        NOTIFICATION_EVENT.RECEIPT_CONFIRMED,
+        { applicantId: primaryApplicantId },
+        'Payment received',
+        `We've received your payment of ${formatInr(receipt.grossAmountPaise)} (receipt ${receipt.receiptNumber}).`,
+      );
+    }
+
+    return receipt;
+  }
+
+  private async createReceiptTx(companyId: string, dto: CreateReceiptDto, actorId: string | null) {
     const allocTotal = dto.allocations.reduce((s, a) => s + a.amountPaise, 0n);
     if (allocTotal !== dto.grossAmountPaise) {
       throw new BadRequestException(
@@ -192,7 +214,7 @@ export class ReceiptService {
           });
         }
 
-        return receipt;
+        return { receipt, primaryApplicantId: booking.primaryApplicantId as string | null };
       }),
     );
   }

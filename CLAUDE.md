@@ -1227,3 +1227,251 @@ this is a log, not a design doc.
   through-the-wire supertest) and the same session-caching discipline
   for the shared `portal-auth` 5-requests/5-minutes-per-IP throttle
   bucket.
+
+- **Commit-2's "staff self-wrapping `runWithTenant({ companyId })` is
+  harmless redundancy" note is SUPERSEDED — bug #1 above proved it was
+  never harmless in the general case, only harmless for call sites that
+  happen to never be reached from a portal-authenticated request.**
+  That property cannot be verified by reading one service file in
+  isolation; it depends on which controllers call it, today and in any
+  future phase. Two structural changes close this gap for good, so the
+  project no longer depends on catching every future instance by
+  review:
+
+  1. **`runWithTenant()` itself now refuses the exact shape of call that
+     caused the bug** (`packages/db/src/tenant-context.ts`): if an
+     ambient store is already active for the SAME `companyId` and
+     carries a portal scope (`portalApplicantId` or `portalBrokerId`),
+     and the new store would replace that scope with anything else
+     (dropped, widened to company-wide, or switched to a different
+     portal principal), it throws instead of silently shadowing.
+     Cross-company re-wrapping (system jobs enumerating companies, e.g.
+     `EscalationService`/`InterestService`) is unaffected — the check
+     only fires on a same-company call. Fail LOUD now, where bug #1
+     failed silent and open. Tested in
+     `packages/db/test/tenant-context-guardrail.test.ts` (10 tests, pure
+     `AsyncLocalStorage` logic, no Postgres needed — same "fast,
+     DB-independent" tier as `postsales-pdf.test.ts`, Phase 4
+     decisions): throws on same-company drop/widen/switch for both
+     `portalApplicantId` and `portalBrokerId`; allowed when the ambient
+     store has no portal scope (plain staff self-wrap, still legitimately
+     harmless); allowed with no ambient store at all; allowed
+     cross-company.
+
+  2. **`runScoped(companyId, fn)` is promoted from `NocService` to
+     `packages/db`** — the blessed helper for any service method
+     reachable from both a staff call site and a portal-facing one:
+     reuses the ambient context when already active for the target
+     company, falls back to `runWithTenant({ companyId })` only when
+     there's no ambient context at all. `NocService.approve()`/
+     `reject()`/`request()` now import it from `@openestate/db` instead
+     of keeping a private copy.
+
+  **Full audit performed of every service method reachable from a
+  portal controller (customer or broker), checking for a bare
+  self-wrapped `runWithTenant({ companyId })`:**
+
+  | Service.method | Portal controller | Self-wraps? |
+  |---|---|---|
+  | `PortalProfileService.getProfile` | `PortalProfileController` | No — `withTenantTx` only |
+  | `ApplicantChangeRequestService.submit` | `PortalProfileController` | No — deliberate (Phase 6 commit 2) |
+  | `PortalPropertyService.getMyProperties` | `PortalPropertyController` | No |
+  | `PortalAccountService.getAccount` | `PortalAccountController` | No |
+  | `DocumentService.listForPortal` / `listForBrokerPortal` / `getDocumentBytesForPortal` | `PortalAccountController`, `PortalBrokerDocumentsController` | No |
+  | `TicketService.listCategories` / `create` / `listMine` / `getOne` / `addMessage` | `PortalTicketController` (+ `AdminTicketController` for `addMessage`) | No — no self-wrap anywhere in the file, including its staff-only methods |
+  | `PortalBrokerDashboardService.getDashboard` | `PortalBrokerDashboardController` | No |
+  | `NocService.listForBroker` / `approve` / `reject` | `PortalBrokerNocController` | `approve`/`reject` DID (bug #1, fixed) — `listForBroker` never did |
+
+  Self-wrapping call sites that DO exist elsewhere in the codebase
+  (`ApplicantChangeRequestService.approve`/`reject`,
+  `DocumentService.reprintReceiptPdf`/`store` used by every `generate*`
+  method, `ConstructionUpdateService`'s 3 methods, and ~40 more across
+  `masters/`, `inventory/`, `presales/`, `postsales/`, `commission/`,
+  `roles/`, `users/`, `company/`, `custom-fields/`, `dispatch/`,
+  `queues/`) were individually checked against every portal controller's
+  constructor injections and confirmed NOT reachable from any portal
+  route — gated behind staff-only permissions
+  (`ADMIN_CHANGE_REQUEST_APPROVE`, etc.) that neither the `customer` nor
+  `broker` role holds. These stay self-wrapped as-is; the guardrail now
+  protects them defensively regardless, and this table plus the
+  guardrail together replace "audit by reading code" with "audit once,
+  then let the runtime enforce it."
+
+  **`docs/todo.md`'s "Staff services' self-wrapped `runWithTenant`
+  calls... stay as-is this phase (harmless redundancy)" note (Phase 6
+  commit 2) is updated accordingly** — see that file for the current
+  wording.
+
+### Phase 6 — notifications, hardening, polish (commit 4 of 4)
+
+- **`NotificationService` (new, `apps/api/src/notifications/`) is an
+  independent service, not a reuse of `CommunicationService`.**
+  `CommunicationLog` has a non-nullable `applicantId` and no `brokerId`
+  column at all, so it cannot represent a broker notification (needed for
+  `COMMISSION_PAID`). Follows this codebase's existing "Convention B"
+  send pattern (`EscalationService`, `PortalPasswordResetProcessor`,
+  `DispatchProcessor`: call `CommunicationProvider.send()` directly, no
+  persistent log row) rather than Convention A
+  (`CommunicationService.send()`, which creates a `CommunicationLog` row
+  + BullMQ job) — there is no portal-facing "view your notification
+  history" screen this phase that would need the row. `notify()` looks
+  up the recipient's portal `User` by `applicantId`/`brokerId`, reads
+  `User.notificationPrefs` (falling back to `DEFAULT_NOTIFICATION_PREFS`
+  from `packages/shared/src/portal.ts`, already scaffolded), and silently
+  no-ops if no portal user exists for that applicant/broker — expected
+  (not every applicant/broker has activated a portal account) and swallowed
+  behind a `try/catch` + `logger.warn`, never thrown, so a notification
+  failure never fails the triggering write. All five trigger call sites
+  (`ReceiptService.createReceipt`, `DocumentService.generateLetterPdf`
+  for `DEMAND_LETTER` only, `ConstructionUpdateService.create`,
+  `TicketService.addMessage` for staff replies only,
+  `CommissionPaymentService.pay`) fire strictly AFTER their transaction
+  commits — CLAUDE.md's Phase 1 "no external I/O inside `withTenantTx`"
+  rule applies to `provider.send()` exactly as it does to email/SMS/S3.
+
+- **Real bug, caught by the portal-read rate-limit test required by this
+  commit's own spec, not by review: `@nestjs/throttler`'s `ThrottlerModule`
+  is `@Global()`, and this app had TWO separate `ThrottlerModule.forRoot()`
+  calls — `app.module.ts`'s own (the unnamed/default staff bucket) and
+  `PortalAuthModule`'s (the `portal-auth`/`portal-read` named buckets,
+  Phase 6 commit 1).** A `@Global()` Nest module's providers are exported
+  to the ENTIRE application graph regardless of which feature module calls
+  `forRoot()`; two independent calls create two competing registrations
+  for the same `THROTTLER_OPTIONS` token, and which one a given consumer's
+  DI resolves to is dependent on module compilation order, not something
+  to rely on. In practice this meant the root `APP_GUARD` — `ThrottlerGuard`
+  used directly, unfiltered, unlike the portal guards which each filter
+  `this.throttlers` down to their own named entry in `onModuleInit()` — was
+  picking up ALL THREE named throttlers on SOME builds, enforcing the tiny
+  `portal-auth` bucket (5 requests/5 minutes) globally on every route in
+  the app, including a `portal-read`-guarded route (`GET /portal/profile`,
+  meant to be governed only by the 60/minute `portal-read` bucket) — the
+  exact opposite of the Phase 6 commit 1 decisions log's claim that "staff
+  routes are structurally unreachable by either bucket." A second rebuild
+  (isolating just the root-guard filter fix, without also removing the
+  second `forRoot()` call) flipped the failure mode instead of fixing it:
+  `PortalAuthThrottlerGuard`'s OWN bucket silently stopped enforcing at
+  all (6 login attempts all returned 401, never 429) — empirical proof
+  that which `forRoot()` call "wins" for a given guard is genuinely
+  nondeterministic across rebuilds, not a one-time fluke. **Fixed at the
+  root, not by working around the symptom**: consolidated to exactly ONE
+  `ThrottlerModule.forRoot([...])` call, in `app.module.ts`, listing all
+  three named throttlers (default, `portal-auth`, `portal-read`) —
+  `PortalAuthModule` no longer calls `ThrottlerModule.forRoot()` at all,
+  it only declares `PortalAuthThrottlerGuard`/`PortalReadThrottlerGuard`
+  as providers, which now resolve their options from the single global
+  registration. **Also added `DefaultThrottlerGuard`
+  (`apps/api/src/auth/guards/default-throttler.guard.ts`)** — mirrors
+  `PortalAuthThrottlerGuard`/`PortalReadThrottlerGuard`'s existing
+  self-filtering pattern (`this.throttlers = this.throttlers.filter(t =>
+  t.name === 'default')`), now used as the root `APP_GUARD` instead of the
+  bare `ThrottlerGuard` class — so even if a future module reintroduces a
+  second `forRoot()` call, the root guard structurally cannot enforce a
+  bucket that isn't its own, the same defense-in-depth principle as the
+  `runWithTenant` guardrail from commit 4's hardening work earlier in this
+  phase. Verified via `test/e2e-portal-throttle.test.ts` (new, real HTTP):
+  the `portal-auth` bucket 429s on the 6th login attempt in 5 minutes from
+  one IP; the `portal-read` bucket is proven keyed by JWT `sub` (not IP) by
+  exhausting one user's 60/minute budget and confirming a second user on
+  the SAME loopback IP is unaffected. Also re-ran `e2e-portal.test.ts` and
+  `e2e-broker-portal.test.ts` (staff + portal routes through the real guard
+  chain) after the fix to confirm no regression.
+
+- **Pre-existing test-harness flakiness, exposed (not introduced) by the
+  new portal-read throttle test: `makeApplicant()`'s phone counter
+  (`appSeq`) resets to 0 per forked test-FILE process, and
+  `PortalAuthService.login()`'s identifier lookup is deliberately
+  company-unscoped** (phone/email must be globally unique across the
+  whole install — Phase 6 commit 1 decisions). Two e2e files that both
+  call `makeApplicant()` early in `beforeAll` can generate the IDENTICAL
+  phone number for their first applicant; when `pnpm test`'s default
+  forked parallelism runs them concurrently, a login can resolve to a
+  DIFFERENT file's user row, which then vanishes mid-test when that
+  file's own `afterAll` cleanup runs — observed as a flaky 500
+  ("no record found") that only reproduced when the full e2e trio ran
+  together, never in isolation. `e2e-portal.test.ts`'s own comment
+  already flagged this exact class of collision for an *assertion*
+  (worked around there by asserting on id, not phone); this is the first
+  time it broke a *login* itself. Fixed locally in
+  `e2e-portal-throttle.test.ts` only (not the shared harness, to avoid
+  changing behavior every other test file depends on): its two portal
+  users get high-entropy phones (`Date.now()` + `Math.random()`) instead
+  of going through `makeApplicant()`. Confirmed stable across three
+  consecutive runs of the full `e2e-portal.test.ts` +
+  `e2e-broker-portal.test.ts` + `e2e-portal-throttle.test.ts` trio
+  together. **Not fixed at the root** (the harness's phone counter, or
+  `PortalAuthService.login`'s cross-company lookup) — flagged here for
+  visibility; the harness-level fix is deferred, not silently dropped
+  (see `docs/todo.md`).
+
+- **RLS EXPLAIN check (plan's required manual verification, run against
+  the same ~200-row `commission_ledger_entries` fixture as the automated
+  coarse perf regression test in `test/portal-rls.test.ts`).** Observed
+  plan for the portal-broker-scoped query, via
+  `EXPLAIN (ANALYZE, VERBOSE)` under a real `portalBrokerId` session
+  (`openestate_app`, RLS-enforced, `openestate_test` DB):
+
+  ```
+  Aggregate  (cost=7.12..7.13 rows=1 width=8) (actual time=0.550..0.551 rows=1 loops=1)
+    Output: count(*)
+    ->  Seq Scan on public.commission_ledger_entries  (cost=0.00..7.12 rows=1 width=0) (actual time=0.045..0.538 rows=200 loops=1)
+          Filter: ((commission_ledger_entries.broker_id = '<uuid>'::uuid)
+                   AND (commission_ledger_entries.company_id = (current_setting('app.current_company_id', true))::uuid)
+                   AND ((((NULLIF(current_setting('app.portal_applicant_id', true), ''))::uuid IS NULL)
+                         AND ((NULLIF(current_setting('app.portal_broker_id', true), ''))::uuid IS NULL))
+                        OR (((NULLIF(current_setting('app.portal_broker_id', true), ''))::uuid IS NOT NULL)
+                            AND (commission_ledger_entries.broker_id = (NULLIF(current_setting('app.portal_broker_id', true), ''))::uuid))))
+    Planning Time: 2.275 ms
+    Execution Time: 0.646 ms
+  ```
+
+  **This differs from the plan's stated hypothesis** ("`portal_applicant()`/
+  `portal_broker()` appear as a single evaluated `Function Scan`/`InitPlan`")
+  — the actual behaviour is that Postgres INLINES `portal_applicant()`/
+  `portal_broker()` (single-statement `LANGUAGE sql` functions) directly
+  into the `Filter` expression as `current_setting(...)` calls, evaluated
+  once per row scanned, rather than hoisting them into a separate
+  `InitPlan` computed once per statement. This is still the *correct* and
+  *fast* outcome, for a different reason than assumed: `current_setting()`
+  is an in-memory GUC lookup with no I/O and no subquery/join, so
+  per-row evaluation costs the same as a constant — confirmed by the
+  0.646ms execution time on 200 rows (Seq Scan is the planner's correct
+  choice at this small a table size; a larger table would use an index on
+  `broker_id`/`company_id` and pay the same negligible per-row
+  `current_setting()` cost). No planner regression risk from function
+  inlining specifically — inlining a `STABLE` function into a filter
+  expression is standard Postgres behavior for simple single-statement SQL
+  functions, not something a future Postgres version is likely to stop
+  doing. The **coarse wall-clock regression test**
+  (`test/portal-rls.test.ts`, "coarse RLS performance regression") is what
+  actually gates this in CI, per the plan's own reasoning — this EXPLAIN
+  capture is documentation of what was observed once, not a repeatable
+  automated check (planner output is version/data-dependent).
+
+- **Final manual click-through (real narrow-viewport browser, 375×667
+  ≈ iPhone SE), against the running dev stack (`apps/api` + `apps/portal`
+  dev servers, the demo company from `packages/db/prisma/seed.ts`).**
+  Customer path: login → profile (confirmed `CompanyConfig.primaryColorHex`
+  renders on the active bottom-nav tab, computed `color: rgb(22, 163, 74)`
+  matching the configured `#16A34A`, and the header falls back to the
+  "OpenEstate" text label when no `logoUrl` is set) → property → account
+  (cost breakup / payment plan / payment history sections, next-due
+  banner) → receipt PDF download (200) → profile change-request
+  submission → ticket creation and thread view — all exercised as real
+  clicks/form input over the actual dev API, not a direct service call.
+  Broker path, including the two steps commit 3's browser session
+  couldn't finish: dashboard (commission figures, units-sold/pending-NOC
+  tiles) → NOC list → **NOC approve in the browser** (real `POST
+  .../nocs/:id/approve`, 201, status flips to APPROVED) → **broker
+  statement PDF download in the browser** (real `GET
+  .../documents/:id/download`, 200). No console errors, no horizontal
+  overflow at the 375px viewport (`document.documentElement.scrollWidth
+  === window.innerWidth` checked directly) at any screen visited. Fixture
+  data for this click-through was built via a throwaway vitest file
+  (`test/_clickthrough-seed.test.ts`, deleted after use, not part of the
+  suite) that reused the real `BookingService`/`PaymentPlanService`/
+  `ReceiptService`/`DocumentService`/`CommissionService`/`NocService`
+  classes against the demo company's already-fully-permissioned
+  customer/broker roles, rather than hand-writing raw rows — the same
+  "reuse the real service, don't reimplement its invariants" discipline
+  every other fixture-builder in this test suite already follows.

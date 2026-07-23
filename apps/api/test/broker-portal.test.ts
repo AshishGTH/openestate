@@ -18,6 +18,8 @@ import { DocumentService } from '../src/pdf/document.service';
 import { PdfService } from '../src/pdf/pdf.service';
 import { UploadService } from '../src/inventory/upload.service';
 import { LedgerService } from '../src/postsales/ledger.service';
+import { NotificationService } from '../src/notifications/notification.service';
+import { ConsoleCommunicationProvider } from '../src/queues/communication-provider';
 import {
   makeClients,
   seedCompany,
@@ -81,7 +83,14 @@ describeIf('Phase 6 broker-portal (commit 3)', () => {
     nocs = new NocService(tenantPrisma, systemPrisma);
     dashboard = new PortalBrokerDashboardService(tenantPrisma);
     const ledger = new LedgerService(tenantPrisma);
-    documents = new DocumentService(tenantPrisma, systemPrisma, new PdfService(), new UploadService(), ledger);
+    documents = new DocumentService(
+      tenantPrisma,
+      systemPrisma,
+      new PdfService(),
+      new UploadService(),
+      ledger,
+      new NotificationService(systemPrisma, new ConsoleCommunicationProvider()),
+    );
   });
 
   afterAll(async () => {

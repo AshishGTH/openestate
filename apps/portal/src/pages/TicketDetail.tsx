@@ -45,9 +45,9 @@ export default function TicketDetail() {
         ← Back to Support
       </Link>
 
-      <div className="flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-slate-900">{data.subject}</h1>
-        <span className="text-xs rounded-full bg-slate-100 text-slate-600 px-2 py-0.5">{data.status}</span>
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold text-slate-900 truncate min-w-0">{data.subject}</h1>
+        <span className="text-xs rounded-full bg-slate-100 text-slate-600 px-2 py-0.5 shrink-0">{data.status}</span>
       </div>
 
       <div className="space-y-2">

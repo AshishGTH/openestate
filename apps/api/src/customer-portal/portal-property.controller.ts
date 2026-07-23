@@ -1,13 +1,15 @@
-import { BadRequestException, Controller, Get, Req } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Req, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { PERMISSIONS } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
+import { PortalReadThrottlerGuard } from '../portal-auth/portal-throttler.guard';
 import { PortalPropertyService } from './portal-property.service';
 
 @ApiTags('Portal Property')
 @Controller('portal/property')
+@UseGuards(PortalReadThrottlerGuard)
 export class PortalPropertyController {
   constructor(private readonly propertyService: PortalPropertyService) {}
 

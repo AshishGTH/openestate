@@ -1,10 +1,11 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Post, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, HttpStatus, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import { submitChangeRequestSchema, PERMISSIONS } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
+import { PortalReadThrottlerGuard } from '../portal-auth/portal-throttler.guard';
 import { PortalProfileService } from './portal-profile.service';
 import { ApplicantChangeRequestService } from './applicant-change-request.service';
 
@@ -19,6 +20,7 @@ class SubmitChangeRequestDto extends createZodDto(submitChangeRequestSchema) {}
  */
 @ApiTags('Portal Profile')
 @Controller('portal/profile')
+@UseGuards(PortalReadThrottlerGuard)
 export class PortalProfileController {
   constructor(
     private readonly profileService: PortalProfileService,

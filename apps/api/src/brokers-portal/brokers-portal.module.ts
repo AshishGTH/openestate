@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { BrokersModule } from '../brokers/brokers.module';
 import { PdfModule } from '../pdf/pdf.module';
+import { PortalAuthModule } from '../portal-auth/portal-auth.module';
 import { PortalBrokerDashboardService } from './portal-broker-dashboard.service';
 import { PortalBrokerDashboardController } from './portal-broker-dashboard.controller';
 import { PortalBrokerNocController } from './portal-broker-noc.controller';
@@ -14,7 +15,7 @@ import { PortalBrokerDocumentsController } from './portal-broker-documents.contr
  * CustomerPortalModule imports.
  */
 @Module({
-  imports: [BrokersModule, PdfModule],
+  imports: [BrokersModule, PdfModule, PortalAuthModule],
   controllers: [PortalBrokerDashboardController, PortalBrokerNocController, PortalBrokerDocumentsController],
   providers: [PortalBrokerDashboardService],
 })

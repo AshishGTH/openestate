@@ -64,9 +64,9 @@ export default function Account() {
 
       {data.map((b) => (
         <div key={b.bookingId} className="rounded-lg border border-slate-200 bg-white p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="font-medium text-slate-900">{b.bookingNumber}</span>
-            <span className="text-sm text-slate-600">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium text-slate-900 truncate min-w-0">{b.bookingNumber}</span>
+            <span className="text-sm text-slate-600 shrink-0">
               Balance {formatInr(BigInt(b.balancePaise))}
             </span>
           </div>
@@ -87,7 +87,7 @@ export default function Account() {
             </summary>
             <ul className="mt-2 space-y-1 text-slate-600">
               {b.costLines.map((l) => (
-                <li key={l.id} className="flex justify-between">
+                <li key={l.id} className="flex justify-between gap-2 flex-wrap">
                   <span>{l.label}</span>
                   <span>{formatInr(BigInt(l.lineTotalPaise))}</span>
                 </li>
@@ -101,7 +101,7 @@ export default function Account() {
             </summary>
             <ul className="mt-2 space-y-1 text-slate-600">
               {b.paymentSchedule.map((i) => (
-                <li key={i.id} className="flex justify-between">
+                <li key={i.id} className="flex justify-between gap-2 flex-wrap">
                   <span>
                     {i.label} · {new Date(i.dueDate).toLocaleDateString('en-IN')}
                   </span>
@@ -119,7 +119,7 @@ export default function Account() {
             </summary>
             <ul className="mt-2 space-y-1 text-slate-600">
               {b.paymentHistory.map((r) => (
-                <li key={r.id} className="flex justify-between">
+                <li key={r.id} className="flex justify-between gap-2 flex-wrap">
                   <span>
                     {r.receiptNumber} · {new Date(r.receiptDate).toLocaleDateString('en-IN')} ({r.mode})
                   </span>

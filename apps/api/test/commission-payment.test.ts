@@ -21,6 +21,8 @@ import {
 import { BrokerCommissionRuleService } from '../src/brokers/broker-commission-rule.service';
 import { CommissionService } from '../src/commission/commission.service';
 import { CommissionPaymentService } from '../src/commission/commission-payment.service';
+import { NotificationService } from '../src/notifications/notification.service';
+import { ConsoleCommunicationProvider } from '../src/queues/communication-provider';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -44,7 +46,7 @@ describeIf('CommissionPaymentService: lifecycle + 194-H TDS', () => {
     svc = buildServices(tenantPrisma, systemPrisma, SYSTEM_CLOCK);
     rules = new BrokerCommissionRuleService(tenantPrisma, systemPrisma);
     commission = new CommissionService(tenantPrisma, systemPrisma, rules);
-    payments = new CommissionPaymentService(tenantPrisma, systemPrisma, commission);
+    payments = new CommissionPaymentService(tenantPrisma, systemPrisma, commission, new NotificationService(systemPrisma, new ConsoleCommunicationProvider()));
     fx = await seedCompany(systemPrisma);
     await systemPrisma.tdsRule.create({
       data: { companyId: fx.companyId, section: '194-H', ratePercent: 5, thresholdPaise: L(15_000), effectiveFrom: new Date('2019-09-01') },

@@ -11,6 +11,8 @@ interface CompanyConfigData {
   timezone: string;
   fyStartMonth: number;
   dateFormat: string;
+  logoUrl: string | null;
+  primaryColorHex: string | null;
 }
 
 const MODULES = ['presales', 'postsales', 'accounts'];
@@ -30,6 +32,8 @@ export default function CompanyConfigPage() {
   const [timezone, setTimezone] = useState('Asia/Kolkata');
   const [fyStartMonth, setFyStartMonth] = useState(4);
   const [dateFormat, setDateFormat] = useState('DD-MM-YYYY');
+  const [logoUrl, setLogoUrl] = useState('');
+  const [primaryColorHex, setPrimaryColorHex] = useState('');
 
   const { data: config, isLoading } = useQuery<CompanyConfigData>({
     queryKey: ['company-config'],
@@ -44,8 +48,12 @@ export default function CompanyConfigPage() {
       setTimezone(config.timezone);
       setFyStartMonth(config.fyStartMonth);
       setDateFormat(config.dateFormat);
+      setLogoUrl(config.logoUrl ?? '');
+      setPrimaryColorHex(config.primaryColorHex ?? '');
     }
   }, [config]);
+
+  const colorError = primaryColorHex.trim() !== '' && !/^#[0-9A-Fa-f]{6}$/.test(primaryColorHex.trim());
 
   const handleSave = async () => {
     setError('');
@@ -60,6 +68,8 @@ export default function CompanyConfigPage() {
           timezone,
           fyStartMonth,
           dateFormat,
+          logoUrl: logoUrl.trim() === '' ? null : logoUrl.trim(),
+          primaryColorHex: primaryColorHex.trim() === '' ? null : primaryColorHex.trim(),
         }),
       });
       qc.invalidateQueries({ queryKey: ['company-config'] });
@@ -180,9 +190,45 @@ export default function CompanyConfigPage() {
           </div>
         </section>
 
+        <section>
+          <h2 className="text-lg font-medium text-slate-800">Portal Branding</h2>
+          <p className="text-sm text-slate-500">Logo and accent color shown in the customer/broker portal (apps/portal)</p>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Logo URL</label>
+              <input
+                type="text"
+                placeholder="https://…/logo.png"
+                value={logoUrl}
+                onChange={(e) => setLogoUrl(e.target.value)}
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Accent Color</label>
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="#2563EB"
+                  value={primaryColorHex}
+                  onChange={(e) => setPrimaryColorHex(e.target.value)}
+                  className={`block w-full rounded-md border px-3 py-2 text-sm ${
+                    colorError ? 'border-red-400' : 'border-slate-300'
+                  }`}
+                />
+                <span
+                  className="h-8 w-8 shrink-0 rounded-md border border-slate-300"
+                  style={{ backgroundColor: /^#[0-9A-Fa-f]{6}$/.test(primaryColorHex.trim()) ? primaryColorHex.trim() : undefined }}
+                />
+              </div>
+              {colorError && <p className="mt-1 text-xs text-red-600">Must be a 6-digit hex color, e.g. #2563EB</p>}
+            </div>
+          </div>
+        </section>
+
         <button
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || colorError}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Save Configuration'}

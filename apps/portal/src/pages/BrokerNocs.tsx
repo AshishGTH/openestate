@@ -46,10 +46,10 @@ export default function BrokerNocs() {
       <div className="space-y-2">
         {data?.map((n) => (
           <div key={n.id} className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-900">{n.bookingNumber ?? '—'}</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-slate-900 truncate min-w-0">{n.bookingNumber ?? '—'}</span>
               <span
-                className={`text-xs rounded-full px-2 py-0.5 ${
+                className={`text-xs rounded-full px-2 py-0.5 shrink-0 ${
                   n.status === 'APPROVED'
                     ? 'bg-green-100 text-green-700'
                     : n.status === 'REJECTED'
