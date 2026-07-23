@@ -16,6 +16,8 @@ import { CancellationService } from '../../src/postsales/cancellation.service';
 import { RefundService } from '../../src/postsales/refund.service';
 import { ExtraChargeService } from '../../src/postsales/extra-charge.service';
 import { UnitStateMachineService } from '../../src/inventory/unit-state-machine.service';
+import { NotificationService } from '../../src/notifications/notification.service';
+import { ConsoleCommunicationProvider, type CommunicationProvider } from '../../src/queues/communication-provider';
 
 export interface Services {
   numbers: NumberSequenceService;
@@ -37,17 +39,22 @@ export function buildServices(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   systemPrisma: any,
   clock: Clock,
+  // Defaults to the real dev provider (just logs) — pass a spy
+  // (implements CommunicationProvider) from a notification-specific test
+  // to assert on what NotificationService actually sent.
+  notificationProvider: CommunicationProvider = new ConsoleCommunicationProvider(),
 ): Services {
   const numbers = new NumberSequenceService();
   const ledger = new LedgerService(tenantPrisma);
   const stateMachine = new UnitStateMachineService(tenantPrisma);
+  const notifications = new NotificationService(systemPrisma, notificationProvider);
   return {
     numbers,
     ledger,
     stateMachine,
     bookings: new BookingService(tenantPrisma, systemPrisma, stateMachine, ledger, numbers),
     plans: new PaymentPlanService(tenantPrisma, systemPrisma),
-    receipts: new ReceiptService(tenantPrisma, systemPrisma, ledger, numbers),
+    receipts: new ReceiptService(tenantPrisma, systemPrisma, ledger, numbers, notifications),
     interest: new InterestService(tenantPrisma, systemPrisma, clock, ledger),
     transfers: new TransferService(tenantPrisma, stateMachine, ledger, numbers),
     cancellations: new CancellationService(tenantPrisma, stateMachine, ledger),

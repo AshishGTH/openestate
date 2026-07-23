@@ -21,6 +21,15 @@ export const updateCompanyConfigSchema = z
     timezone: z.string().max(50).optional(),
     fyStartMonth: z.number().int().min(1).max(12).optional(),
     dateFormat: z.string().max(20).optional(),
+    // Phase 6: portal branding (logo + accent color shown in apps/portal).
+    // Nullable so staff can explicitly clear a previously-set value, not
+    // just overwrite it with a new one.
+    logoUrl: z.string().url().max(500).nullable().optional(),
+    primaryColorHex: z
+      .string()
+      .regex(/^#[0-9A-Fa-f]{6}$/, 'Must be a 6-digit hex color, e.g. #2563EB')
+      .nullable()
+      .optional(),
   })
   .strict();
 

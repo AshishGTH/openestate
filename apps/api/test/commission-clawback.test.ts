@@ -34,6 +34,8 @@ import {
 import { BrokerCommissionRuleService } from '../src/brokers/broker-commission-rule.service';
 import { CommissionService } from '../src/commission/commission.service';
 import { CommissionPaymentService } from '../src/commission/commission-payment.service';
+import { NotificationService } from '../src/notifications/notification.service';
+import { ConsoleCommunicationProvider } from '../src/queues/communication-provider';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -65,7 +67,7 @@ describeIf('Commission clawback reconciliation (fast-check)', () => {
     svc = buildServices(tenantPrisma, systemPrisma, SYSTEM_CLOCK);
     rules = new BrokerCommissionRuleService(tenantPrisma, systemPrisma);
     commission = new CommissionService(tenantPrisma, systemPrisma, rules);
-    payments = new CommissionPaymentService(tenantPrisma, systemPrisma, commission);
+    payments = new CommissionPaymentService(tenantPrisma, systemPrisma, commission, new NotificationService(systemPrisma, new ConsoleCommunicationProvider()));
     fx = await seedCompany(systemPrisma);
     // No TdsRule for 194-H in this fixture — isolates the property test to
     // clawback arithmetic; 194-H correctness has its own dedicated test.

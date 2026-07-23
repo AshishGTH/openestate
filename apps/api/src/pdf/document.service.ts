@@ -3,6 +3,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
 import {
   GENERATED_DOCUMENT_TYPE,
+  NOTIFICATION_EVENT,
   formatInr,
   resolveMergeFields,
   type GeneratedDocumentTypeValue,
@@ -11,6 +12,7 @@ import {
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import { UploadService } from '../inventory/upload.service';
 import { LedgerService } from '../postsales/ledger.service';
+import { NotificationService } from '../notifications/notification.service';
 import { PdfService } from './pdf.service';
 import {
   buildReceiptDocDefinition,
@@ -33,6 +35,7 @@ export class DocumentService {
     private readonly pdfService: PdfService,
     private readonly uploadService: UploadService,
     private readonly ledger: LedgerService,
+    private readonly notifications: NotificationService,
   ) {}
 
   // ── RECEIPT ────────────────────────────────────────────────
@@ -272,7 +275,7 @@ export class DocumentService {
       buildLetterDocDefinition({ subject, body, companyName: booking.company.name, companyAddress: '' }),
     );
 
-    return this.store(companyId, buffer, {
+    const doc = await this.store(companyId, buffer, {
       documentType,
       bookingId,
       applicantId: booking.primaryApplicantId,
@@ -280,6 +283,22 @@ export class DocumentService {
       originalName: `${documentType.toLowerCase()}-${booking.bookingNumber}.pdf`,
       createdById: actorId,
     });
+
+    // Notification only for DEMAND_LETTER — ALLOTMENT_LETTER/REMINDER_LETTER
+    // share this method but aren't in the 5 triggered events. Fired AFTER
+    // store()'s withTenantTx commits (CLAUDE.md Phase 1 rule: no external
+    // I/O inside a tenant transaction).
+    if (documentType === GENERATED_DOCUMENT_TYPE.DEMAND_LETTER && booking.primaryApplicantId) {
+      await this.notifications.notify(
+        companyId,
+        NOTIFICATION_EVENT.DEMAND_LETTER_ISSUED,
+        { applicantId: booking.primaryApplicantId },
+        subject,
+        body,
+      );
+    }
+
+    return doc;
   }
 
   private async buildLetterContext(

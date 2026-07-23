@@ -3,6 +3,8 @@ import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
 import {
   COMMISSION_PAYMENT_STATUS,
   COMMISSION_ENTRY_TYPE,
+  NOTIFICATION_EVENT,
+  formatInr,
   percentOf,
   allocate,
   type RequestCommissionPaymentDto,
@@ -10,6 +12,7 @@ import {
 } from '@openestate/shared';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import { CommissionService } from './commission.service';
+import { NotificationService } from '../notifications/notification.service';
 
 /**
  * REQUESTED -> APPROVED -> PAID | REJECTED, mirroring RefundStatus's shape
@@ -45,6 +48,7 @@ export class CommissionPaymentService {
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
     private readonly commission: CommissionService,
+    private readonly notifications: NotificationService,
   ) {}
 
   async history(companyId: string, brokerId: string) {
@@ -125,7 +129,7 @@ export class CommissionPaymentService {
    * for a broker paid across multiple bookings in one CommissionPayment.
    */
   async pay(companyId: string, paymentId: string, dto: PayCommissionPaymentDto, actorId: string | null) {
-    return runWithTenant({ companyId }, () =>
+    const paid = await runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
         const payment = await tx.commissionPayment.findFirst({ where: { id: paymentId, companyId } });
         if (!payment) throw new NotFoundException('Commission payment not found');
@@ -228,5 +232,16 @@ export class CommissionPaymentService {
         });
       }),
     );
+
+    // Fired AFTER the transaction commits (CLAUDE.md Phase 1 rule).
+    await this.notifications.notify(
+      companyId,
+      NOTIFICATION_EVENT.COMMISSION_PAID,
+      { brokerId: paid.brokerId },
+      'Commission payment processed',
+      `A commission payment of ${formatInr(paid.amountPaise)} has been processed.`,
+    );
+
+    return paid;
   }
 }

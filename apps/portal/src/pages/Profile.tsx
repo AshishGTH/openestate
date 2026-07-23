@@ -41,22 +41,24 @@ export default function Profile() {
 function ApplicantCard({ applicant, isSelf }: { applicant: Applicant; isSelf: boolean }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-4">
-      <div className="flex items-center justify-between">
-        <span className="font-medium text-slate-900">{applicant.name}</span>
-        {isSelf && <span className="text-xs rounded-full bg-blue-50 text-blue-700 px-2 py-0.5">You</span>}
-        {!isSelf && <span className="text-xs rounded-full bg-slate-100 text-slate-600 px-2 py-0.5">Co-applicant</span>}
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium text-slate-900 truncate min-w-0">{applicant.name}</span>
+        {isSelf && <span className="text-xs rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 shrink-0">You</span>}
+        {!isSelf && (
+          <span className="text-xs rounded-full bg-slate-100 text-slate-600 px-2 py-0.5 shrink-0">Co-applicant</span>
+        )}
       </div>
       <dl className="mt-2 text-sm text-slate-600 space-y-1">
-        <div className="flex justify-between">
+        <div className="flex justify-between gap-2 flex-wrap">
           <dt>Phone</dt>
           <dd>{applicant.primaryPhone}</dd>
         </div>
-        <div className="flex justify-between">
+        <div className="flex justify-between gap-2 flex-wrap">
           <dt>Email</dt>
           <dd>{applicant.email ?? '—'}</dd>
         </div>
         {applicant.alternatePhones.length > 0 && (
-          <div className="flex justify-between">
+          <div className="flex justify-between gap-2 flex-wrap">
             <dt>Alt. phones</dt>
             <dd>{applicant.alternatePhones.join(', ')}</dd>
           </div>

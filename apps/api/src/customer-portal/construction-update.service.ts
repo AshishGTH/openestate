@@ -1,8 +1,9 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { withTenantTx } from '@openestate/db';
-import type { CreateConstructionUpdateDto } from '@openestate/shared';
-import { TENANT_PRISMA } from '../database/database.module';
+import { withTenantTx, type PrismaClient } from '@openestate/db';
+import { NOTIFICATION_EVENT, type CreateConstructionUpdateDto } from '@openestate/shared';
+import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import { UploadService } from '../inventory/upload.service';
+import { NotificationService } from '../notifications/notification.service';
 
 @Injectable()
 export class ConstructionUpdateService {
@@ -10,11 +11,14 @@ export class ConstructionUpdateService {
     @Inject(TENANT_PRISMA)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private readonly tenantPrisma: any,
+    @Inject(SYSTEM_PRISMA)
+    private readonly systemPrisma: PrismaClient,
     private readonly uploadService: UploadService,
+    private readonly notifications: NotificationService,
   ) {}
 
   async create(companyId: string, createdById: string, dto: CreateConstructionUpdateDto) {
-    return withTenantTx(this.tenantPrisma, companyId, (tx) =>
+    const update = await withTenantTx(this.tenantPrisma, companyId, (tx) =>
       tx.constructionUpdate.create({
         data: {
           companyId,
@@ -26,6 +30,29 @@ export class ConstructionUpdateService {
         },
       }),
     );
+
+    // Fired AFTER the transaction commits. Primary applicants only —
+    // matches the sole notification-audience convention already used
+    // everywhere else in this codebase (DocumentService's letters,
+    // DispatchService); co-applicant expansion is new scope, not a
+    // precedent, and stays out of this trigger.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bookings: any[] = await this.systemPrisma.booking.findMany({
+      where: { companyId, unit: { floor: { tower: { projectId: dto.projectId } } } },
+      select: { primaryApplicantId: true },
+    });
+    const applicantIds = [...new Set(bookings.map((b) => b.primaryApplicantId as string))];
+    for (const applicantId of applicantIds) {
+      await this.notifications.notify(
+        companyId,
+        NOTIFICATION_EVENT.CONSTRUCTION_UPDATE_PUBLISHED,
+        { applicantId },
+        `New update: ${update.title}`,
+        update.description ?? update.title,
+      );
+    }
+
+    return update;
   }
 
   async addMedia(companyId: string, updateId: string, file: { buffer: Buffer; originalname: string; size: number }) {

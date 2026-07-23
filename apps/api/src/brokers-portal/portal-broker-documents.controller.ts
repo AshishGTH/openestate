@@ -1,13 +1,15 @@
-import { BadRequestException, Controller, Get, Param, Req, Res } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Param, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { PERMISSIONS } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
+import { PortalReadThrottlerGuard } from '../portal-auth/portal-throttler.guard';
 import { DocumentService } from '../pdf/document.service';
 
 @ApiTags('Portal Broker Documents')
 @Controller('portal/broker/documents')
+@UseGuards(PortalReadThrottlerGuard)
 export class PortalBrokerDocumentsController {
   constructor(private readonly documents: DocumentService) {}
 

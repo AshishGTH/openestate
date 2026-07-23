@@ -1,10 +1,11 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import { createTicketSchema, addTicketMessageSchema, PERMISSIONS } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
+import { PortalReadThrottlerGuard } from '../portal-auth/portal-throttler.guard';
 import { TicketService } from './ticket.service';
 
 class CreateTicketDto extends createZodDto(createTicketSchema) {}
@@ -12,6 +13,7 @@ class AddTicketMessageDto extends createZodDto(addTicketMessageSchema) {}
 
 @ApiTags('Portal Tickets')
 @Controller('portal/tickets')
+@UseGuards(PortalReadThrottlerGuard)
 export class PortalTicketController {
   constructor(private readonly tickets: TicketService) {}
 

@@ -1,7 +1,8 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaClient, withTenantTx } from '@openestate/db';
-import { TICKET_STATUS, type CreateTicketDto, type TicketStatusValue } from '@openestate/shared';
+import { NOTIFICATION_EVENT, TICKET_STATUS, type CreateTicketDto, type TicketStatusValue } from '@openestate/shared';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
+import { NotificationService } from '../notifications/notification.service';
 
 interface PortalScope {
   applicantId?: string;
@@ -23,6 +24,7 @@ export class TicketService {
     private readonly tenantPrisma: any,
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
+    private readonly notifications: NotificationService,
   ) {}
 
   /** Category picklist for the portal's "raise a query" form — TicketCategory is
@@ -73,11 +75,35 @@ export class TicketService {
   }
 
   async addMessage(companyId: string, ticketId: string, authorId: string, authorIsStaff: boolean, body: string) {
-    return withTenantTx(this.tenantPrisma, companyId, async (tx) => {
-      const ticket = await tx.ticket.findFirst({ where: { id: ticketId } });
-      if (!ticket) throw new NotFoundException('Ticket not found');
-      return tx.ticketMessage.create({ data: { companyId, ticketId, authorId, authorIsStaff, body } });
+    const { message, ticket } = await withTenantTx(this.tenantPrisma, companyId, async (tx) => {
+      const t = await tx.ticket.findFirst({ where: { id: ticketId } });
+      if (!t) throw new NotFoundException('Ticket not found');
+      const m = await tx.ticketMessage.create({ data: { companyId, ticketId, authorId, authorIsStaff, body } });
+      return { message: m, ticket: t };
     });
+
+    // Only a STAFF reply notifies the portal user — the portal-side
+    // addMessage() call (authorIsStaff=false) is the customer/broker's
+    // own message, nothing to notify them about. Fired after the tx
+    // commits (CLAUDE.md Phase 1 rule).
+    if (authorIsStaff) {
+      const recipient = ticket.applicantId
+        ? { applicantId: ticket.applicantId as string }
+        : ticket.brokerId
+          ? { brokerId: ticket.brokerId as string }
+          : null;
+      if (recipient) {
+        await this.notifications.notify(
+          companyId,
+          NOTIFICATION_EVENT.QUERY_REPLIED,
+          recipient,
+          `Reply to: ${ticket.subject}`,
+          body,
+        );
+      }
+    }
+
+    return message;
   }
 
   /** Staff queue — system client, unscoped within the company. */

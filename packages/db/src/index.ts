@@ -16,6 +16,7 @@ export {
   getCurrentPortalApplicantId,
   getCurrentPortalBrokerId,
   runWithTenant,
+  runScoped,
   enterTenantContext,
 } from './tenant-context';
 export type { TenantStore, TenantTxStore } from './tenant-context';

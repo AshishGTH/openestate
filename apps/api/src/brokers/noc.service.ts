@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaClient, withTenantTx, runWithTenant, getCurrentCompanyId } from '@openestate/db';
+import { PrismaClient, withTenantTx, runScoped } from '@openestate/db';
 import { NOC_STATUS, type RequestNocDto, type RejectNocDto } from '@openestate/shared';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 
@@ -8,14 +8,17 @@ import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
  * (apps/api/src/postsales/refund.service.ts, frozen — used only as a
  * design template, never imported). request() is staff-only;
  * approve()/reject() are shared by the staff NocController (Phase 5) AND
- * the broker portal (Phase 6 commit 3, see runScoped()'s doc comment for
- * why that reuse needed a context-shadowing fix). Each is its own
- * withTenantTx — same independence as RefundService.request/.approve.
- * assertApprovedOrAutoApprove() is the gate consumed by
- * BookingController.cancel() (commit 2): it takes an ALREADY-OPEN tx so
- * it joins that controller's outer transaction via withTenantTx's
- * same-companyId nesting-reuse (see CLAUDE.md Phase 5 decisions) rather
- * than opening its own.
+ * the broker portal (Phase 6 commit 3, see @openestate/db's runScoped()
+ * doc comment for why that reuse needed a context-shadowing fix — this
+ * was the first real call site to hit the bug; runScoped() has since
+ * been promoted to the shared db package, Phase 6 commit 4, so future
+ * dual-purpose services reuse one implementation instead of
+ * reinventing it). Each is its own withTenantTx — same independence as
+ * RefundService.request/.approve. assertApprovedOrAutoApprove() is the
+ * gate consumed by BookingController.cancel() (commit 2): it takes an
+ * ALREADY-OPEN tx so it joins that controller's outer transaction via
+ * withTenantTx's same-companyId nesting-reuse (see CLAUDE.md Phase 5
+ * decisions) rather than opening its own.
  */
 @Injectable()
 export class NocService {
@@ -29,29 +32,6 @@ export class NocService {
 
   async findForBooking(companyId: string, bookingId: string) {
     return this.systemPrisma.brokerNoc.findMany({ where: { companyId, bookingId }, orderBy: { createdAt: 'desc' } });
-  }
-
-  /**
-   * Reuses the ambient tenant context when one is already active for this
-   * companyId (established by TenantContextInterceptor on every real
-   * request, or by a test's own runWithTenant) instead of unconditionally
-   * shadowing it with a companyId-only runWithTenant(). Unconditional
-   * self-wrapping is exactly what applicant-change-request.service.ts's
-   * own doc comment warns against for portal-facing methods — request()/
-   * approve()/reject() below are BOTH staff- AND (Phase 6 commit 3)
-   * broker-portal-facing, and shadowing the ambient store here silently
-   * strips portalBrokerId, turning PORTAL_SCOPED_MODELS' brokerId
-   * narrowing into a no-op — a real IDOR this method shipped with until
-   * broker-portal.test.ts's IDOR test caught it (a broker approving
-   * another broker's NOC via the portal). Falls back to self-wrapping
-   * only when there is NO ambient context at all (e.g.
-   * noc-cancellation.test.ts's direct `new NocService(...)` calls with no
-   * enclosing runWithTenant), preserving that existing test contract
-   * unchanged.
-   */
-  private runScoped<T>(companyId: string, fn: () => Promise<T>): Promise<T> {
-    if (getCurrentCompanyId() === companyId) return fn();
-    return runWithTenant({ companyId }, fn);
   }
 
   /**
@@ -88,7 +68,7 @@ export class NocService {
     const brokerId: string | null = booking.brokerId;
     if (!brokerId) throw new BadRequestException('Booking has no sourcing broker');
 
-    return this.runScoped(companyId, () =>
+    return runScoped(companyId, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>
         tx.brokerNoc.create({
           data: {
@@ -105,7 +85,7 @@ export class NocService {
   }
 
   async approve(companyId: string, nocId: string, actorId: string | null) {
-    return this.runScoped(companyId, () =>
+    return runScoped(companyId, () =>
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
         const noc = await tx.brokerNoc.findFirst({ where: { id: nocId, companyId } });
         if (!noc) throw new NotFoundException('NOC not found');
@@ -121,7 +101,7 @@ export class NocService {
   }
 
   async reject(companyId: string, nocId: string, dto: RejectNocDto, actorId: string | null) {
-    return this.runScoped(companyId, () =>
+    return runScoped(companyId, () =>
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
         const noc = await tx.brokerNoc.findFirst({ where: { id: nocId, companyId } });
         if (!noc) throw new NotFoundException('NOC not found');

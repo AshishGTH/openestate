@@ -110,9 +110,9 @@ export default function Tickets() {
             to={`/tickets/${t.id}`}
             className="block rounded-lg border border-slate-200 bg-white p-3"
           >
-            <div className="flex items-center justify-between">
-              <span className="text-sm font-medium text-slate-900">{t.subject}</span>
-              <span className="text-xs rounded-full bg-slate-100 text-slate-600 px-2 py-0.5">{t.status}</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium text-slate-900 truncate min-w-0">{t.subject}</span>
+              <span className="text-xs rounded-full bg-slate-100 text-slate-600 px-2 py-0.5 shrink-0">{t.status}</span>
             </div>
             <span className="text-xs text-slate-400">{new Date(t.createdAt).toLocaleDateString('en-IN')}</span>
           </Link>

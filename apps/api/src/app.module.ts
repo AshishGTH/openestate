@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { HealthModule } from './health/health.module';
@@ -22,7 +22,9 @@ import { BrokerReportsModule } from './reports/broker-reports.module';
 import { BrokersModule } from './brokers/brokers.module';
 import { CommissionModule } from './commission/commission.module';
 import { QueuesModule } from './queues/queues.module';
+import { NotificationModule } from './notifications/notification.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { DefaultThrottlerGuard } from './auth/guards/default-throttler.guard';
 import { TenantContextInterceptor } from './auth/interceptors/tenant-context.interceptor';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { CsrfGuard } from './auth/csrf.guard';
@@ -44,11 +46,23 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
         autoLogging: true,
       },
     }),
+    // Single, application-wide registration of every named throttler
+    // bucket (the unnamed/'default' staff bucket, plus PortalAuthModule's
+    // 'portal-auth'/'portal-read' buckets) — see DefaultThrottlerGuard's
+    // doc comment for why there must be exactly ONE ThrottlerModule.forRoot()
+    // call anywhere in this app's module graph: @nestjs/throttler's
+    // ThrottlerModule is @Global(), so a SECOND forRoot() call (as
+    // PortalAuthModule's own used to be) creates a second, competing
+    // global THROTTLER_OPTIONS registration — which of the two "wins" for
+    // any given consumer is compile-order-dependent, not something to
+    // rely on (empirically proven flaky by a real bug this fixes: the
+    // portal-read rate-limit test intermittently either leaked the tiny
+    // portal-auth bucket onto every staff/portal-read route, or caused
+    // PortalAuthThrottlerGuard's own bucket to silently stop enforcing).
     ThrottlerModule.forRoot([
-      {
-        ttl: 60_000,
-        limit: 100,
-      },
+      { ttl: 60_000, limit: 100 },
+      { name: 'portal-auth', ttl: 300_000, limit: 5 },
+      { name: 'portal-read', ttl: 60_000, limit: 60 },
     ]),
     DatabaseModule,
     HealthModule,
@@ -60,6 +74,7 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     CompanyModule,
     AuditModule,
     QueuesModule,
+    NotificationModule,
     InventoryModule,
     PresalesModule,
     PostsalesModule,
@@ -74,7 +89,13 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     BrokersPortalModule,
   ],
   providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Filtered to the unnamed/'default' bucket only — see
+    // DefaultThrottlerGuard's doc comment for the real bug (Phase 6
+    // commit 4) this fixes: ThrottlerModule is @Global(), so the plain
+    // ThrottlerGuard class would otherwise pick up PortalAuthModule's
+    // 'portal-auth'/'portal-read' buckets too and enforce them on every
+    // route in the app, including staff routes.
+    { provide: APP_GUARD, useClass: DefaultThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
