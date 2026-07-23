@@ -103,3 +103,84 @@ they're expected to land. Each entry should say *what*, *why deferred*, and
   is chosen should also close the identical gap
   `e2e-portal.test.ts`'s own comment already flagged for id-based
   assertions.
+
+## Plugins (Phase 7)
+
+- **Plugin execution has no worker-thread/process isolation — a genuine
+  synchronous infinite loop in a plugin hook blocks the single Node event
+  loop and cannot be preempted by `PluginRuntimeService.invoke()`'s
+  `Promise.race` timeout.** Stated plainly in CLAUDE.md Phase 7 decisions
+  and in the plan's Trust Model section: first-party plugins ship as
+  reviewed npm workspace packages inside this repo, not untrusted code in
+  a marketplace, so the isolation boundary (package-boundary — no
+  `@openestate/db` dependency at all; capability-gated `Proxy` context;
+  timeout+catch-all `invoke()` wrapper) defends against the Phase 6-style
+  *composition* bug class and against accidental misbehavior, not against
+  deliberately hostile code. If this project ever accepts untrusted
+  third-party plugins, real isolation (a `worker_threads` sandbox or a
+  separate process per plugin invocation, with message-passing instead of
+  direct object references for `PluginContext`) is required before that
+  trust boundary can move. Unblocked by: a decision to support untrusted
+  plugins at all, which has real design cost (message-passing context,
+  serialization limits on what `ctx.http`/`ctx.leads` can return, a new
+  process-lifecycle story) — not attempted speculatively here.
+- **Redis-backed `ThrottlerStorage` gap (see the Phase 1/6 entry above)
+  will also apply to the `lead-inbound` named throttler once it's added
+  in commit 2** — same single `ThrottlerModule.forRoot([...])` call,
+  same in-memory-storage limitation, no new gap introduced, just noting
+  the surface area grows by one more bucket.
+
+## Full-suite (`pnpm test`) contention failure in `postsales-property.test.ts`'s cleanup (Phase 4, discovered during Phase 7 commit 1's pipeline run)
+
+- **`test/postsales-property.test.ts`'s `afterAll` cleanup
+  (`cleanupCompany`) fails with a foreign-key violation when run as part
+  of the FULL monorepo `pnpm test` (all ~42 apps/api test files plus
+  every other package's suite running concurrently), but passes cleanly
+  and quickly (96s, 500 runs) when run in isolation
+  (`npx vitest run test/postsales-property.test.ts`) — confirmed a
+  contention/timing issue, not a logic bug, and confirmed unrelated to
+  Phase 7's plugin work.** Evidence gathered across four full-pipeline
+  attempts, each against a database freshly recreated via
+  `scripts/test-setup.sh teardown` + re-run (ruling out stale-data
+  contamination):
+  1. `PROPERTY_NUM_RUNS=2000` (matches the nightly-schedule CI setting):
+     failed with `bookings_unit_id_fkey` violated on `DELETE FROM units`.
+  2. `PROPERTY_NUM_RUNS=500` (matches the actual PR/push CI setting,
+     `.github/workflows/ci.yml`'s
+     `github.event_name == 'schedule' && '2000' || '500'` split, Phase 4
+     decisions): failed the SAME way, taking essentially the same
+     ~600-613s wall-clock time as the 2000-run attempt — despite 500
+     runs completing in 96s flat when isolated, which is the first sign
+     this isn't about iteration count.
+  3. A repeat of (2) on another freshly-recreated database: failed with
+     a DIFFERENT foreign key —
+     `receipt_allocations_installment_id_fkey` on `DELETE FROM
+     installments` — a different table pair than attempt 1 or 2. A fixed
+     ordering bug in `cleanupCompany`'s deletion sequence (verified
+     correct on inspection: `bookings` before `units`,
+     `receipt_allocations` before `installments`) would fail on the SAME
+     constraint every time; a different constraint failing on each
+     attempt, at the same ~600s ceiling regardless of run count, points
+     to resource contention (connection pool pressure, statement
+     scheduling) across the ~42-file concurrent suite on this local
+     Docker Desktop setup, not a deterministic code defect.
+  4. Isolated single-file run, `PROPERTY_NUM_RUNS=500`, no other test
+     file running concurrently: passed cleanly in 96s.
+
+  This Phase 7 session did not modify `postsales-property.test.ts`,
+  `postsales-harness.ts`, or any Booking/Unit/Ledger/Receipt service —
+  every other package and 41 of 42 `apps/api` test files passed cleanly
+  in the same full-pipeline runs (`Tasks: 8 successful, 9 total` at the
+  turbo level; `41 passed | 271 passed` at the apps/api vitest level,
+  every time). Not fixed here: out of scope for Phase 7, and root-causing
+  connection/resource contention on one local machine's Docker setup
+  isn't something a code change to frozen Phase 4 logic should attempt
+  speculatively. Same class of "only reproduces under the full
+  concurrent suite, not in isolation" issue already documented for
+  `makeApplicant()`'s phone-counter collision (Phase 6 commit 4 entry
+  above) — not silently dropped, flagged here for whoever investigates
+  next. Unblocked by: profiling Postgres connection count
+  (`pg_stat_activity`) DURING a live full-suite run (not after, when it's
+  already idle) to confirm/refute connection-pool exhaustion as the
+  mechanism, or reducing vitest's fork/pool concurrency for apps/api
+  specifically and re-measuring.

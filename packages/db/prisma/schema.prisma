@@ -100,6 +100,7 @@ model Company {
   ticketMessages           TicketMessage[]
   constructionUpdates      ConstructionUpdate[]
   constructionUpdateMedia  ConstructionUpdateMedia[]
+  pluginInstallations      PluginInstallation[]
 
   @@map("companies")
 }
@@ -2236,4 +2237,30 @@ model ConstructionUpdateMedia {
   update  ConstructionUpdate @relation(fields: [constructionUpdateId], references: [id], onDelete: Cascade)
 
   @@map("construction_update_media")
+}
+
+/// Phase 7: per-company installation state for a plugin. The plugin
+/// DEFINITION (manifest, hooks) is code — plugins/* packages, loaded into
+/// an in-memory registry at boot (PluginRegistryService) — this table
+/// only tracks whether a company has installed/enabled one, and its
+/// encrypted config. pluginId is NOT a foreign key: the registry it
+/// refers to is code, not a database table (see CLAUDE.md Phase 7
+/// decisions for why there is no Plugin catalog table).
+model PluginInstallation {
+  id               String    @id @default(uuid()) @db.Uuid
+  companyId        String    @map("company_id") @db.Uuid
+  pluginId         String    @map("plugin_id") @db.VarChar(100)
+  isEnabled        Boolean   @default(false) @map("is_enabled")
+  /// AES-256-GCM ciphertext of the whole config object (PluginSecretEncryptionService).
+  /// NEVER the plaintext — see CLAUDE.md Phase 7 decisions §6/addendum A1.
+  configCiphertext String?   @map("config_ciphertext") @db.Text
+  secretKeyVersion Int?      @map("secret_key_version")
+  installedById    String?   @map("installed_by_id") @db.Uuid
+  installedAt      DateTime  @default(now()) @map("installed_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@unique([companyId, pluginId])
+  @@map("plugin_installations")
 }

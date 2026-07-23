@@ -45,6 +45,6 @@ import { ReportsService } from './reports.service';
     EscalationScheduler,
     ReportsService,
   ],
-  exports: [CLOCK, AssignmentService, EscalationService],
+  exports: [CLOCK, AssignmentService, EscalationService, ApplicantService],
 })
 export class PresalesModule {}

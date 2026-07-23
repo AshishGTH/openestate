@@ -30,6 +30,12 @@ export const PERMISSIONS = {
   ADMIN_TICKET_RESPOND: 'admin.ticket.respond',
   ADMIN_PORTAL_INVITE_SEND: 'admin.portal-invite.send',
   ADMIN_CONSTRUCTION_UPDATE_MANAGE: 'admin.construction-update.manage',
+  // Phase 7: plugin install/enable/configure. Same 2-permission
+  // read/manage shape as ADMIN_CONFIG_READ/UPDATE — plugin admin isn't
+  // granular enough (install vs configure vs enable) to warrant 5
+  // separate keys the way booking/unit actions are.
+  ADMIN_PLUGIN_READ: 'admin.plugin.read',
+  ADMIN_PLUGIN_MANAGE: 'admin.plugin.manage',
 
   // ── Inventory ─────────────────────────────────────
   INVENTORY_PROJECT_READ: 'inventory.project.read',

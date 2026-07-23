@@ -97,6 +97,10 @@ const AUDITED_MODELS = new Set([
   'ConstructionUpdate',
   'ConstructionUpdateMedia',
   'PortalInvite',
+  // Phase 7: plugin installation lifecycle is a staff-accountable
+  // action, audited like any other admin config change. configCiphertext
+  // is redacted below, same treatment as panCiphertext/tokenHash.
+  'PluginInstallation',
 ]);
 
 const SENSITIVE_FIELDS = new Set([
@@ -115,6 +119,13 @@ const SENSITIVE_FIELDS = new Set([
   // passwordHash/totpSecret above.
   'tokenHash',
   'token_hash',
+  // Phase 7: plugin config secrets (and, in a later commit, webhook
+  // signing secrets and lead API key hashes) — same reasoning as
+  // panCiphertext/tokenHash above: the encrypted blob itself is
+  // redundant-but-safe to redact from audit diffs, keeps rows small and
+  // honest.
+  'configCiphertext',
+  'config_ciphertext',
 ]);
 
 function sanitize(data: unknown): unknown {

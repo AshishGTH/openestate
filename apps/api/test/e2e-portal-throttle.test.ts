@@ -54,6 +54,7 @@ async function bootstrapApp(): Promise<INestApplication> {
   process.env.JWT_REFRESH_SECRET ??= 'e2e-test-refresh-secret-0123456789';
   process.env.PAN_ENCRYPTION_KEY ??= 'a1b2c3d4'.repeat(8);
   process.env.TOTP_ENCRYPTION_KEY ??= 'e5f6a7b8'.repeat(8);
+  process.env.PLUGIN_SECRET_ENCRYPTION_KEYS ??= `1:${'c9d8e7f6'.repeat(8)}`;
   process.env.CORS_ALLOWLIST ??= 'http://localhost:5174';
   process.env.SWAGGER_ENABLED = 'false';
 
