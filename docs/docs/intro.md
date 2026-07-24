@@ -20,4 +20,6 @@ filled in as each build phase lands:
 - **API reference** — generated from the OpenAPI spec (Phase 0+)
 - **Plugin development** — writing a plugin, the `generic-sales` recipe (Phase 7)
 - **Customization guide** — custom fields, terminology, module flags (Phase 1)
-- **Security** — threat model, ASVS checklist, disclosure policy (Phase 8)
+- **Security** — [ASVS L2 self-assessment](./security/asvs-checklist.md)
+  and [STRIDE threat model](./security/threat-model.md) (Phase 8);
+  disclosure policy in the repo's [SECURITY.md](https://github.com/openestate/openestate/blob/main/SECURITY.md)

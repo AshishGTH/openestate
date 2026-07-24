@@ -8,11 +8,8 @@ ask that you report vulnerabilities responsibly.
 
 **Do not open a public GitHub issue for a security vulnerability.**
 
-<!-- TODO: replace with a real reporting channel before this repo goes public
-     — e.g. GitHub Security Advisories ("Report a vulnerability" under the
-     Security tab), or a dedicated security@your-domain.tld address. -->
-
-Instead, report it privately via **TODO: add a real disclosure channel**.
+Instead, report it privately via this repository's **GitHub Security
+Advisories** ("Report a vulnerability" under the repo's Security tab).
 Please include:
 
 - A description of the vulnerability and its potential impact
@@ -42,14 +39,16 @@ deliberately open `CORS_ALLOWLIST`).
 
 ## Supported versions
 
-Until the first tagged release (v0.1.0, Phase 8), only the `main` branch is
-supported. After v0.1.0, this section will list which versions receive
-security fixes.
+v0.1.0 is the first tagged release. Until a v0.2.0 or later release exists,
+only `v0.1.0` and the `main` branch are supported — this section will be
+expanded with a real version-support table once there is more than one
+tagged release to choose between.
 
 ## Project security posture
 
 See [CLAUDE.md](CLAUDE.md) for the security rules every change in this repo
 must follow: input validation, RBAC + Postgres row-level security,
 append-only financial ledgers, PAN encryption at rest, audit logging, and
-more. Phase 8 adds a formal OWASP ASVS L2 self-checklist and a STRIDE threat
-model per module under `docs/security/`.
+more. A formal OWASP ASVS L2 self-checklist and a STRIDE threat model per
+module live in the docs site: `docs/docs/security/asvs-checklist.md` and
+`docs/docs/security/threat-model.md`.

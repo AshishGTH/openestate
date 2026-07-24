@@ -4,7 +4,12 @@
 const config = {
   title: 'OpenEstate',
   tagline: 'Self-hosted, open-source CRM for real estate — and beyond.',
-  favicon: 'img/favicon.ico',
+  // No favicon shipped yet — no real brand asset exists in this repo to
+  // reference (docs/static/ was an empty, git-untracked directory until
+  // Phase 8 gave the docs site its first real build verification; found
+  // while confirming the new security docs pages actually compile).
+  // Omitting `favicon` is valid Docusaurus config; add a real one before
+  // going public rather than fabricating a placeholder icon.
   url: 'https://openestate.example.com',
   baseUrl: '/',
   organizationName: 'openestate',
