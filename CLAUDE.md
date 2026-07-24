@@ -1795,3 +1795,99 @@ this is a log, not a design doc.
   .retry()`'s new-row-per-retry pattern for document dispatch (Phase
   4-UI decisions) — just achieved differently here because BullMQ's own
   attempt tracking is job-scoped, not something to fight.
+
+### Phase 7 — generic-sales-and-UI (commit 3 of 3)
+
+- **`plugins/generic-sales` is purely declarative — `terminologyOverrides`/
+  `enabledModules`/`customFieldSeeds` are plain data on `plugin.hooks`,
+  not functions, and `capabilities: []` since nothing here needs a
+  runtime `ctx` method.** `PluginAdminService.install()` reads these
+  three fields directly and applies them through the SAME
+  `CompanyService.updateConfig()`/`CustomFieldsService.create()` calls a
+  staff admin would make by hand — no new core surface, matching §7's
+  "no new database tables, no new HTTP routes, no schema columns"
+  boundary literally, not just in spirit.
+- **`terminologyOverrides` MERGES onto the company's existing
+  `labelOverrides`; `enabledModules` is a full replace.** A blind
+  `Prisma.update({ data: { labelOverrides: {...} } })` would silently
+  discard any admin-set override for a key the plugin doesn't touch
+  (Prisma JSON writes replace the whole column, no partial merge) — so
+  `applyVerticalHooks()` reads the current config first and spreads the
+  plugin's overrides on top. `enabledModules` intentionally is NOT
+  merged — it's a full replace, matching how the existing admin config
+  screen already sets the whole array, not a delta; a plugin's module
+  list IS the company's module list going forward, not an addition to it.
+- **`customFieldSeeds` application is idempotent by skip, not by
+  upsert** — `applyVerticalHooks()` checks for an existing
+  `(companyId, entityType, key)` row before calling
+  `CustomFieldsService.create()` and simply skips if found, rather than
+  updating it. An uninstall→reinstall cycle (or, if this phase's
+  `install()` were ever called twice by a race) must not crash on
+  `CustomFieldsService.create()`'s own duplicate-key
+  `BadRequestException`, and must not silently overwrite a label/
+  options an admin has since hand-edited on that custom field.
+- **Real gap found while writing `generic-sales.test.ts`, not by
+  review: `cleanupCompany` (the shared financial-harness test teardown,
+  Phase 4) had never deleted `custom_field_definitions` — no test using
+  that harness had ever created one before this phase's own test was
+  the first.** Same class of gap as the `inquiries`/`follow_ups`/etc.
+  omission the lead-inbound tests found in commit 2 (that entry, above):
+  a harness helper's `tables` list only ever gets exercised for tables
+  the tests that use it happen to write to, so a genuinely unused table
+  can go unnoticed indefinitely. Fixed by adding
+  `custom_field_definitions` to the list (no child rows reference it —
+  custom field values live inline as JSON on each entity — so it only
+  needed to go before `companies`, no dependency ordering concerns).
+- **`useApiMutation` (apps/web `lib/hooks.ts`) widened from
+  `'POST' | 'PATCH' | 'DELETE'` to also accept `'PUT'`** — a pure
+  additive change to the method-name union, needed for the plugin config
+  screen's `PUT /admin/plugins/:pluginId/config` call. Existing call
+  sites are unaffected (they pass literal method strings already in the
+  narrower set); this is not the "extra key in the body" class of shared-
+  hook footgun Phase 5's decisions log warned about, since it doesn't
+  touch how the body is serialized or what's included in it.
+- **No dedicated "Inquiries" list screen exists in apps/web at all**
+  (confirmed by grep before relying on one) — the manual click-through's
+  "post an inbound lead and see it appear as an inquiry" step was
+  verified via the staff `GET /inquiries/:id` API directly (returns the
+  applicant's mapped name/phone/email and `status: 'OPEN'`) rather than
+  a browser screen, since building a new list page was out of this
+  phase's UI scope (three specific screens were asked for: plugins,
+  webhooks, lead API keys — not a general inquiry browser).
+- **A "Send Test Event" endpoint (`POST /admin/webhook-endpoints/:id/test`)
+  was added beyond the original plan** — needed a real UI trigger for
+  the required manual click-through's "fire a webhook" step, since no
+  domain event is wired to `WebhookDeliveryService.dispatchEvent()` yet
+  (deliberate commit-2 scope boundary — see that phase's decisions).
+  Delivers directly to the one endpoint, bypassing its `eventTypes`
+  subscription filter — the point of a test button is proving
+  reachability regardless of what events the endpoint claims to care
+  about — through the exact same signing/retry/attempt-logging path as
+  a real event, not a separate fire-and-forget ping.
+- **Manual click-through (real dev servers, `apps/api` + a locally-
+  started `apps/web` Vite instance) — a genuine environmental finding,
+  not a product bug: this Windows machine has TCP ports 5151–5250
+  excluded by an OS-level Hyper-V/WSL reservation
+  (`netsh interface ipv4 show excludedportrange`), which covers both of
+  Vite's conventional dev ports (5173, 5174) — every `EACCES: permission
+  denied` on those ports across this session was that exclusion, not a
+  port conflict. Worked around by running Vite on port 5500 (confirmed
+  clear of every excluded range) and adding it to `CORS_ALLOWLIST` for
+  local dev only (`.env`, not committed). Recorded here in case a future
+  session hits the same `EACCES` and wastes time assuming it's a stale
+  process.** Exercised, over real HTTP through the full guard/DI
+  pipeline: installed and enabled `generic-sales` from the admin UI
+  (confirmed `CompanyConfig.labelOverrides`/`enabledModules` updated via
+  the Company Config screen: unit→Product, project→Catalog,
+  booking→Order, inquiry→Lead, tower/floor left at their existing
+  defaults — proving the merge-not-replace behavior above); created a
+  webhook endpoint with a signing secret and fired it via Send Test — a
+  real HTTP POST reached a local echo listener carrying a valid
+  `X-OpenEstate-Signature`/`X-OpenEstate-Timestamp` pair, and the
+  delivery showed `SUCCESS` in the UI; created a lead API key with a
+  field mapping and `POST`ed a signed-shape inbound payload via curl —
+  the response's `inquiryId`/`applicantId` resolved to a real `OPEN`
+  inquiry with the correctly-mapped applicant name/phone/email, verified
+  via the staff API (see the "no Inquiries screen" entry above for why
+  API verification, not a browser screen, was used for this specific
+  step).

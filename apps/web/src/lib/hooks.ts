@@ -20,7 +20,7 @@ export function usePaginatedQuery<T>(
 }
 
 export function useApiMutation<TData = unknown, TBody = unknown>(
-  method: 'POST' | 'PATCH' | 'DELETE',
+  method: 'POST' | 'PUT' | 'PATCH' | 'DELETE',
   path: string | ((body: TBody) => string),
   invalidateKeys?: string[][],
 ) {

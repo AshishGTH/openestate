@@ -62,6 +62,9 @@ importers:
       '@openestate/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@openestate/generic-sales':
+        specifier: workspace:*
+        version: link:../../plugins/generic-sales
       '@openestate/plugin-sdk':
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
@@ -338,6 +341,22 @@ importers:
       fast-check:
         specifier: ^4.9.0
         version: 4.9.0
+      typescript:
+        specifier: ^5.7.2
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.1)(terser@5.49.0)
+
+  plugins/generic-sales:
+    dependencies:
+      '@openestate/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
       typescript:
         specifier: ^5.7.2
         version: 5.9.3

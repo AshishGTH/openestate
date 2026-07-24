@@ -49,6 +49,29 @@ export class WebhookDeliveryService {
     return { dispatchedTo: endpoints.length };
   }
 
+  /** Admin "send test event" — delivers directly to ONE endpoint,
+   * bypassing its own eventTypes subscription filter (the whole point of
+   * a test button is "prove this endpoint is reachable," independent of
+   * what event types it's configured to care about). Same retry/signing/
+   * attempt-logging path as a real event — this is not a fire-and-forget
+   * ping, it goes through the exact same WebhookDeliveryProcessor. */
+  async sendTestEvent(companyId: string, webhookEndpointId: string): Promise<{ deliveryId: string }> {
+    const endpoint = await this.systemPrisma.webhookEndpoint.findFirst({ where: { id: webhookEndpointId, companyId } });
+    if (!endpoint) throw new NotFoundException('Webhook endpoint not found');
+
+    const delivery = await this.systemPrisma.webhookDelivery.create({
+      data: {
+        companyId,
+        webhookEndpointId: endpoint.id,
+        eventType: 'test.ping',
+        payload: { message: 'This is a test event from OpenEstate', sentAt: new Date().toISOString() },
+        status: 'PENDING',
+      },
+    });
+    await this.queue.add('deliver', { companyId, webhookDeliveryId: delivery.id }, RETRY_OPTS);
+    return { deliveryId: delivery.id };
+  }
+
   async listForEndpoint(companyId: string, webhookEndpointId: string) {
     return this.systemPrisma.webhookDelivery.findMany({
       where: { companyId, webhookEndpointId },

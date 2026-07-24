@@ -20,6 +20,10 @@ import Applicant360 from './pages/postsales/Applicant360';
 import ReportsPage from './pages/postsales/Reports';
 import BrokersPage from './pages/postsales/Brokers';
 import BrokerDetail from './pages/postsales/BrokerDetail';
+import PluginsPage from './pages/admin/Plugins';
+import PluginDetailPage from './pages/admin/PluginDetail';
+import WebhooksPage from './pages/admin/Webhooks';
+import LeadApiKeysPage from './pages/admin/LeadApiKeys';
 
 export default function App() {
   return (
@@ -38,6 +42,10 @@ export default function App() {
             <Route path="admin/custom-fields" element={<CustomFieldsPage />} />
             <Route path="admin/config" element={<CompanyConfigPage />} />
             <Route path="admin/audit" element={<AuditLogPage />} />
+            <Route path="admin/plugins" element={<PluginsPage />} />
+            <Route path="admin/plugins/:pluginId" element={<PluginDetailPage />} />
+            <Route path="admin/webhooks" element={<WebhooksPage />} />
+            <Route path="admin/lead-api-keys" element={<LeadApiKeysPage />} />
 
             <Route path="postsales/bookings/new" element={<BookingWizard />} />
             <Route path="postsales/bookings/:bookingId/installments" element={<InstallmentSchedule />} />
