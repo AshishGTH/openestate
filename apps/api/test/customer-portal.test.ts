@@ -14,6 +14,7 @@ import { PermissionsGuard } from '../src/auth/guards/permissions.guard';
 import { ApplicantChangeRequestService } from '../src/customer-portal/applicant-change-request.service';
 import { PortalProfileService } from '../src/customer-portal/portal-profile.service';
 import { ApplicantService } from '../src/presales/applicant.service';
+import { PanEncryptionService } from '../src/common/pan-encryption.service';
 import { DocumentService } from '../src/pdf/document.service';
 import { PdfService } from '../src/pdf/pdf.service';
 import { UploadService } from '../src/inventory/upload.service';
@@ -33,6 +34,8 @@ import {
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
 const describeIf = APP_URL && SYSTEM_URL ? describe : describe.skip;
+
+process.env.PAN_ENCRYPTION_KEY ??= 'e5f6a7b8'.repeat(8);
 
 describeIf('Phase 6 customer-portal (commit 2)', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -92,7 +95,7 @@ describeIf('Phase 6 customer-portal (commit 2)', () => {
 
     changeRequests = new ApplicantChangeRequestService(tenantPrisma, systemPrisma);
     profileService = new PortalProfileService(tenantPrisma);
-    applicantService = new ApplicantService(tenantPrisma, systemPrisma);
+    applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService());
     const ledger = new LedgerService(tenantPrisma);
     documents = new DocumentService(
       tenantPrisma,

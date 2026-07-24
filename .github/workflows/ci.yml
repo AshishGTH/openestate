@@ -209,6 +209,7 @@ jobs:
           sed -i "s#^JWT_REFRESH_SECRET=.*#JWT_REFRESH_SECRET=$(openssl rand -hex 24)#" .env
           sed -i "s#^PAN_ENCRYPTION_KEY=.*#PAN_ENCRYPTION_KEY=$(openssl rand -hex 32)#" .env
           sed -i "s#^TOTP_ENCRYPTION_KEY=.*#TOTP_ENCRYPTION_KEY=$(openssl rand -hex 32)#" .env
+          sed -i "s#^PLUGIN_SECRET_ENCRYPTION_KEYS=.*#PLUGIN_SECRET_ENCRYPTION_KEYS=1:$(openssl rand -hex 32)#" .env
           sed -i "s#^MINIO_ROOT_PASSWORD=.*#MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)#" .env
 
       - name: docker compose up

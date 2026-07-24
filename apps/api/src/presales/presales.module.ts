@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ClockProvider, CLOCK } from '../common/clock.provider';
+import { PanEncryptionService } from '../common/pan-encryption.service';
 import { QueuesModule } from '../queues/queues.module';
 import { CommunicationProcessor } from '../queues/communication.processor';
 import { ApplicantController } from './applicant.controller';
@@ -33,6 +34,7 @@ import { ReportsService } from './reports.service';
   ],
   providers: [
     ClockProvider,
+    PanEncryptionService,
     ApplicantService,
     InquiryService,
     AssignmentService,

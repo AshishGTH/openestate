@@ -13,6 +13,7 @@ import type {
   UpdateApplicantDto,
   PaginationQuery,
 } from '@openestate/shared';
+import { PanEncryptionService } from '../common/pan-encryption.service';
 
 @Injectable()
 export class ApplicantService {
@@ -22,6 +23,7 @@ export class ApplicantService {
     private readonly tenantPrisma: any,
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
+    private readonly panEncryption: PanEncryptionService,
   ) {}
 
   async findAll(companyId: string, query: PaginationQuery) {
@@ -102,6 +104,8 @@ export class ApplicantService {
             city: dto.city,
             state: dto.state,
             pincode: dto.pincode,
+            panCiphertext: dto.pan ? this.panEncryption.encrypt(dto.pan) : null,
+            panMasked: dto.pan ? this.panEncryption.mask(dto.pan) : null,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             customFields: dto.customFields as any,
           },
@@ -123,14 +127,19 @@ export class ApplicantService {
       );
     }
 
+    const { pan, ...rest } = dto;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const data: any = { ...dto };
+    const data: any = { ...rest };
     if (dto.primaryPhone !== undefined) {
       data.primaryPhone = dto.primaryPhone.trim();
       data.primaryPhoneNormalized = normalizePhone(dto.primaryPhone);
     }
     if (dto.email !== undefined) {
       data.emailNormalized = dto.email ? normalizeEmail(dto.email) : null;
+    }
+    if (pan !== undefined) {
+      data.panCiphertext = this.panEncryption.encrypt(pan);
+      data.panMasked = this.panEncryption.mask(pan);
     }
 
     return runWithTenant({ companyId }, () =>

@@ -5,6 +5,7 @@ import {
   computeAgeingBucket,
   isFollowUpOverdue,
   isEscalationEligible,
+  createApplicantSchema,
 } from '../src/presales';
 
 describe('normalizePhone', () => {
@@ -52,6 +53,28 @@ describe('normalizePhone', () => {
 describe('normalizeEmail', () => {
   it('lowercases and trims', () => {
     expect(normalizeEmail('  Foo.Bar@Example.COM  ')).toBe('foo.bar@example.com');
+  });
+});
+
+describe('createApplicantSchema pan validation (Phase 8 retrofit)', () => {
+  const base = { name: 'Test', primaryPhone: '9876543210', alternatePhones: [] };
+
+  it('accepts a well-formed PAN', () => {
+    expect(createApplicantSchema.safeParse({ ...base, pan: 'ABCDE1234F' }).success).toBe(true);
+  });
+
+  it('accepts no PAN at all (optional field)', () => {
+    expect(createApplicantSchema.safeParse(base).success).toBe(true);
+  });
+
+  it('rejects a malformed PAN — a schema-level assertion, not a service-call one', () => {
+    // because Nest's ZodValidationPipe runs BEFORE the handler body — a
+    // direct applicantService.create() call bypasses it entirely (the
+    // same lesson CLAUDE.md's Phase 5 decisions already recorded for
+    // soldUnitsQuerySchema: only an HTTP-level test or a schema-level
+    // safeParse() actually exercises Zod validation).
+    const result = createApplicantSchema.safeParse({ ...base, pan: 'not-a-pan' });
+    expect(result.success).toBe(false);
   });
 });
 

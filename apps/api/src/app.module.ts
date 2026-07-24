@@ -28,6 +28,7 @@ import { DefaultThrottlerGuard } from './auth/guards/default-throttler.guard';
 import { TenantContextInterceptor } from './auth/interceptors/tenant-context.interceptor';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
 import { CsrfGuard } from './auth/csrf.guard';
+import { RedisThrottlerStorage } from './common/redis-throttler-storage';
 import { PortalAuthModule } from './portal-auth/portal-auth.module';
 import { CustomerPortalModule } from './customer-portal/customer-portal.module';
 import { BrokersPortalModule } from './brokers-portal/brokers-portal.module';
@@ -62,22 +63,53 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     // portal-read rate-limit test intermittently either leaked the tiny
     // portal-auth bucket onto every staff/portal-read route, or caused
     // PortalAuthThrottlerGuard's own bucket to silently stop enforcing).
-    ThrottlerModule.forRoot([
-      { ttl: 60_000, limit: 100 },
-      { name: 'portal-auth', ttl: 300_000, limit: 5 },
-      { name: 'portal-read', ttl: 60_000, limit: 60 },
-      // Phase 7 commit 2: per-API-key limit, not a global constant — the
-      // resolver reads the LeadApiKeyGuard-populated req.leadApiKey (that
-      // guard runs first in the route's guard chain). Falls back to 60
-      // for any request that somehow reaches here without a resolved key
-      // (defense-in-depth; LeadApiKeyGuard already rejects those with a
-      // 401 before this throttler would matter).
-      {
-        name: 'lead-inbound',
-        ttl: 60_000,
-        limit: (context) => context.switchToHttp().getRequest().leadApiKey?.rateLimitPerMinute ?? 60,
-      },
-    ]),
+    ThrottlerModule.forRootAsync({
+      // Phase 8: Redis-backed, not @nestjs/throttler's in-memory default
+      // (closes the Phase 1/6/7 docs/todo.md gap — rate-limit state now
+      // survives a restart and is shared across replicas, for all four
+      // buckets below at once since they share this one registration).
+      // See RedisThrottlerStorage's own doc comment for why this is
+      // hand-rolled on the existing ioredis dependency rather than a new
+      // package.
+      //
+      // forRootAsync + useFactory, NOT forRoot's plain `storage: new
+      // RedisThrottlerStorage()` — a plain value is only constructed ONCE,
+      // at @Module({imports:[...]}) decorator-evaluation time, which Node
+      // caches on the module (require('../dist/app.module') resolves to
+      // the SAME AppModule class, and therefore the SAME storage instance
+      // and its ONE ioredis connection, across every NestFactory.create()
+      // call in a process — real bug, caught by this phase's own e2e test:
+      // closing one app instance ran RedisThrottlerStorage's
+      // onApplicationShutdown() and disconnected the ioredis client that
+      // every OTHER already-running or later-created app instance in the
+      // same process also depended on, throwing "Connection is closed" on
+      // their very next throttled request. useFactory runs fresh at
+      // application-bootstrap time (once per NestFactory.create() call,
+      // via that app's own DI container), giving each app instance its
+      // own RedisThrottlerStorage and its own connection — the correct
+      // ownership boundary regardless of the test-only symptom that
+      // surfaced it.
+      useFactory: () => ({
+        storage: new RedisThrottlerStorage(),
+        throttlers: [
+          { ttl: 60_000, limit: 100 },
+          { name: 'portal-auth', ttl: 300_000, limit: 5 },
+          { name: 'portal-read', ttl: 60_000, limit: 60 },
+          // Phase 7 commit 2: per-API-key limit, not a global constant —
+          // the resolver reads the LeadApiKeyGuard-populated
+          // req.leadApiKey (that guard runs first in the route's guard
+          // chain). Falls back to 60 for any request that somehow reaches
+          // here without a resolved key (defense-in-depth; LeadApiKeyGuard
+          // already rejects those with a 401 before this throttler would
+          // matter).
+          {
+            name: 'lead-inbound',
+            ttl: 60_000,
+            limit: (context) => context.switchToHttp().getRequest().leadApiKey?.rateLimitPerMinute ?? 60,
+          },
+        ],
+      }),
+    }),
     DatabaseModule,
     HealthModule,
     AuthModule,

@@ -90,6 +90,7 @@ function ApplicantSearch({
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
+  const [newPan, setNewPan] = useState('');
   const [createError, setCreateError] = useState('');
 
   const { data, isFetching } = useQuery<{ data: ApplicantRow[] }>({
@@ -105,13 +106,19 @@ function ApplicantSearch({
     try {
       const res = await api<{ applicant: ApplicantRow } | ApplicantRow>('/applicants', {
         method: 'POST',
-        body: JSON.stringify({ name: newName, primaryPhone: newPhone, alternatePhones: [] }),
+        body: JSON.stringify({
+          name: newName,
+          primaryPhone: newPhone,
+          alternatePhones: [],
+          ...(newPan ? { pan: newPan } : {}),
+        }),
       });
       const applicant = 'applicant' in res ? res.applicant : res;
       onPick(applicant);
       setShowCreate(false);
       setNewName('');
       setNewPhone('');
+      setNewPan('');
     } catch (err) {
       setCreateError((err as Error).message);
     }
@@ -169,6 +176,14 @@ function ApplicantSearch({
             placeholder="Phone"
             value={newPhone}
             onChange={(e) => setNewPhone(e.target.value)}
+            className="block w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+          <input
+            type="text"
+            placeholder="PAN (optional, e.g. ABCDE1234F)"
+            value={newPan}
+            maxLength={10}
+            onChange={(e) => setNewPan(e.target.value.toUpperCase())}
             className="block w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
           <div className="flex gap-2">

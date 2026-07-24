@@ -5,11 +5,14 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTenantPrismaClient, createSystemPrismaClient, runWithTenant, withTenantTx } from '@openestate/db';
 import { ApplicantService } from '../src/presales/applicant.service';
+import { PanEncryptionService } from '../src/common/pan-encryption.service';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
 const shouldRun = !!(APP_URL && SYSTEM_URL);
 const describeIf = shouldRun ? describe : describe.skip;
+
+process.env.PAN_ENCRYPTION_KEY ??= 'f6a7b8c9'.repeat(8);
 
 describeIf('Applicant dedup, consent, merge', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -23,7 +26,7 @@ describeIf('Applicant dedup, consent, merge', () => {
   beforeAll(async () => {
     tenantPrisma = createTenantPrismaClient(APP_URL!);
     systemPrisma = createSystemPrismaClient(SYSTEM_URL!);
-    applicantService = new ApplicantService(tenantPrisma, systemPrisma);
+    applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService());
 
     const company = await systemPrisma.company.create({
       data: { name: 'Applicant Test Co', slug: `applicant-test-${Date.now()}` },
@@ -98,6 +101,41 @@ describeIf('Applicant dedup, consent, merge', () => {
       alternatePhones: [],
     });
     expect(unrelatedIndian.possibleDuplicateApplicantIds).toEqual([]);
+  });
+
+  describe('PAN encryption (Phase 8 retrofit — Broker already had this, Applicant never did)', () => {
+    it('encrypts pan at rest, masks for display, and round-trips on decrypt', async () => {
+      const applicant = await applicantService.create(companyId, {
+        name: 'PAN Test',
+        primaryPhone: '9876510060',
+        alternatePhones: [],
+        pan: 'ABCDE1234F',
+      });
+
+      const raw = await systemPrisma.applicant.findUniqueOrThrow({ where: { id: applicant.id } });
+      expect(raw.panCiphertext).toBeTruthy();
+      expect(raw.panCiphertext).not.toContain('ABCDE1234F');
+      expect(raw.panMasked).toBe('XXXXX1234F');
+
+      const panEncryption = new PanEncryptionService();
+      expect(panEncryption.decrypt(raw.panCiphertext)).toBe('ABCDE1234F');
+    });
+
+    it('update() re-encrypts a changed PAN', async () => {
+      const applicant = await applicantService.create(companyId, {
+        name: 'PAN Update Test',
+        primaryPhone: '9876510062',
+        alternatePhones: [],
+        pan: 'ABCDE1234F',
+      });
+
+      await applicantService.update(companyId, applicant.id, { pan: 'PQRST5678G' });
+
+      const raw = await systemPrisma.applicant.findUniqueOrThrow({ where: { id: applicant.id } });
+      expect(raw.panMasked).toBe('XXXXX5678G');
+      const panEncryption = new PanEncryptionService();
+      expect(panEncryption.decrypt(raw.panCiphertext)).toBe('PQRST5678G');
+    });
   });
 
   describe('consent ledger', () => {

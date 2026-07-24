@@ -15,12 +15,15 @@
  *     only when unauthenticated.
  *
  * Each bucket gets its OWN app instance / `beforeAll` (rather than one
- * shared app for the whole file, as `e2e-portal.test.ts` uses): both
- * guards use `@nestjs/throttler`'s in-memory storage, which is
- * per-process/per-app, and the two tests below would otherwise
- * cross-contaminate each other's budget — e.g. the two logins the
+ * shared app for the whole file, as `e2e-portal.test.ts` uses) — kept even
+ * after Phase 8 moved storage to Redis (see RedisThrottlerStorage), since
+ * the two tests below would otherwise cross-contaminate each other's
+ * budget regardless of storage backend: e.g. the two logins the
  * portal-read test needs would themselves count against the portal-auth
  * bucket a preceding test had already exhausted down to 429.
+ * THROTTLE_TEST_KEY_PREFIX (below) additionally isolates this whole
+ * file's Redis keys from every OTHER e2e file that touches the same
+ * IP-keyed portal-auth bucket.
  *
  * Requires DATABASE_URL_TEST + DATABASE_URL_TEST_SYSTEM + Redis, and a
  * fresh `pnpm --filter @openestate/api build` (see e2e-portal.test.ts's
@@ -29,6 +32,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createRequire } from 'node:module';
+import Redis from 'ioredis';
 import request from 'supertest';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -45,6 +49,22 @@ const shouldRun = !!(APP_URL && SYSTEM_URL);
 const describeIf = shouldRun ? describe : describe.skip;
 
 const CUSTOMER_PASSWORD = 'CustomerPass123';
+
+// Redis-backed ThrottlerStorage (Phase 8) is real, shared, external state —
+// unlike the in-memory default it replaced, this file no longer gets free
+// isolation from OTHER e2e files (e2e-portal, e2e-broker-portal,
+// portal-csrf-guard) that ALSO log in through the portal-auth-guarded
+// route and can run concurrently under vitest's forked pool. Those other
+// files don't assert exact hit counts so sharing the default namespace is
+// harmless for them — but THIS file's portal-auth test deliberately drives
+// the bucket to its exact 5-then-429 boundary, which a single stray
+// concurrent login from another file would throw off. A private key
+// prefix, unique per test-file PROCESS (vitest's fork pool gives each
+// concurrently-active worker its own PID), gives this file's portal-auth
+// assertions their own Redis keyspace without touching production
+// behavior at all (RedisThrottlerStorage defaults this to '' — see its
+// own doc comment).
+process.env.THROTTLE_TEST_KEY_PREFIX = `e2e-portal-throttle-${process.pid}-${Date.now()}-`;
 
 async function bootstrapApp(): Promise<INestApplication> {
   process.env.DATABASE_URL = APP_URL;
@@ -70,15 +90,34 @@ async function bootstrapApp(): Promise<INestApplication> {
   return nestApp;
 }
 
+// Phase 8: RedisThrottlerStorage made the portal-auth bucket REAL shared
+// state (previously @nestjs/throttler's in-memory default meant each
+// describe block's own fresh app instance was automatically isolated —
+// that free isolation is gone now). THROTTLE_TEST_KEY_PREFIX (set above,
+// once per test-file process) already gives this file's own keys a
+// private namespace other e2e files never touch — this clear is a second,
+// cheap layer of defense (a crashed prior run reusing the exact same
+// pid+timestamp prefix is astronomically unlikely, but a within-file
+// describe-block-to-describe-block reset is still exactly what's needed
+// so this file's OWN two describe blocks don't contaminate each other).
+async function clearPortalAuthThrottleState(): Promise<void> {
+  const redis = new Redis(process.env.REDIS_TEST_URL ?? 'redis://localhost:6380');
+  const staleKeys = await redis.keys(`${process.env.THROTTLE_TEST_KEY_PREFIX}throttle:portal-auth:*`);
+  if (staleKeys.length) await redis.del(...staleKeys);
+  await redis.quit();
+}
+
 describeIf('Phase 6 commit 4: portal-auth throttle bucket over real HTTP', () => {
   let app: INestApplication;
 
   beforeAll(async () => {
+    await clearPortalAuthThrottleState();
     app = await bootstrapApp();
   });
 
   afterAll(async () => {
     await app?.close();
+    await clearPortalAuthThrottleState();
   });
 
   it('the 6th login attempt within 5 minutes from the same IP returns 429; the first 5 do not', async () => {
@@ -204,4 +243,47 @@ describeIf('Phase 6 commit 4: portal-read throttle bucket over real HTTP', () =>
     },
     30_000,
   );
+});
+
+describeIf('Phase 8: throttle state survives a fresh app instance (Redis-backed, not in-memory)', () => {
+  // Two INDEPENDENT app instances, each its own NestFactory.create() call —
+  // each constructs its own `new RedisThrottlerStorage()` (app.module.ts's
+  // ThrottlerModule.forRoot's `storage` option is a plain value, not a
+  // DI-shared singleton), simulating two replicas/a restart. With the old
+  // in-memory default this test would fail: a fresh app means a fresh,
+  // empty Map, and the 6th request against appB would see 0 prior hits and
+  // return 200, not 429. It only passes because both instances point at
+  // the SAME Redis (REDIS_TEST_URL) and RedisThrottlerStorage's key space
+  // (`throttle:${throttlerName}:${key}`) is keyed by tracker value alone,
+  // not by which process wrote it.
+  let appA: INestApplication;
+  let appB: INestApplication;
+
+  beforeAll(async () => {
+    await clearPortalAuthThrottleState();
+  });
+
+  afterAll(async () => {
+    await appA?.close();
+    await appB?.close();
+    await clearPortalAuthThrottleState();
+  });
+
+  it('5 requests against instance A, then the 6th against a BRAND NEW instance B is already 429', async () => {
+    appA = await bootstrapApp();
+
+    const attemptA = () =>
+      request(appA.getHttpServer()).post('/api/v1/portal/auth/login').send({ identifier: 'no-such-identifier-redis-persistence', password: 'x' });
+    for (let i = 0; i < 5; i++) {
+      const res = await attemptA();
+      expect(res.status).toBe(401);
+    }
+    await appA.close();
+
+    appB = await bootstrapApp();
+    const sixthOnB = await request(appB.getHttpServer())
+      .post('/api/v1/portal/auth/login')
+      .send({ identifier: 'no-such-identifier-redis-persistence', password: 'x' });
+    expect(sixthOnB.status).toBe(429);
+  });
 });
