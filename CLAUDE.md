@@ -183,10 +183,16 @@ this is a log, not a design doc.
   canonical sources (gnu.org, contributor-covenant.org), not
   reproduced from memory.** Legal/community-policy text shouldn't risk
   subtle inaccuracies. `CODE_OF_CONDUCT.md` and `SECURITY.md` both
-  have `TODO` placeholders for a real contact/disclosure channel —
-  left unfilled rather than invented, since "OpenEstate" is a
-  placeholder name/org for this project (see the build guide's
-  launch-checklist note to verify the name before going public).
+  had `TODO` placeholders for a real contact/disclosure channel,
+  left unfilled rather than invented while "OpenEstate" was still an
+  unconfirmed working name.
+  **Resolved in Phase 8: "OpenEstate" is confirmed as the project's
+  real, final name — v0.1.0 tags under it.** `SECURITY.md`'s disclosure
+  channel is now filled in (GitHub Security Advisories, zero
+  additional infrastructure needed). `CODE_OF_CONDUCT.md`'s
+  conduct-contact TODO stays an honestly-marked placeholder — it needs
+  a real, maintained email address only a human maintainer can commit
+  to, which is a decision deliberately left open rather than invented.
 
 ### Phase 1 — auth, RBAC, multi-tenancy, masters, custom fields, frontend
 
@@ -2011,3 +2017,184 @@ this is a log, not a design doc.
   `CI` and `FC_SEED`), so a future divergence between intended and actual
   tier is visible in every CI log by default, not something that needs
   re-instrumenting to catch a second time.
+
+### Phase 8 — security pass and first tagged release (v0.1.0)
+
+- **"OpenEstate" is confirmed as the project's real, final name** — see
+  the amended Phase 0 entry above. v0.1.0 tags under it.
+- **CWE-798 fixed, not just documented: the seed script's initial admin
+  credential was hardcoded (`admin@demo-realty.com`/`Admin@123`) and
+  shipped identically to every self-hosted production install**, since
+  `deploy/install.sh` runs this exact seed script on first bring-up.
+  `forcePasswordChange: true` was already set, but the account was
+  attackable with a publicly-known-from-source password in the window
+  before a real admin logs in. Fixed by generating a random password
+  (`crypto.randomBytes`, printed once to stdout) — the same discipline
+  every other secret in this codebase already gets via
+  `install.sh`'s `rand_secret()`. Confirmed safe: grepped the whole repo
+  for the literal string before changing it — only
+  `apps/api/scripts/portal-demo-seed.ts` referenced it, and only to look
+  the user up by email for a `createdById`, never the password itself;
+  no automated test depends on this credential.
+- **`Applicant.pan*` encryption retrofit closes a gap open since Phase 5** —
+  `PanEncryptionService` was built for `Broker.pan*` only; `Applicant`'s
+  identical columns (`panCiphertext`/`panMasked`/`panKeyVersion`, present
+  since Phase 4) were always null because nothing ever wrote or read
+  them. Same reuse pattern as `BrokerService`: `pan` added to
+  `createApplicantSchema` (optional, same PAN regex), wired through
+  `ApplicantService.create`/`update`. Real gap found in the same pass:
+  neither this codebase's PAN encryption service NOR its "malformed
+  input" behavior had ANY test coverage anywhere, for Broker OR
+  Applicant — a service-level test calling `applicantService.create()`
+  directly cannot prove Zod validation rejects a malformed PAN (the
+  pipe runs before the handler, exactly the Phase 5 `soldUnitsQuerySchema`
+  lesson) — fixed by adding the malformed-PAN test as a schema-level
+  `.safeParse()` assertion in `packages/shared/test/presales-normalization.test.ts`
+  instead, and adding real encrypt/mask/decrypt/round-trip coverage in
+  `apps/api/test/presales-applicant.test.ts`.
+- **Redis-backed `ThrottlerStorage` closes the Phase 1/6/7 in-memory-storage
+  gap for all four named buckets at once** (they share one
+  `ThrottlerModule.forRootAsync` registration). Hand-rolled
+  `RedisThrottlerStorage` on the existing `ioredis` dependency (a single
+  Lua script for atomicity, replicating `@nestjs/throttler`'s own
+  `ThrottlerStorageService` semantics exactly — fixed window, block
+  window, unblock-with-fresh-window — using Redis server `TIME` so
+  multiple replicas agree on one clock) rather than a third-party
+  throttler-storage package, matching this codebase's established
+  preference for small hand-rolled implementations over new dependencies
+  when the surface is small (Phase 7's SSRF/dot-path-resolver precedent).
+  **Real bug, caught while writing the test, not by review:** `forRoot`'s
+  plain `storage: new RedisThrottlerStorage()` value is constructed ONCE,
+  at `@Module({imports:[...]})` decorator-evaluation time — Node's
+  `require()` cache means every `NestFactory.create(AppModule)` call in
+  one process (exactly what `e2e-*.test.ts` files do, repeatedly) shared
+  the SAME storage instance and its ONE ioredis connection; closing one
+  app instance ran `onApplicationShutdown()` and disconnected the client
+  every OTHER already-running or later-created app instance in the same
+  process also depended on, throwing "Connection is closed" on their next
+  throttled request. Fixed by switching to `forRootAsync` + `useFactory`,
+  which Nest evaluates fresh per application bootstrap — the correct
+  ownership boundary regardless of the test-only symptom that surfaced
+  it. **Second real bug, caught by running the full suite, not the
+  isolated test file:** once storage was genuinely shared Redis state,
+  `e2e-portal-throttle.test.ts`'s own portal-auth-bucket test (which
+  deliberately drives an IP-keyed 5-req/5-min bucket to its exact 429
+  boundary) started intermittently failing under real full-suite
+  concurrency — OTHER e2e files that also log in through the same
+  portal-auth-guarded route (`e2e-portal`, `e2e-broker-portal`,
+  `portal-csrf-guard`) now share the same real Redis key, and a stray
+  concurrent login from any of them shifts the boundary. The in-memory
+  storage this replaced had given every concurrently-running test FILE
+  free isolation from every other one; Redis-backed storage removes that
+  for free — a genuinely new flakiness source, caught before it shipped
+  by running the full suite (not just the one file) after the fix,
+  exactly the discipline the Phase 7→8 CI-reliability session above this
+  one just finished establishing. Fixed with `THROTTLE_TEST_KEY_PREFIX`,
+  an env var `RedisThrottlerStorage` reads and prefixes its Redis keys
+  with — empty (default, unchanged production behavior) in every real
+  deployment, set to a value unique per test-file OS process
+  (`e2e-portal-throttle.test.ts` only, the one file whose assertions
+  actually depend on an exact hit count) so it gets a private keyspace
+  other e2e files never touch. Proven via 3 consecutive full-suite green
+  runs after the fix (11/11 tasks, 333/333 apps/api tests each time).
+- **Docker base images pinned to real, freshly-pulled sha256 digests** —
+  closes the Phase 0 gap whose own stated blocker was "no verified way
+  to confirm real digests without risking a fabricated/stale hash";
+  resolved directly this phase via `docker pull` + `docker inspect
+  --format='{{index .RepoDigests 0}}'` for every image actually in use
+  (`postgres:16-alpine`, `redis:7-alpine`, `nginx:1.27-alpine`,
+  `minio/minio:RELEASE.2024-12-18T13-15-44Z`, `node:20-slim`,
+  `node:20-alpine`). Dependabot's existing `docker` ecosystem entry
+  already supports digest-pinned images and keeps proposing updates —
+  no Dependabot config change needed.
+- **Verifying the digest pinning end-to-end (`docker compose up` +
+  `install.sh`, not just a healthcheck curl) surfaced four more real,
+  pre-existing release blockers — all found only because this phase
+  insisted on running the actual documented first-run path, not just
+  the narrower thing the plan asked for:**
+  1. `apps/api/Dockerfile` never copied `packages/plugin-sdk` or
+     `plugins/generic-sales` into either build stage — Phase 7 added
+     both as real runtime dependencies of `@openestate/api`
+     (`plugins.module.ts` imports `@openestate/plugin-sdk` and
+     `@openestate/generic-sales` directly) but the Dockerfile's
+     selective-COPY list (Phase 1's deliberate pattern — copy specific
+     paths, not whole directories) was never updated. The production
+     image has been unbuildable since Phase 7 shipped; nothing caught it
+     because `ci.yml`'s `compose-healthcheck` job builds the image but
+     Phase 7's own verification apparently never rebuilt it from a
+     clean Docker layer cache. Fixed: both packages' `package.json`
+     (deps stage), `src`+`tsconfig.json` (build stage, plus their own
+     `pnpm --filter ... build` steps in dependency order — plugin-sdk
+     before generic-sales, which depends on it), and `dist`+`package.json`
+     (runtime stage, mirroring the existing `packages/db`/`packages/shared`
+     pattern) all added.
+  2. `.dockerignore` excluded `plugins` entirely — a Phase 0 scaffold
+     default from before any plugin package existed, never revisited
+     when Phase 7 introduced one Docker now genuinely depends on.
+     Removed.
+  3. `PLUGIN_SECRET_ENCRYPTION_KEYS` is required at boot
+     (`PluginSecretEncryptionService`'s constructor throws if unset) but
+     was never added to `deploy/.env.example`, `deploy/install.sh`'s
+     secret generation, `deploy/docker-compose.yml`'s `api` service
+     environment block, or `ci.yml`'s `compose-healthcheck` `.env`
+     generation step — every one of those was written before Phase 7
+     introduced the variable and never updated. A production
+     `docker compose up` has been unable to actually start the API
+     container (not just "unbuildable" — this one throws at boot) since
+     Phase 7. Fixed in all four places, `install.sh` generating a real
+     `1:$(rand_hex_32)`-shaped value matching
+     `PluginSecretEncryptionService`'s expected `version:hexkey` format.
+  4. `install.sh`'s documented migrate/seed step
+     (`docker compose exec ... pnpm --filter @openestate/db migrate:deploy`)
+     has apparently never actually succeeded against a real built image:
+     (a) the runtime container's service user (`useradd -r -g openestate
+     openestate`, no `-m`) had no home directory, so corepack's
+     first-use pnpm-version cache write failed with `EACCES`; (b) even
+     with that fixed, `/app` in the runtime image is a `pnpm deploy
+     --prod` output — a flattened, standalone package directory, not a
+     pnpm workspace (no root `package.json`/`pnpm-workspace.yaml` there)
+     — so `pnpm --filter @openestate/db ...` has no workspace context to
+     resolve against, and corepack falls back to fetching whatever
+     "latest" pnpm resolves to instead of the version actually pinned in
+     the (absent, from that directory) root `package.json` — that
+     latest version required Node 22+, hard-failing on this image's
+     Node 20; (c) `MIGRATION_DATABASE_URL` used `localhost` as the
+     Postgres host, but this URL is used inside a `docker compose exec
+     api` call — from the API container's OWN network namespace, where
+     `localhost` means the api container itself, not the separate
+     `postgres` container reachable only via its compose service DNS
+     name. Fixed: `prisma`/`tsx` promoted to direct `dependencies` of
+     `@openestate/api` specifically so `pnpm deploy --prod` hoists their
+     binaries to `/app/node_modules/.bin/` (found and fixed a duplicate
+     `tsx` devDependency entry in the same pass — pnpm was silently not
+     hoisting it while a plain `dependencies` entry with no
+     `devDependencies` duplicate DID hoist correctly for `prisma`);
+     `install.sh`'s migrate/seed steps now invoke
+     `../../node_modules/.bin/prisma`/`tsx` directly via `docker compose
+     exec -w /app/packages/db`, bypassing pnpm/corepack entirely for
+     these one-shot operational commands; `MIGRATION_DATABASE_URL`'s
+     host changed to `postgres` (the compose service name), matching
+     the pattern `docker-compose.yml`'s own `api` service's
+     `DATABASE_URL_SYSTEM` already used correctly.
+  Verified via a genuine from-scratch `bash install.sh` run against a
+  freshly built, digest-pinned stack: build succeeds, all containers
+  become healthy, migrations apply, seed completes and prints a random
+  admin credential, and that credential successfully logs in over real
+  HTTP.
+- **OWASP ASVS L2 self-assessment and a STRIDE threat model per module**
+  added under the docs site (`docs/docs/security/asvs-checklist.md`,
+  `docs/docs/security/threat-model.md`, Docusaurus's actual doc root —
+  not the bare `docs/security/` path `SECURITY.md`'s and `docs/docs/intro.md`'s
+  own prose informally referenced). Synthesis of the decisions already
+  recorded across every phase above, not new design work; each entry
+  points at a real file or a real decisions-log entry rather than
+  asserting a control exists without a way to check it. States accepted
+  residual risk plainly where it exists (plugin worker-thread isolation,
+  PAN key-rotation wiring) instead of implying a guarantee the
+  architecture doesn't make.
+- **`SECURITY.md`'s disclosure channel resolved to GitHub Security
+  Advisories** (zero additional infrastructure) — see the amended Phase 0
+  entry above for the paired project-name resolution.
+  `CODE_OF_CONDUCT.md`'s conduct-contact TODO deliberately stays an
+  honest placeholder, per explicit user choice this phase — needs a real
+  email only a human maintainer can commit to.

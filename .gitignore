@@ -3,6 +3,7 @@ dist/
 build/
 .next/
 .turbo/
+.docusaurus/
 coverage/
 *.log
 .env

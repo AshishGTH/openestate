@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true
+  },
+  // No .ts/.tsx source exists yet — this site is markdown-content-only
+  // (docusaurus.config.js/sidebars.js are the only source files) —
+  // included here so `tsc --noEmit` has real inputs to succeed against
+  // rather than erroring on an empty match (TS18003). Widen `include`
+  // to `src/**/*.{ts,tsx}` once real TS content (a custom component,
+  // etc.) is added.
+  "include": ["docusaurus.config.js", "sidebars.js", "src/**/*.ts", "src/**/*.tsx"]
+}
