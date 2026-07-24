@@ -333,6 +333,24 @@ export async function setTenantOnTx(
 export interface WithTenantTxOptions {
   /** Prisma interactive-transaction timeout in ms (default 10 000). */
   timeout?: number;
+  /**
+   * Max time to wait for a pooled connection to become available before
+   * Prisma throws "Unable to start a transaction in the given time"
+   * (default 10 000). Prisma's own built-in default for this is a much
+   * tighter 2 000ms — fine when concurrency is low, but a real source of
+   * spurious failures for any call site that fires many concurrent
+   * `withTenantTx` calls against one client (e.g.
+   * `AssignmentService.autoAssign`'s round-robin fairness tests drive
+   * 100 concurrent transactions through a single pooled client), since
+   * every one of those transactions competes for the same
+   * `connection_limit`-sized pool and Prisma's 2s default assumes queue
+   * depth drains almost immediately. Root-caused via the actual error
+   * (`PrismaClientKnownRequestError: Unable to start a transaction in
+   * the given time`) during Phase 7's CI-reliability pass — see
+   * CLAUDE.md's Decisions log for the full diagnosis. Callers with a
+   * known high-concurrency burst can still raise it further per call.
+   */
+  maxWait?: number;
 }
 
 /**
@@ -386,6 +404,6 @@ export async function withTenantTx<T>(
       await setTenantOnTx(tx, companyId, ambientStore?.portalApplicantId, ambientStore?.portalBrokerId);
       return tenantTxContext.run({ tx, companyId }, () => fn(tx));
     },
-    { timeout: options?.timeout ?? 10_000 },
+    { timeout: options?.timeout ?? 10_000, maxWait: options?.maxWait ?? 10_000 },
   );
 }

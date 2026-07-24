@@ -81,6 +81,18 @@ describeIf('Commission clawback reconciliation (fast-check)', () => {
 
   it(`reconciles to the paise across ${resolveNumRuns()} random accrue/partial-pay/cancel sequences`, async () => {
     const numRuns = resolveNumRuns();
+    // See postsales-property.test.ts's identical log for why this exists:
+    // PROPERTY_NUM_RUNS_COMMISSION is a SEPARATE env var from
+    // PROPERTY_NUM_RUNS (its own resolveNumRuns() above) and was found
+    // missing from turbo.json's strict-envMode allowlist during the same
+    // audit that caught PROPERTY_NUM_RUNS itself — same failure shape,
+    // different name, easy to miss twice.
+    console.log(
+      `[commission-clawback] effective numRuns=${numRuns} ` +
+        `(PROPERTY_NUM_RUNS_COMMISSION=${process.env.PROPERTY_NUM_RUNS_COMMISSION ?? '<unset>'}, ` +
+        `CI=${process.env.CI ?? '<unset>'}, ` +
+        `FC_SEED=${process.env.FC_SEED ?? '<unset>'})`,
+    );
 
     await fc.assert(
       fc.asyncProperty(

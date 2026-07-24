@@ -1891,3 +1891,123 @@ this is a log, not a design doc.
   via the staff API (see the "no Inquiries screen" entry above for why
   API verification, not a browser screen, was used for this specific
   step).
+
+### Phase 7 → 8 gate — CI reliability (full-suite flakiness under parallel load)
+
+- **Instrumented before guessing, per the standing rule.** `pg_stat_activity`
+  polled every 1s during a full `pnpm test` run (Postgres `log_connections`/
+  `log_disconnections` on) showed peak concurrent connections of 39 against
+  `max_connections=100` — this directly REFUTES the leading hypothesis
+  (raw connection-pool exhaustion from ~42 test files each constructing
+  their own uncapped-default-pool `PrismaClient` pair). The real
+  mechanisms were two unrelated, evidence-confirmed bugs, both triggered
+  by CPU/IO contention under the full concurrent suite rather than by
+  connection count:
+  1. **`presales-assignment.test.ts`'s "100 concurrent claims" failure**
+     was Prisma's own built-in `maxWait` (2000ms, never overridden by
+     `withTenantTx`) being too tight once contention slowed individual
+     transaction-acquisition below that window — not a pool-size problem.
+  2. **`postsales-property.test.ts`'s recurring, differently-FK'd
+     failures** (documented across Phase 4/5/7 in the now-removed
+     `docs/todo.md` "known contention" entries) were a genuine self-race:
+     Vitest's `it(fn, timeout)` stops AWAITING a timed-out test body but
+     does NOT cancel it — the abandoned fast-check loop kept issuing real
+     Postgres writes concurrently with the SAME test's `afterAll`
+     cleanup deleting the same company's rows, producing a real `40P01`
+     deadlock (confirmed by reading the Postgres server's own log, not
+     just the client-side error, which only reports participant PIDs).
+- **Fixes, in the order they compound:**
+  1. `withTenantTx` (`packages/db/src/tenant.extension.ts`) now defaults
+     `maxWait` to 10,000ms (was implicitly Prisma's 2,000ms) — fixes
+     mechanism #1 directly, for every caller (prod and test), not just
+     the failing test.
+  2. Explicit `connection_limit=10` (tenant) / `connection_limit=5`
+     (system) added to the test `DATABASE_URL`s
+     (`scripts/test-setup.sh`, `.github/workflows/ci.yml`) — pure
+     defense-in-depth given the 39/100 finding, replacing Prisma's
+     oversized `num_cpus*2+1` default pool per client.
+  3. `apps/api/vitest.config.ts` caps `poolOptions.forks.{minForks:1,
+     maxForks:4}` (was vitest's default, which equals CPU count — 16 on
+     the dev box) — directly reduces the CPU/IO contention that is the
+     actual root driver of both mechanisms above. (Vitest requires
+     `minForks` set explicitly alongside `maxForks`, or it throws
+     "minThreads and maxThreads must not conflict" at collection time —
+     its own default `minForks` is not `1`.)
+  4. `postsales-property.test.ts`'s own `it(...)` timeout raised from
+     600,000ms to 1,800,000ms — removes the false-positive trigger for
+     mechanism #2's self-race (GitHub Actions' own job timeout, 360min
+     default and unset in `ci.yml`, remains the real backstop against a
+     genuine hang).
+- **A separate, previously-undiscovered bug was found while proving the
+  fix: Turborepo 2.10's default `envMode` is `strict`, and `turbo.json`'s
+  `test` task only listed `DATABASE_URL_TEST`/`DATABASE_URL_TEST_SYSTEM`/
+  `REDIS_TEST_URL` in its `env` array — silently stripping
+  `PROPERTY_NUM_RUNS` from every task invocation, local or CI.** The
+  first proof run's property test title read "holds across 2000 random
+  sequences" despite `PROPERTY_NUM_RUNS=500` being exported, and at 2000
+  runs under contention it took long enough to hit the newly-raised
+  1,800,000ms timeout, reproducing mechanism #2 exactly. Since
+  `.github/workflows/ci.yml`'s `PROPERTY_NUM_RUNS` override is set the
+  same way (a step-level env var feeding the same `turbo run test`
+  invocation), **this means the Phase 4 "500 on PR/push, 2000 only on
+  the nightly schedule" cost-saving design has likely never actually been
+  in effect in real CI** — every run has silently executed the CI-floor
+  2000. Fixed by adding `PROPERTY_NUM_RUNS`/`FC_SEED` to `turbo.json`'s
+  `test` task `env` array; no `ci.yml` change was needed since it flows
+  through the same fixed `turbo.json`. Verified via a 5-run sanity pass
+  ("holds across 5 random sequences") before re-running the real proof.
+- **Proof: three consecutive full-suite (`pnpm test`) runs against a
+  freshly-reset test DB each time, `CI=true PROPERTY_NUM_RUNS=500`,
+  `--force` (turbo cache bypassed so each run genuinely re-executes) —
+  all three: 11/11 tasks successful, apps/api 49/49 files / 330/330
+  tests, `packages/db` 7/7 files / 61/61 tests, `packages/shared` 4/4
+  files / 56/56 tests, 0 skipped, 0 failed, exit code 0.** Property test
+  wall time per run: 128s, 120s, 136s (500 runs, consistent with
+  isolated-run timing — confirms the maxForks cap eliminated the
+  contention that previously inflated it).
+- **CI already carries the equivalent configuration** — `.github/workflows/ci.yml`'s
+  two `DATABASE_URL_TEST`/`DATABASE_URL_TEST_SYSTEM` env blocks were
+  updated alongside `scripts/test-setup.sh` (same `connection_limit`
+  values); `apps/api/vitest.config.ts`'s `maxForks` cap and
+  `postsales-property.test.ts`'s timeout apply automatically in CI since
+  both are versioned source files, not local-only config; the
+  `turbo.json` fix applies identically to both `pnpm test` (local) and
+  CI's `pnpm test` step since both invoke the same `turbo run test`.
+  No CI-specific divergence remains.
+- **Replaces every "known contention" entry previously in `docs/todo.md`**
+  (the Phase 4-discovered, Phase 7-widened "Full-suite (`pnpm test`)
+  contention failure in `postsales-property.test.ts`'s cleanup" section)
+  — removed now that the root cause is fixed and proven, not just
+  documented as a known flake.
+- **Post-fix audit of every `process.env` read across the monorepo for
+  the SAME silent-stripping class, done before closing this out —
+  finding it once and stopping would have left the exact same failure
+  shape sitting one variable name away.** Found and fixed two more gaps
+  in `turbo.json`'s `test` task `env` array: `PROPERTY_NUM_RUNS_COMMISSION`
+  (`commission-clawback.test.ts` has its own independent
+  `resolveNumRuns()`, a SEPARATE env var from `PROPERTY_NUM_RUNS` — same
+  bug, different name, easy to miss twice) and `CI` itself (read directly
+  in both property tests' resolveNumRuns() fallback branch; every proof
+  run so far had `PROPERTY_NUM_RUNS` explicitly set, so `CI`'s passthrough
+  was never actually exercised — declaring it explicitly removes reliance
+  on turbo's unverified-by-us built-in allowlist rather than assuming it
+  covers this). Everything else found reading `process.env` at test-file
+  module scope (`JWT_ACCESS_SECRET`, `PAN_ENCRYPTION_KEY`,
+  `TOTP_ENCRYPTION_KEY`, `PLUGIN_SECRET_ENCRYPTION_KEYS`,
+  `CORS_ALLOWLIST`, etc., across the e2e/plugin test files) uses a
+  `??=` self-healing fallback to a hardcoded test value — a deliberate
+  test-only default, not an accidentally-droppable override, so left
+  as-is; the risk class is specifically "a value meant to TUNE test
+  behavior/coverage silently reverting to a different tier," not "a
+  credential defaulting to a known-safe stand-in."
+- **Both property tests now log their effective config unconditionally
+  at test start, not just in the parameterized test title** — the title
+  alone (`` `holds across ${numRuns} random sequences` ``) is how this
+  whole investigation started, but it's invisible to some reporters
+  (CI's own "fail if any test was skipped" step reads `numPendingTests`
+  from the JSON reporter, never the name) and easy to skim past. Each
+  test's first line now prints resolved `numRuns` alongside the RAW env
+  var it read (`PROPERTY_NUM_RUNS`/`PROPERTY_NUM_RUNS_COMMISSION`, plus
+  `CI` and `FC_SEED`), so a future divergence between intended and actual
+  tier is visible in every CI log by default, not something that needs
+  re-instrumenting to catch a second time.

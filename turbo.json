@@ -16,9 +16,13 @@
     "test": {
       "dependsOn": ["^build"],
       "env": [
+        "CI",
         "DATABASE_URL_TEST",
         "DATABASE_URL_TEST_SYSTEM",
-        "REDIS_TEST_URL"
+        "REDIS_TEST_URL",
+        "PROPERTY_NUM_RUNS",
+        "PROPERTY_NUM_RUNS_COMMISSION",
+        "FC_SEED"
       ]
     },
     "typecheck": {
