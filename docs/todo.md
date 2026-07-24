@@ -194,3 +194,18 @@ they're expected to land. Each entry should say *what*, *why deferred*, and
   local machine/Docker setup under full-suite load), not something that
   reappears because of anything Phase 7 touches — commit 2 added zero
   code to the Booking/Unit/Ledger/Receipt path.
+
+  **Widened to a second, previously-unaffected file during Phase 7 commit
+  3's (generic-sales-and-UI) full-pipeline run: `presales-assignment.test.ts`'s
+  "100 concurrent claims against a pool of 10" case failed with
+  `Transaction API error: Unable to start a transaction in the given
+  time` — a Prisma connection-pool acquisition timeout, the same
+  resource-contention signature as `postsales-property.test.ts` (which
+  also failed in this same run, yet another different FK). Confirmed
+  clean in isolation immediately after (5/5 tests, 1.5s total) on the
+  exact same freshly-reset database. Commit 3 touched no code either of
+  these two tests exercises (`AssignmentService`, `BookingService`,
+  `ReceiptService` are all frozen this phase) — this is the identical
+  environmental pattern widening to whichever heavy-concurrency test
+  happens to be running at the moment this machine's Docker/Postgres
+  setup is under peak full-suite load, not a new or growing defect.**

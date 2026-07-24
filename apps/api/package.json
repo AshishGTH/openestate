@@ -26,6 +26,7 @@
     "@nestjs/terminus": "^10.2.3",
     "@nestjs/throttler": "^6.3.0",
     "@openestate/db": "workspace:*",
+    "@openestate/generic-sales": "workspace:*",
     "@openestate/plugin-sdk": "workspace:*",
     "@openestate/shared": "workspace:*",
     "@prisma/client": "^6.1.0",

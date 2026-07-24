@@ -6,6 +6,7 @@ import { createWebhookEndpointSchema, updateWebhookEndpointSchema, PERMISSIONS }
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
 import { WebhookEndpointService } from './webhook-endpoint.service';
+import { WebhookDeliveryService } from './webhook-delivery.service';
 
 class CreateWebhookEndpointDto extends createZodDto(createWebhookEndpointSchema) {}
 class UpdateWebhookEndpointDto extends createZodDto(updateWebhookEndpointSchema) {}
@@ -13,7 +14,10 @@ class UpdateWebhookEndpointDto extends createZodDto(updateWebhookEndpointSchema)
 @ApiTags('Admin Webhooks')
 @Controller('admin/webhook-endpoints')
 export class WebhookEndpointController {
-  constructor(private readonly endpoints: WebhookEndpointService) {}
+  constructor(
+    private readonly endpoints: WebhookEndpointService,
+    private readonly deliveries: WebhookDeliveryService,
+  ) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.ADMIN_WEBHOOK_READ)
@@ -69,5 +73,13 @@ export class WebhookEndpointController {
   remove(@Param('id') id: string, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.endpoints.remove(user.companyId, id);
+  }
+
+  @Post(':id/test')
+  @RequirePermissions(PERMISSIONS.ADMIN_WEBHOOK_MANAGE)
+  @ApiOperation({ summary: 'Send a test event to this endpoint (bypasses its eventTypes filter — proves reachability)' })
+  sendTestEvent(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.deliveries.sendTestEvent(user.companyId, id);
   }
 }

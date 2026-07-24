@@ -27,6 +27,9 @@ const NAV_ITEMS = [
       { label: 'Custom Fields', to: '/admin/custom-fields', perm: PERMISSIONS.ADMIN_CUSTOM_FIELD_READ },
       { label: 'Company Config', to: '/admin/config', perm: PERMISSIONS.ADMIN_CONFIG_READ },
       { label: 'Audit Log', to: '/admin/audit', perm: PERMISSIONS.ADMIN_AUDIT_READ },
+      { label: 'Plugins', to: '/admin/plugins', perm: PERMISSIONS.ADMIN_PLUGIN_READ },
+      { label: 'Webhooks', to: '/admin/webhooks', perm: PERMISSIONS.ADMIN_WEBHOOK_READ },
+      { label: 'Lead API Keys', to: '/admin/lead-api-keys', perm: PERMISSIONS.ADMIN_LEAD_API_KEY_READ },
     ],
   },
 ];

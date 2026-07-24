@@ -1,10 +1,13 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { PrismaClient } from '@openestate/db';
 import type { Plugin, PluginConfigField } from '@openestate/plugin-sdk';
+import type { CustomFieldEntity, CustomFieldType } from '@openestate/shared';
 import { SYSTEM_PRISMA } from '../database/database.module';
 import { PluginRegistryService } from './plugin-registry.service';
 import { PluginRuntimeService } from './plugin-runtime.service';
 import { PluginSecretEncryptionService } from './plugin-secret-encryption.service';
+import { CompanyService } from '../company/company.service';
+import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 
 const LIFECYCLE_BUDGET_MS = 10_000; // admin-triggered, staff-only, not a hot path — see CLAUDE.md Phase 7 decisions §2
 
@@ -26,6 +29,8 @@ export class PluginAdminService {
     private readonly registry: PluginRegistryService,
     private readonly runtime: PluginRuntimeService,
     private readonly secretEncryption: PluginSecretEncryptionService,
+    private readonly companyService: CompanyService,
+    private readonly customFieldsService: CustomFieldsService,
   ) {}
 
   /** Includes orphaned installations too (addendum A6) — a company can
@@ -105,11 +110,60 @@ export class PluginAdminService {
       data: { companyId, pluginId, isEnabled: false, installedById: actorId },
     });
 
+    // Vertical hooks (§7) are plain declarative data on plugin.hooks, not
+    // functions — applied directly through the SAME CompanyService/
+    // CustomFieldsService calls a staff admin would make by hand, once
+    // at install time (not re-applied on every enable/disable cycle).
+    await this.applyVerticalHooks(companyId, plugin);
+
     if (plugin.hooks.onInstall) {
       const ctx = this.runtime.buildContextForInstallation(plugin, companyId, installation);
       await this.runtime.invoke(pluginId, 'onInstall', companyId, LIFECYCLE_BUDGET_MS, () => plugin.hooks.onInstall!(ctx));
     }
     return installation;
+  }
+
+  /** Terminology overrides MERGE onto the company's existing
+   * labelOverrides (never a blind replace) — a plugin relabeling "unit"
+   * must not silently discard an admin's own unrelated override for
+   * "project". enabledModules IS a full replace, matching that field's
+   * existing semantics everywhere else it's set (the admin config
+   * screen sets the whole array too, not a delta). customFieldSeeds are
+   * skipped (not errored) if a same-key field already exists — install()
+   * must stay safely re-runnable after an uninstall/reinstall cycle. */
+  private async applyVerticalHooks(companyId: string, plugin: Plugin): Promise<void> {
+    const { terminologyOverrides, enabledModules, customFieldSeeds } = plugin.hooks;
+
+    if (terminologyOverrides || enabledModules) {
+      const existing = await this.companyService.getConfig(companyId);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data: any = {};
+      if (terminologyOverrides) {
+        data.labelOverrides = { ...((existing.labelOverrides as Record<string, string> | null) ?? {}), ...terminologyOverrides };
+      }
+      if (enabledModules) {
+        data.enabledModules = enabledModules;
+      }
+      await this.companyService.updateConfig(companyId, data);
+    }
+
+    if (customFieldSeeds) {
+      for (const seed of customFieldSeeds) {
+        const alreadyExists = await this.systemPrisma.customFieldDefinition.findFirst({
+          where: { companyId, entityType: seed.entityType, key: seed.key },
+        });
+        if (alreadyExists) continue;
+        await this.customFieldsService.create(companyId, {
+          entityType: seed.entityType as CustomFieldEntity,
+          key: seed.key,
+          label: seed.label,
+          fieldType: seed.fieldType as CustomFieldType,
+          isRequired: seed.isRequired,
+          options: seed.options,
+          sortOrder: 0,
+        });
+      }
+    }
   }
 
   /** Validates against the plugin's own configSchema, encrypts, saves.

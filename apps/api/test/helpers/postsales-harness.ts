@@ -247,6 +247,12 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     // any test using this helper, so its absence here was never caught.
     'communication_logs', 'follow_ups', 'inquiry_assignments', 'inquiries',
     'applicant_consents', 'applicant_merges',
+    // Phase 1 — no child rows reference custom_field_definitions (values
+    // live inline as JSON on each entity), so it just needs to go before
+    // 'companies'. Same "never previously exercised by this harness" gap
+    // as the presales tables above, surfaced by Phase 7's generic-sales
+    // plugin test (the first to create a CustomFieldDefinition here).
+    'custom_field_definitions',
     'letter_templates', 'applicants', 'number_sequences', 'company_configs', 'users', 'roles',
   ];
   // Single transaction so the maintenance GUC (which lets us bypass the
