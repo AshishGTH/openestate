@@ -16,6 +16,7 @@ import { PluginRuntimeService } from '../src/plugins/plugin-runtime.service';
 import { PluginSecretEncryptionService } from '../src/plugins/plugin-secret-encryption.service';
 import { PluginAdminService } from '../src/plugins/plugin-admin.service';
 import { ApplicantService } from '../src/presales/applicant.service';
+import { PanEncryptionService } from '../src/common/pan-encryption.service';
 import { CompanyService } from '../src/company/company.service';
 import { CustomFieldsService } from '../src/custom-fields/custom-fields.service';
 import { InquiryService } from '../src/presales/inquiry.service';
@@ -26,6 +27,7 @@ const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
 const describeIf = APP_URL && SYSTEM_URL ? describe : describe.skip;
 
 process.env.PLUGIN_SECRET_ENCRYPTION_KEYS ??= `1:${'d4e5f6a7'.repeat(8)}`;
+process.env.PAN_ENCRYPTION_KEY ??= 'd4e5f6a7'.repeat(8);
 
 describeIf('generic-sales plugin (Phase 7 commit 3)', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -43,7 +45,7 @@ describeIf('generic-sales plugin (Phase 7 commit 3)', () => {
 
     registry = new PluginRegistryService([genericSalesPlugin as Plugin]);
     registry.onModuleInit();
-    const applicantService = new ApplicantService(tenantPrisma, systemPrisma);
+    const applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService());
     companyService = new CompanyService(tenantPrisma, systemPrisma);
     const assignmentService = new AssignmentService(tenantPrisma);
     const inquiryService = new InquiryService(tenantPrisma, systemPrisma, SYSTEM_CLOCK, assignmentService, applicantService);

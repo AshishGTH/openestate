@@ -1,8 +1,19 @@
+import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { ALL_PERMISSIONS, SYSTEM_ROLES, ROLE_PERMISSIONS, ROLE_DISPLAY_NAMES } from '@openestate/shared';
 import * as argon2 from 'argon2';
 
 const prisma = new PrismaClient();
+
+// Same spirit as deploy/install.sh's rand_secret() for every other
+// generated credential — a hardcoded initial admin password shipped via
+// this exact seed script to every self-hosted production install
+// (deploy/install.sh runs it on first bring-up) is CWE-798, not a demo
+// convenience. Printed once to stdout; forcePasswordChange below means
+// it only works until the real admin logs in and changes it.
+function generateAdminPassword(): string {
+  return randomBytes(18).toString('base64url');
+}
 
 async function main() {
   console.log('Seeding permissions...');
@@ -62,7 +73,8 @@ async function main() {
   }
 
   console.log('Creating admin user...');
-  const adminHash = await argon2.hash('Admin@123', { type: argon2.argon2id });
+  const adminPassword = generateAdminPassword();
+  const adminHash = await argon2.hash(adminPassword, { type: argon2.argon2id });
   await prisma.user.create({
     data: {
       companyId: company.id,
@@ -73,6 +85,13 @@ async function main() {
       forcePasswordChange: true,
     },
   });
+  console.log('');
+  console.log('  ==============================================');
+  console.log('   Initial admin login (save this — shown once):');
+  console.log('   email:    admin@demo-realty.com');
+  console.log(`   password: ${adminPassword}`);
+  console.log('  ==============================================');
+  console.log('');
 
   console.log('Seeding company config...');
   await prisma.companyConfig.create({

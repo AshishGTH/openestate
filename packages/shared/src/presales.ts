@@ -104,6 +104,10 @@ export const createApplicantSchema = z
     city: z.string().max(100).optional(),
     state: z.string().max(100).optional(),
     pincode: z.string().max(10).optional(),
+    pan: z
+      .string()
+      .regex(/^[A-Z]{5}[0-9]{4}[A-Z]$/, 'Invalid PAN format')
+      .optional(),
     customFields: z.record(z.unknown()).optional(),
   })
   .strict();

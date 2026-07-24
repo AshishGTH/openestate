@@ -14,6 +14,7 @@ import { makeClients, seedCompany, cleanupCompany, type CompanyFixture } from '.
 import { InquiryService } from '../src/presales/inquiry.service';
 import { AssignmentService } from '../src/presales/assignment.service';
 import { ApplicantService } from '../src/presales/applicant.service';
+import { PanEncryptionService } from '../src/common/pan-encryption.service';
 import { LeadApiKeyService } from '../src/leads/lead-api-key.service';
 import { LeadInboundController } from '../src/leads/lead-inbound.controller';
 import { PluginSecretEncryptionService } from '../src/plugins/plugin-secret-encryption.service';
@@ -25,6 +26,7 @@ const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
 const describeIf = APP_URL && SYSTEM_URL ? describe : describe.skip;
 
 process.env.PLUGIN_SECRET_ENCRYPTION_KEYS ??= `1:${'c1d2e3f4'.repeat(8)}`;
+process.env.PAN_ENCRYPTION_KEY ??= 'a1b2c3d4'.repeat(8);
 
 // `Date.now() + N` for small N truncates to the SAME leading digits once
 // sliced to 10 — every test in this file would collide on the same
@@ -49,7 +51,7 @@ describeIf('Inbound lead API (Phase 7 commit 2)', () => {
     ({ tenantPrisma, systemPrisma } = makeClients());
     fx = await seedCompany(systemPrisma);
     const assignmentService = new AssignmentService(tenantPrisma);
-    const applicantService = new ApplicantService(tenantPrisma, systemPrisma);
+    const applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService());
     inquiryService = new InquiryService(tenantPrisma, systemPrisma, SYSTEM_CLOCK, assignmentService, applicantService);
     leadApiKeyService = new LeadApiKeyService(systemPrisma);
     inboundController = new LeadInboundController(inquiryService);
@@ -99,7 +101,7 @@ describeIf('Inbound lead API (Phase 7 commit 2)', () => {
     let runtime: PluginRuntimeService;
 
     beforeAll(() => {
-      runtime = new PluginRuntimeService(new PluginSecretEncryptionService(), new ApplicantService(tenantPrisma, systemPrisma), new CompanyService(tenantPrisma, systemPrisma), inquiryService);
+      runtime = new PluginRuntimeService(new PluginSecretEncryptionService(), new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService()), new CompanyService(tenantPrisma, systemPrisma), inquiryService);
     });
 
     function makePlugin(capabilities: Plugin['manifest']['capabilities']): Plugin {

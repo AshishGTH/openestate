@@ -13,6 +13,7 @@ import { runWithTenant } from '@openestate/db';
 import { isSecretRef, PluginCapabilityError, type Plugin } from '@openestate/plugin-sdk';
 import { makeClients, seedCompany, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
 import { ApplicantService } from '../src/presales/applicant.service';
+import { PanEncryptionService } from '../src/common/pan-encryption.service';
 import { CompanyService } from '../src/company/company.service';
 import { PluginSecretEncryptionService } from '../src/plugins/plugin-secret-encryption.service';
 import { PluginRuntimeService } from '../src/plugins/plugin-runtime.service';
@@ -22,6 +23,7 @@ const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
 const describeIf = APP_URL && SYSTEM_URL ? describe : describe.skip;
 
 process.env.PLUGIN_SECRET_ENCRYPTION_KEYS ??= `1:${'d1e2f3a4'.repeat(8)}`;
+process.env.PAN_ENCRYPTION_KEY ??= 'c3d4e5f6'.repeat(8);
 
 function makePlugin(capabilities: Plugin['manifest']['capabilities'], configFields: Plugin['manifest']['configFields'] = []): Plugin {
   return {
@@ -52,7 +54,7 @@ describeIf('PluginRuntimeService (Phase 7 commit 1)', () => {
     ({ tenantPrisma, systemPrisma } = makeClients());
     fx = await seedCompany(systemPrisma);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    runtime = new PluginRuntimeService(new PluginSecretEncryptionService(), new ApplicantService(tenantPrisma, systemPrisma), new CompanyService(tenantPrisma, systemPrisma), null as any);
+    runtime = new PluginRuntimeService(new PluginSecretEncryptionService(), new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService()), new CompanyService(tenantPrisma, systemPrisma), null as any);
   });
 
   afterAll(async () => {

@@ -5,7 +5,7 @@ x-restart-policy: &restart-policy
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     <<: *restart-policy
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-openestate}
@@ -25,7 +25,7 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     <<: *restart-policy
     command: ["redis-server", "--save", "60", "1"]
     volumes:
@@ -61,6 +61,7 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET is required}
       PAN_ENCRYPTION_KEY: ${PAN_ENCRYPTION_KEY:?PAN_ENCRYPTION_KEY is required}
       TOTP_ENCRYPTION_KEY: ${TOTP_ENCRYPTION_KEY:?TOTP_ENCRYPTION_KEY is required}
+      PLUGIN_SECRET_ENCRYPTION_KEYS: ${PLUGIN_SECRET_ENCRYPTION_KEYS:?PLUGIN_SECRET_ENCRYPTION_KEYS is required}
     volumes:
       - uploads:/app/uploads
     ports:
@@ -87,7 +88,7 @@ services:
       - api
 
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
     <<: *restart-policy
     depends_on:
       - api
@@ -105,7 +106,7 @@ services:
       start_period: 15s
 
   minio:
-    image: minio/minio:RELEASE.2024-12-18T13-15-44Z
+    image: minio/minio:RELEASE.2024-12-18T13-15-44Z@sha256:1dce27c494a16bae114774f1cec295493f3613142713130c2d22dd5696be6ad3
     <<: *restart-policy
     profiles: ["storage"]
     command: ["server", "/data", "--console-address", ":9001"]

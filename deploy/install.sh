@@ -35,6 +35,7 @@ else
   JWT_REFRESH_SECRET="$(rand_secret)"
   PAN_ENCRYPTION_KEY="$(rand_hex_32)"
   TOTP_ENCRYPTION_KEY="$(rand_hex_32)"
+  PLUGIN_SECRET_ENCRYPTION_KEYS="1:$(rand_hex_32)"
   MINIO_ROOT_PASSWORD="$(rand_secret)"
 
   # Portable in-place sed for both GNU and BSD/macOS sed.
@@ -46,6 +47,7 @@ else
   sedi "s#^JWT_REFRESH_SECRET=.*#JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}#"
   sedi "s#^PAN_ENCRYPTION_KEY=.*#PAN_ENCRYPTION_KEY=${PAN_ENCRYPTION_KEY}#"
   sedi "s#^TOTP_ENCRYPTION_KEY=.*#TOTP_ENCRYPTION_KEY=${TOTP_ENCRYPTION_KEY}#"
+  sedi "s#^PLUGIN_SECRET_ENCRYPTION_KEYS=.*#PLUGIN_SECRET_ENCRYPTION_KEYS=${PLUGIN_SECRET_ENCRYPTION_KEYS}#"
   sedi "s#^MINIO_ROOT_PASSWORD=.*#MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD}#"
 fi
 
@@ -53,7 +55,12 @@ fi
 set -a; source .env; set +a
 
 # Construct the superuser URL for migrations only (never used by the app).
-MIGRATION_DATABASE_URL="postgresql://${POSTGRES_USER:-openestate}:${POSTGRES_PASSWORD}@localhost:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-openestate}"
+# Host is "postgres" (the compose service's DNS name on the shared
+# openestate_default network), not "localhost" — this URL is used inside
+# a `docker compose exec api ...` call below, i.e. from the API
+# container's own network namespace, where "localhost" would mean the api
+# container itself, not the separate postgres container.
+MIGRATION_DATABASE_URL="postgresql://${POSTGRES_USER:-openestate}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-openestate}"
 
 log "Building and starting the stack (this can take a few minutes on first run)..."
 docker compose up -d --build
@@ -68,17 +75,26 @@ until docker compose exec -T api node -e "fetch('http://127.0.0.1:3000/api/v1/he
   sleep 2
 done
 
+# Invoked directly via their hoisted node_modules/.bin/ path, NOT via
+# `pnpm --filter @openestate/db ...` — the runtime image's /app is a
+# `pnpm deploy --prod` output (a flattened, standalone package directory),
+# not a pnpm workspace: there's no root package.json/pnpm-workspace.yaml
+# there for `--filter` to resolve against, so corepack falls back to
+# fetching whatever "latest" pnpm resolves to instead of the version
+# pinned in the (absent, from this directory) root package.json — and
+# that latest version can require a newer Node than this image ships,
+# hard-failing. prisma/tsx are direct `dependencies` of @openestate/api
+# specifically so pnpm deploy hoists their binaries to /app/node_modules/.bin/.
 log "Running database migrations (as superuser role)..."
-docker compose exec -T -e DATABASE_URL="$MIGRATION_DATABASE_URL" api node -e "require('child_process').execSync('pnpm --filter @openestate/db migrate:deploy', {stdio:'inherit'})" \
+docker compose exec -T -w /app/packages/db -e DATABASE_URL="$MIGRATION_DATABASE_URL" api ../../node_modules/.bin/prisma migrate deploy \
   || die "Migration failed. Check logs: docker compose logs api"
 
 log "Seeding initial data..."
-docker compose exec -T -e DATABASE_URL="$MIGRATION_DATABASE_URL" api node -e "require('child_process').execSync('pnpm --filter @openestate/db seed', {stdio:'inherit'})" \
+docker compose exec -T -w /app/packages/db -e DATABASE_URL="$MIGRATION_DATABASE_URL" api ../../node_modules/.bin/tsx prisma/seed.ts \
   || warn "Seed step skipped/failed."
 
-# TODO: generate an initial super_admin user with a random password
-# here, force password change on first login, and print credentials.
 NGINX_PORT="${NGINX_PORT:-8080}"
 log "OpenEstate is up: http://localhost:${NGINX_PORT}"
 log "API health check: http://localhost:${NGINX_PORT}/api/v1/health"
-warn "No admin user exists yet — run the seed script to create one."
+log "The seed step above printed a one-time initial admin email + random"
+log "password — scroll up in this terminal to find it (it is not shown again)."
