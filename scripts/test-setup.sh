@@ -10,9 +10,17 @@ set -euo pipefail
 COMPOSE_FILE="deploy/docker-compose.test.yml"
 SERVICE="postgres-test"
 
+# connection_limit is deliberate, not decorative — see CLAUDE.md's Phase 7
+# CI-reliability decisions. Every test file gets its OWN PrismaClient pair
+# (createTenantPrismaClient/createSystemPrismaClient), and Prisma's default
+# pool size is num_cpus*2+1 (33 on a 16-core box) PER CLIENT. With vitest's
+# default fork concurrency, that adds up to several hundred potential
+# connections against Postgres's max_connections=100 — capped here to a
+# fixed, arithmetically-checked-safe budget instead (see vitest.config.ts's
+# maxForks comment for the other half of this budget).
 export DATABASE_URL="postgresql://openestate_super:test_super_pass@localhost:5433/openestate_test"
-export DATABASE_URL_TEST="postgresql://openestate_app:test_app_pass@localhost:5433/openestate_test"
-export DATABASE_URL_TEST_SYSTEM="postgresql://openestate_system:test_system_pass@localhost:5433/openestate_test"
+export DATABASE_URL_TEST="postgresql://openestate_app:test_app_pass@localhost:5433/openestate_test?connection_limit=10"
+export DATABASE_URL_TEST_SYSTEM="postgresql://openestate_system:test_system_pass@localhost:5433/openestate_test?connection_limit=5"
 
 if [ "${1:-}" = "teardown" ]; then
   echo "Stopping test database..."

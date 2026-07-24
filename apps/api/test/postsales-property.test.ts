@@ -75,8 +75,39 @@ describeIf('Ledger property: balance == Σ(ledger) for random sequences', () => 
     await tenantPrisma.$disconnect();
   }, 300_000);
 
+  // Timeout is 1_800_000 (30min), not the old 600_000 — raised as part of
+  // the Phase 7 CI-reliability fix (CLAUDE.md's Decisions log). The old
+  // 600s timeout was tight enough that CPU/IO contention under the FULL
+  // concurrent suite (not this test in isolation, which finishes in ~96s
+  // at 500 runs) could push a real, still-succeeding run past it. Vitest's
+  // it(fn, timeout) only stops AWAITING on timeout — it does not cancel
+  // the in-flight fast-check loop, which kept issuing real Postgres writes
+  // concurrently with afterAll's cleanupCompany() delete sweep, producing
+  // a genuine 40P01 deadlock (confirmed via the Postgres server's own
+  // log, not just the client-side error). Raising the timeout removes the
+  // false-positive trigger for that self-race rather than papering over
+  // the race itself; the vitest maxForks cap (vitest.config.ts)
+  // additionally reduces the contention that made 600s too tight in the
+  // first place. GitHub Actions' own job timeout (360min default, unset
+  // in ci.yml) is the real backstop against a genuine hang.
   it(`holds across ${resolveNumRuns()} random sequences`, async () => {
     const numRuns = resolveNumRuns();
+    // Explicit, unconditional log — not just the test title above. A test
+    // NAME is invisible to some reporters (the JSON reporter CI uses for
+    // its "fail if any test was skipped" check only surfaces pass/fail
+    // counts, not names) and easy to skim past in a long log. This line
+    // is how the turbo strict-envMode bug that stripped PROPERTY_NUM_RUNS
+    // in both local and real CI runs (CLAUDE.md's Phase 7→8 gate decision)
+    // got caught in the first place — printing the RAW env value alongside
+    // the resolved one means a future divergence between "what was
+    // intended" and "what the process actually saw" is visible in every
+    // CI log, not something you have to go instrument for again.
+    console.log(
+      `[postsales-property] effective numRuns=${numRuns} ` +
+        `(PROPERTY_NUM_RUNS=${process.env.PROPERTY_NUM_RUNS ?? '<unset>'}, ` +
+        `CI=${process.env.CI ?? '<unset>'}, ` +
+        `FC_SEED=${process.env.FC_SEED ?? '<unset>'})`,
+    );
     if (!process.env.PROPERTY_NUM_RUNS && process.env.CI && numRuns < CI_DEFAULT) {
       throw new Error(
         `Property test numRuns (${numRuns}) is below the CI floor of ${CI_DEFAULT}. ` +
@@ -195,7 +226,7 @@ describeIf('Ledger property: balance == Σ(ledger) for random sequences', () => 
       }),
       { numRuns, seed: process.env.FC_SEED ? Number(process.env.FC_SEED) : undefined },
     );
-  }, 600_000);
+  }, 1_800_000);
 
   async function entryCount(bookingId: string): Promise<number> {
     return systemPrisma.ledgerEntry.count({ where: { companyId: fx.companyId, bookingId } });

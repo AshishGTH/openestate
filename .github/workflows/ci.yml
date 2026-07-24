@@ -146,8 +146,13 @@ jobs:
 
       - name: Run integration tests
         env:
-          DATABASE_URL_TEST: postgresql://openestate_app:test_app_pass@localhost:5432/openestate_test
-          DATABASE_URL_TEST_SYSTEM: postgresql://openestate_system:test_system_pass@localhost:5432/openestate_test
+          # connection_limit is deliberate — see CLAUDE.md's Phase 7
+          # CI-reliability decisions (must match scripts/test-setup.sh's
+          # local equivalent, and apps/api/vitest.config.ts's maxForks,
+          # so the total connection budget stays arithmetically safe
+          # against Postgres's max_connections=100).
+          DATABASE_URL_TEST: postgresql://openestate_app:test_app_pass@localhost:5432/openestate_test?connection_limit=10
+          DATABASE_URL_TEST_SYSTEM: postgresql://openestate_system:test_system_pass@localhost:5432/openestate_test?connection_limit=5
           REDIS_TEST_URL: redis://localhost:6379
           # Ledger property test: full CI floor (2000 runs, ~6 min) only on
           # the nightly schedule; PR/push runs 500 for fast feedback. Both
@@ -159,8 +164,13 @@ jobs:
 
       - name: Fail if any test was skipped
         env:
-          DATABASE_URL_TEST: postgresql://openestate_app:test_app_pass@localhost:5432/openestate_test
-          DATABASE_URL_TEST_SYSTEM: postgresql://openestate_system:test_system_pass@localhost:5432/openestate_test
+          # connection_limit is deliberate — see CLAUDE.md's Phase 7
+          # CI-reliability decisions (must match scripts/test-setup.sh's
+          # local equivalent, and apps/api/vitest.config.ts's maxForks,
+          # so the total connection budget stays arithmetically safe
+          # against Postgres's max_connections=100).
+          DATABASE_URL_TEST: postgresql://openestate_app:test_app_pass@localhost:5432/openestate_test?connection_limit=10
+          DATABASE_URL_TEST_SYSTEM: postgresql://openestate_system:test_system_pass@localhost:5432/openestate_test?connection_limit=5
           REDIS_TEST_URL: redis://localhost:6379
           PROPERTY_NUM_RUNS: ${{ github.event_name == 'schedule' && '2000' || '500' }}
         run: |
