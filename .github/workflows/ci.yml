@@ -99,6 +99,18 @@ jobs:
       - name: Generate Prisma client
         run: pnpm --filter @openestate/db generate
 
+      # packages/db/prisma/seed.ts imports from @openestate/shared, resolved
+      # via plain Node `require()` (tsx runs it, not Vite) — same class of
+      # gap as apps/api's Dockerfile needing packages/shared built first
+      # (Phase 1 decisions: "Vite builds don't require pnpm --filter
+      # @openestate/shared build first, but NestJS production runtime
+      # does"). The "Run seed" step below invokes pnpm --filter directly,
+      # bypassing turbo's dependsOn: ["^build"] graph that the later
+      # "Run integration tests" step (pnpm test -> turbo run test) gets
+      # automatically — so this needs its own explicit build step.
+      - name: Build workspace packages
+        run: pnpm --filter @openestate/shared build
+
       - name: Create application roles
         env:
           PGHOST: localhost
