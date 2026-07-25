@@ -1,3 +1,9 @@
+---
+id: installation
+title: Installation Guide & SOP
+sidebar_position: 1
+---
+
 # OpenEstate — Installation Guide & Standard Operating Procedure
 
 This guide covers installing OpenEstate on a fresh Linux server, first-time

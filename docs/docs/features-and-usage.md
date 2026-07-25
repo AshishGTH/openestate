@@ -1,3 +1,9 @@
+---
+id: features-and-usage
+title: Features & Usage Guide
+sidebar_position: 2
+---
+
 # OpenEstate — Features & Usage Guide
 
 ## What OpenEstate is
@@ -151,6 +157,6 @@ a broker checks a live availability grid before bringing a client to site.
 
 ## Getting started
 
-See `INSTALLATION_GUIDE.md` for setup. Once running, walk through the
-"First login and initial setup SOP" section, then the "dry-run booking"
-step before inviting real customers.
+See the [Installation Guide](./installation.md) for setup. Once running,
+walk through the "First login and initial setup SOP" section, then the
+"dry-run booking" step before inviting real customers.
