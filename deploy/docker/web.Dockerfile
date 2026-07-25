@@ -19,7 +19,9 @@ COPY apps/web/vite.config.ts apps/web/vite.config.ts
 COPY apps/web/index.html apps/web/index.html
 COPY apps/web/postcss.config.js apps/web/postcss.config.js
 COPY apps/web/tailwind.config.js apps/web/tailwind.config.js
-ARG VITE_API_URL=/api
+# Empty: nginx forwards /api/ through unchanged, and the app code already
+# hardcodes /api/v1/... on top of this — see deploy/.env.example.
+ARG VITE_API_URL=
 ENV VITE_API_URL=$VITE_API_URL
 RUN pnpm --filter @openestate/web build
 

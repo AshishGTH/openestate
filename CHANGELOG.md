@@ -3,6 +3,20 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Login failed on every fresh Docker Compose install with "Cannot POST
+  /api/api/v1/auth/login".** `VITE_API_URL` defaulted to `/api`
+  (`deploy/.env.example`, `deploy/docker-compose.yml`,
+  `deploy/docker/{web,portal}.Dockerfile`), but `apps/web`/`apps/portal`'s
+  own API client already hardcodes `/api/v1/...` on top of it, and
+  nginx's `/api/` location already forwards that prefix through unchanged
+  — doubling it. Since Vite bakes this value into the built JS bundle at
+  image-build time, existing installs need `git pull` +
+  `docker compose up -d --build` (not just a restart) to pick up the fix.
+
 ## [0.1.0] — first tagged release
 
 The first tagged release of OpenEstate: a self-hostable, open-source
