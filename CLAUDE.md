@@ -2198,3 +2198,39 @@ this is a log, not a design doc.
   `CODE_OF_CONDUCT.md`'s conduct-contact TODO deliberately stays an
   honest placeholder, per explicit user choice this phase — needs a real
   email only a human maintainer can commit to.
+
+### Post-release hotfix — doubled `/api/api/v1/...` path on first real install
+
+- **Real production bug, reported by the repo owner's own real Ubuntu 24
+  install (v0.1.0) — every login failed with "Cannot POST
+  /api/api/v1/auth/login".** Root cause: `VITE_API_URL` defaulted to
+  `/api` in `deploy/.env.example`, `deploy/docker-compose.yml` (both the
+  `web` and `portal` build-arg lines), and `ARG VITE_API_URL=/api` in
+  both `deploy/docker/web.Dockerfile` and `deploy/docker/portal.Dockerfile`
+  — but `apps/web/src/lib/api.ts`/`apps/portal/src/lib/api.ts` already
+  hardcode `` `${API_BASE}/api/v1/...` `` on top of it, and
+  `deploy/nginx/reverse-proxy.conf`'s `location /api/ { proxy_pass
+  http://api:3000/api/; }` already forwards the `/api/` prefix through
+  unchanged — so the correct default is an EMPTY string, not `/api`.
+  **This had never been caught in eight prior phases of manual
+  click-throughs because every one of them exercised either the Vite dev
+  server directly (`http://localhost:3000` fallback, no `/api` prefix to
+  double) or the API directly via curl/supertest — nobody had loaded a
+  real Docker-built frontend bundle through nginx and clicked "Sign in"
+  in a browser until this real install did.** Fixed by changing the
+  default to empty in all four locations; verified end-to-end (not just
+  by inspection) via a real `docker compose up -d --build` +
+  `prisma migrate deploy` + seed + a real browser login through
+  `localhost:8080`, confirming the network request hits
+  `POST /api/v1/auth/login` (200), not the doubled path. Because Vite
+  bakes `VITE_API_URL` into the JS bundle at image-build time, existing
+  installs need `git pull` + `docker compose up -d --build` — a plain
+  restart does not pick up the fix.
+- **Lesson for future phases' "manual click-through" verification
+  steps**: a click-through against `pnpm dev`'s Vite dev servers, or
+  against the API directly, is not equivalent to a click-through against
+  the actual `docker compose` production build — the two take genuinely
+  different code paths for anything baked in at build time (like
+  `VITE_API_URL`) or routed through nginx. At least one manual
+  browser-based login should be run against the real Docker stack before
+  any future release tag, not only against dev servers.

@@ -72,7 +72,7 @@ services:
       context: ..
       dockerfile: deploy/docker/web.Dockerfile
       args:
-        VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_API_URL: ${VITE_API_URL:-}
     <<: *restart-policy
     depends_on:
       - api
@@ -82,7 +82,7 @@ services:
       context: ..
       dockerfile: deploy/docker/portal.Dockerfile
       args:
-        VITE_API_URL: ${VITE_API_URL:-/api}
+        VITE_API_URL: ${VITE_API_URL:-}
     <<: *restart-policy
     depends_on:
       - api
