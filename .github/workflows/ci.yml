@@ -99,17 +99,31 @@ jobs:
       - name: Generate Prisma client
         run: pnpm --filter @openestate/db generate
 
-      # packages/db/prisma/seed.ts imports from @openestate/shared, resolved
-      # via plain Node `require()` (tsx runs it, not Vite) — same class of
-      # gap as apps/api's Dockerfile needing packages/shared built first
-      # (Phase 1 decisions: "Vite builds don't require pnpm --filter
-      # @openestate/shared build first, but NestJS production runtime
-      # does"). The "Run seed" step below invokes pnpm --filter directly,
-      # bypassing turbo's dependsOn: ["^build"] graph that the later
-      # "Run integration tests" step (pnpm test -> turbo run test) gets
-      # automatically — so this needs its own explicit build step.
-      - name: Build workspace packages
-        run: pnpm --filter @openestate/shared build
+      # Two independent things in this job need compiled output that
+      # `pnpm install` alone doesn't produce:
+      #   1. packages/db/prisma/seed.ts imports from @openestate/shared,
+      #      resolved via plain Node `require()` (tsx runs it, not Vite) —
+      #      same class of gap as apps/api's Dockerfile needing
+      #      packages/shared built first (Phase 1 decisions: "Vite builds
+      #      don't require pnpm --filter @openestate/shared build first,
+      #      but NestJS production runtime does"). The "Run seed" step
+      #      below invokes pnpm --filter directly, bypassing turbo's
+      #      dependsOn: ["^build"] graph.
+      #   2. Several e2e test files (e2e-portal, e2e-portal-throttle,
+      #      e2e-broker-portal, e2e-webhooks-leads, e2e-plugins) deliberately
+      #      boot from apps/api's COMPILED dist/app.module, not TS source
+      #      (Phase 6 decisions: esbuild's transform doesn't emit correct
+      #      design:paramtypes decorator metadata for NestJS DI). turbo's
+      #      `test` task only depends on `^build` (upstream packages), never
+      #      the same package's own `build` — so `pnpm test` alone never
+      #      builds apps/api itself. The OTHER job in this workflow
+      #      ("Lint, typecheck, unit tests, build") does run `pnpm build`,
+      #      but GitHub Actions jobs are separate runners with no shared
+      #      filesystem, so that build is invisible here.
+      # A full `pnpm build` (not just @openestate/shared) covers both,
+      # building every workspace package in dependency order via turbo.
+      - name: Build workspace
+        run: pnpm build
 
       - name: Create application roles
         env:
