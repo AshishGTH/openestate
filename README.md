@@ -30,23 +30,21 @@ OpenEstate is AGPL-3.0 licensed. Run it yourself with a single
 
 ## Quickstart
 
-### One-liner (Docker Compose)
+### Docker Compose
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/openestate/openestate/main/deploy/install.sh | bash
-```
-
-### From source
-
-```bash
-git clone https://github.com/openestate/openestate.git
+git clone https://github.com/AshishGTH/openestate.git
 cd openestate/deploy
 ./install.sh
 ```
 
-Either way, `install.sh` checks for Docker, generates `deploy/.env` with
-strong random secrets, builds and starts the stack, runs migrations and seed
-data, then prints the URL to open.
+`install.sh` needs to run from inside a cloned copy of the repo (it isn't
+set up to be piped straight from `curl` yet). It checks for Docker,
+generates `deploy/.env` with strong random secrets, builds and starts the
+stack, runs migrations and seed data, then prints the URL to open plus a
+one-time random admin password. See the
+[Installation Guide](docs/docs/installation.md) for the full SOP —
+first-login checklist, backups, upgrades, and troubleshooting.
 
 **Prerequisites:** Docker + Docker Compose v2. For local development without
 containers you'll also want Node.js 20+ and pnpm.
