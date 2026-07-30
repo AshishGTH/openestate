@@ -196,3 +196,56 @@ export const reportDateRangeSchema = z
   })
   .strict();
 export type ReportDateRangeQuery = z.infer<typeof reportDateRangeSchema>;
+
+// ── Letter templates ─────────────────────────────────────────
+// LetterTemplate.entityType tags which document type a template is meant
+// for (admin-facing label/filter only — generateLetterPdf takes
+// documentType as its own separate parameter, it never reads this column).
+// Only the three merge-field-driven letter types apply; BROKER_STATEMENT
+// is a typed ledger-table template (buildBrokerStatementDocDefinition),
+// not a LetterTemplate at all.
+export const LETTER_TEMPLATE_ENTITY_TYPES = ['ALLOTMENT_LETTER', 'DEMAND_LETTER', 'REMINDER_LETTER'] as const;
+
+export const createLetterTemplateSchema = z
+  .object({
+    name: z.string().min(1).max(255),
+    subject: z.string().min(1).max(500),
+    entityType: z.enum(LETTER_TEMPLATE_ENTITY_TYPES),
+    body: z.string().min(1),
+    isActive: z.boolean().default(true),
+    sortOrder: z.number().int().min(0).default(0),
+  })
+  .strict()
+  .refine(
+    (d) => validateTemplateMergeFields(d.body, d.entityType as GeneratedDocumentTypeValue).valid,
+    (d) => ({
+      message: `Unknown merge field(s) in body for ${d.entityType}. Allowed: ${MERGE_FIELD_REGISTRY[d.entityType as GeneratedDocumentTypeValue].join(', ')}`,
+      path: ['body'],
+    }),
+  );
+export type CreateLetterTemplateDto = z.infer<typeof createLetterTemplateSchema>;
+
+// A partial update needs BOTH entityType and body together to re-validate
+// merge fields (validating body against a not-yet-known entityType would be
+// meaningless) — so this is a hand-written partial, not
+// createLetterTemplateSchema.partial(), which would silently allow body
+// and entityType to be edited independently of each other with no
+// re-validation at all.
+export const updateLetterTemplateSchema = z
+  .object({
+    name: z.string().min(1).max(255).optional(),
+    subject: z.string().min(1).max(500).optional(),
+    entityType: z.enum(LETTER_TEMPLATE_ENTITY_TYPES).optional(),
+    body: z.string().min(1).optional(),
+    isActive: z.boolean().optional(),
+    sortOrder: z.number().int().min(0).optional(),
+  })
+  .strict()
+  .refine(
+    (d) => {
+      if (d.body === undefined || d.entityType === undefined) return true;
+      return validateTemplateMergeFields(d.body, d.entityType as GeneratedDocumentTypeValue).valid;
+    },
+    { message: 'Unknown merge field(s) in body for the given entityType', path: ['body'] },
+  );
+export type UpdateLetterTemplateDto = z.infer<typeof updateLetterTemplateSchema>;

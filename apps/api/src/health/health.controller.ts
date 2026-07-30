@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Controller, Get } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { getSystemPrisma } from '@openestate/db';
@@ -6,6 +8,24 @@ import { Public } from '../auth/guards/jwt-auth.guard';
 import Redis from 'ioredis';
 
 const startedAt = Date.now();
+
+// `npm_package_version` is only set by npm/pnpm when a script is launched
+// via `pnpm run ...` — systemd's `ExecStart=node dist/main.js` (and
+// Docker's equivalent direct `node` CMD) never sets it, so this endpoint
+// silently reported the hardcoded '0.1.0' fallback in every real
+// deployment regardless of the actual released version. Reading
+// package.json directly (two levels up from dist/health/, i.e. the
+// deployed api package root) works the same way in dev (ts source) and
+// prod (compiled dist) since it's a fixed relative position, not a build
+// artifact.
+const packageVersion: string = (() => {
+  try {
+    return (JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8')) as { version?: string })
+      .version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
 
 @ApiTags('health')
 @Controller('health')
@@ -21,7 +41,7 @@ export class HealthController {
       status: db === 'ok' && redis === 'ok' ? 'ok' : 'degraded',
       db,
       redis,
-      version: process.env.npm_package_version ?? '0.1.0',
+      version: packageVersion,
       uptimeSeconds: Math.floor((Date.now() - startedAt) / 1000),
     };
   }

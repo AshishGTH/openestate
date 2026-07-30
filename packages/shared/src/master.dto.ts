@@ -76,21 +76,10 @@ export type CreateBankDto = z.infer<typeof createBankSchema>;
 export const updateBankSchema = createBankSchema.partial().strict();
 export type UpdateBankDto = z.infer<typeof updateBankSchema>;
 
-export const createLetterTemplateSchema = z
-  .object({
-    name: z.string().min(1).max(255),
-    subject: z.string().max(255).optional(),
-    body: z.string(),
-    isActive: z.boolean().default(true),
-    sortOrder: z.number().int().min(0).default(0),
-  })
-  .strict();
-
-export type CreateLetterTemplateDto = z.infer<typeof createLetterTemplateSchema>;
-
-export const updateLetterTemplateSchema = createLetterTemplateSchema
-  .partial()
-  .strict();
-export type UpdateLetterTemplateDto = z.infer<
-  typeof updateLetterTemplateSchema
->;
+// createLetterTemplateSchema/updateLetterTemplateSchema live in documents.ts
+// now, not here — this file's original version was itself incomplete
+// (subject optional/wrong max length, entityType missing entirely, no
+// merge-field validation) and was never wired to any controller; that's
+// WHY LetterTemplate ended up routed through the generic master factory
+// instead, which doesn't know about subject/body/entityType at all. See
+// documents.ts and masters/letter-template/ for the real implementation.

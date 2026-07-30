@@ -18,6 +18,8 @@ vi.mock('ioredis', () => ({
   },
 }));
 
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { HealthController } from './health.controller';
 
 describe('HealthController', () => {
@@ -29,5 +31,18 @@ describe('HealthController', () => {
     expect(result.db).toBe('down');
     expect(result.redis).toBe('down');
     expect(typeof result.uptimeSeconds).toBe('number');
+  });
+
+  it('reports the real deployed package version, not a hardcoded fallback', async () => {
+    // Regression test: process.env.npm_package_version is only set when
+    // launched via `pnpm run`, never by systemd's/Docker's direct
+    // `node dist/main.js` — a hardcoded fallback silently lied about the
+    // running version in every real deployment.
+    const controller = new HealthController();
+    const result = await controller.check();
+    const { version } = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf-8'));
+
+    expect(result.version).toBe(version);
+    expect(result.version).not.toBe('unknown');
   });
 });
