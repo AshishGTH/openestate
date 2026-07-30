@@ -1,0 +1,45 @@
+# OpenEstate nginx site config — installed to
+# /etc/nginx/sites-available/openestate by install-native.sh, which fills
+# in the server_name placeholder below with the admin's real domain (or
+# leaves it as `_` for an IP-only/no-domain install).
+#
+# Node serves only /api/*. Everything else is static files served
+# directly by nginx from the current release symlink — no reverse proxy
+# hop for the frontend, unlike the retired Docker setup's three-nginx
+# arrangement (this is the only nginx now).
+#
+# TLS is intentionally not configured here — put a real TLS-terminating
+# proxy (or run `certbot --nginx` against this same server block) in
+# front for production use; see docs/docs/installation.md.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name __SERVER_NAME__;
+    client_max_body_size 25m;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:3000/api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Portal SPA is built with base '/portal/' (apps/portal/vite.config.ts),
+    # so its own HTML/JS reference asset paths like /portal/assets/....
+    # `alias` (not `root`) is required here: it replaces the matched
+    # `/portal/` prefix with the target dir instead of appending the full
+    # request URI to it, which is what actually lines up with the dist
+    # folder's real (unprefixed) layout on disk.
+    location /portal/ {
+        alias /opt/openestate/current/portal/;
+        try_files $uri $uri/ /portal/index.html;
+    }
+
+    # Staff web app is built with the default base '/', so `root` +
+    # try_files is the direct match for its dist folder layout.
+    location / {
+        root /opt/openestate/current/web;
+        try_files $uri $uri/ /index.html;
+    }
+}
