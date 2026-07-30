@@ -1,4 +1,6 @@
 import { Module } from '@nestjs/common';
+import { z } from 'zod';
+import { INTEREST_RATE_TYPE } from '@openestate/shared';
 import { createMasterModule } from './master.factory';
 import { GstRateModule } from './gst-rate/gst-rate.module';
 import { TdsRuleModule } from './tds-rule/tds-rule.module';
@@ -17,21 +19,44 @@ const SIMPLE_MASTERS = [
   { modelName: 'ReceiptType', routePath: 'receipt-types', apiTag: 'Receipt Types' },
   { modelName: 'RegistrationType', routePath: 'registration-types', apiTag: 'Registration Types' },
   { modelName: 'AreaLocation', routePath: 'area-locations', apiTag: 'Area Locations' },
-  { modelName: 'DocumentType', routePath: 'document-types', apiTag: 'Document Types' },
-  { modelName: 'LetterTemplate', routePath: 'letter-templates', apiTag: 'Letter Templates' },
+  // DocumentType.entityType is a required Prisma column (free-text label,
+  // not read by any business logic — confirmed by grep — so no enum to
+  // validate against beyond "non-empty").
+  { modelName: 'DocumentType', routePath: 'document-types', apiTag: 'Document Types', extraFields: { entityType: z.string().min(1).max(50) } },
   { modelName: 'Bank', routePath: 'banks', apiTag: 'Banks' },
   { modelName: 'ChargeType', routePath: 'charge-types', apiTag: 'Charge Types' },
-  { modelName: 'InterestRule', routePath: 'interest-rules', apiTag: 'Interest Rules' },
-  { modelName: 'TransferFeeRule', routePath: 'transfer-fee-rules', apiTag: 'Transfer Fee Rules' },
+  // InterestRule.rateType/ratePercent/frequency are all required, non-
+  // nullable Prisma columns createMasterSchema never had. rateType
+  // reuses InterestService's own INTEREST_RATE_TYPE enum (SIMPLE/
+  // COMPOUND) so this can never drift from what the accrual engine
+  // actually understands.
+  {
+    modelName: 'InterestRule', routePath: 'interest-rules', apiTag: 'Interest Rules',
+    extraFields: {
+      rateType: z.nativeEnum(INTEREST_RATE_TYPE),
+      ratePercent: z.coerce.number().min(0).max(100),
+      frequency: z.enum(['DAILY', 'MONTHLY', 'YEARLY']),
+    },
+  },
+  // TransferFeeRule.feeType is required; TransferService reads the
+  // literal 'FIXED' to decide between amountPaise/percentage.
+  {
+    modelName: 'TransferFeeRule', routePath: 'transfer-fee-rules', apiTag: 'Transfer Fee Rules',
+    extraFields: {
+      feeType: z.enum(['FIXED', 'PERCENTAGE']),
+      amountPaise: z.coerce.bigint().min(0n).optional(),
+      percentage: z.coerce.number().min(0).max(100).optional(),
+    },
+  },
   // The only SIMPLE_MASTERS model whose Prisma model actually has a
   // `description` column — see MasterModuleConfig.supportsDescription.
   { modelName: 'PaymentPlanTemplate', routePath: 'payment-plan-templates', apiTag: 'Payment Plan Templates', supportsDescription: true },
   { modelName: 'TicketCategory', routePath: 'ticket-categories', apiTag: 'Ticket Categories' },
   // LetterTemplate is NOT here — its Prisma model requires subject/body/
-  // entityType, which createMasterSchema doesn't provide at all (a 500,
-  // not a validation error, for every create attempt); it has its own
-  // module (mirroring SmsTemplateModule's existing precedent for masters
-  // that need fields beyond name/description/isActive/sortOrder).
+  // entityType with merge-field validation (not just "field present"),
+  // which the generic extraFields mechanism above doesn't cover; it has
+  // its own dedicated module (mirroring SmsTemplateModule's existing
+  // precedent).
 ] as const;
 
 const simpleMasterModules = SIMPLE_MASTERS.map((config) =>
