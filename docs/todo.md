@@ -129,3 +129,13 @@ they're expected to land. Each entry should say *what*, *why deferred*, and
   in commit 2** — same single `ThrottlerModule.forRoot([...])` call,
   same in-memory-storage limitation, no new gap introduced, just noting
   the surface area grows by one more bucket.
+
+## GSTIN checksum digit not verified (format regex only)
+
+`updateCompanyConfigSchema.companyGstin` (packages/shared/src/company.dto.ts)
+validates the 15-char GSTIN structure via regex but does not verify the
+final check-digit (a mod-36 algorithm). Deferred rather than risking a
+subtly wrong implementation that silently rejects real, valid GSTINs —
+worse than no check at all for an admin trying to onboard their real
+company. Add real checksum verification once validated against a set of
+known-correct GSTIN/check-digit pairs (not from memory).

@@ -32,10 +32,25 @@ class CreateMasterDto extends createZodDto(createMasterSchema) {}
 class UpdateMasterDto extends createZodDto(updateMasterSchema) {}
 class PaginationQueryDto extends createZodDto(paginationQuerySchema) {}
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function stripDescription(data: any) {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { description, ...rest } = data;
+  return rest;
+}
+
 export interface MasterModuleConfig {
   modelName: string;
   routePath: string;
   apiTag: string;
+  // createMasterSchema's `description` field is optional but only
+  // PaymentPlanTemplate's Prisma model actually has a `description`
+  // column — every other SIMPLE_MASTERS model threw
+  // PrismaClientValidationError ("Unknown argument `description`")
+  // whenever a caller provided one, since create()/update() below spread
+  // the whole validated dto straight into Prisma's `data`. Default false
+  // strips it; only the one model that supports it opts in.
+  supportsDescription?: boolean;
 }
 
 export function createMasterService(config: MasterModuleConfig) {
@@ -102,11 +117,12 @@ export function createMasterService(config: MasterModuleConfig) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     async create(companyId: string, data: any) {
       const key = config.modelName.charAt(0).toLowerCase() + config.modelName.slice(1);
+      const payload = config.supportsDescription ? data : stripDescription(data);
       return runWithTenant({ companyId }, () =>
         withTenantTx(this.tenantPrisma, companyId, (tx) =>
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (tx as any)[key].create({
-            data: { ...data, companyId },
+            data: { ...payload, companyId },
           }),
         ),
       );
@@ -116,10 +132,11 @@ export function createMasterService(config: MasterModuleConfig) {
     async update(companyId: string, id: string, data: any) {
       await this.findOne(companyId, id);
       const key = config.modelName.charAt(0).toLowerCase() + config.modelName.slice(1);
+      const payload = config.supportsDescription ? data : stripDescription(data);
       return runWithTenant({ companyId }, () =>
         withTenantTx(this.tenantPrisma, companyId, (tx) =>
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (tx as any)[key].update({ where: { id }, data }),
+          (tx as any)[key].update({ where: { id }, data: payload }),
         ),
       );
     }

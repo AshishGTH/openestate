@@ -246,6 +246,13 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     // real Inquiry rows — 'inquiries' was previously never populated by
     // any test using this helper, so its absence here was never caught.
     'communication_logs', 'follow_ups', 'inquiry_assignments', 'inquiries',
+    // inquiry_sources is a master referenced by inquiries.source_id, so it
+    // must be deleted after inquiries above, not with the other masters
+    // section — never previously exercised by this harness (same
+    // never-caught-until-first-use gap as inquiries/custom_field_definitions
+    // above), surfaced by the master-factory regression test being the
+    // first to create an InquirySource row here.
+    'inquiry_sources',
     'applicant_consents', 'applicant_merges',
     // Phase 1 — no child rows reference custom_field_definitions (values
     // live inline as JSON on each entity), so it just needs to go before

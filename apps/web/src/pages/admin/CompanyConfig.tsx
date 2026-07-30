@@ -13,6 +13,8 @@ interface CompanyConfigData {
   dateFormat: string;
   logoUrl: string | null;
   primaryColorHex: string | null;
+  companyGstin: string | null;
+  gstStateCode: string | null;
 }
 
 const MODULES = ['presales', 'postsales', 'accounts'];
@@ -34,6 +36,8 @@ export default function CompanyConfigPage() {
   const [dateFormat, setDateFormat] = useState('DD-MM-YYYY');
   const [logoUrl, setLogoUrl] = useState('');
   const [primaryColorHex, setPrimaryColorHex] = useState('');
+  const [companyGstin, setCompanyGstin] = useState('');
+  const [gstStateCode, setGstStateCode] = useState('');
 
   const { data: config, isLoading } = useQuery<CompanyConfigData>({
     queryKey: ['company-config'],
@@ -50,10 +54,14 @@ export default function CompanyConfigPage() {
       setDateFormat(config.dateFormat);
       setLogoUrl(config.logoUrl ?? '');
       setPrimaryColorHex(config.primaryColorHex ?? '');
+      setCompanyGstin(config.companyGstin ?? '');
+      setGstStateCode(config.gstStateCode ?? '');
     }
   }, [config]);
 
   const colorError = primaryColorHex.trim() !== '' && !/^#[0-9A-Fa-f]{6}$/.test(primaryColorHex.trim());
+  const gstinError = companyGstin.trim() !== '' && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(companyGstin.trim());
+  const stateCodeError = gstStateCode.trim() !== '' && !/^[0-9]{2}$/.test(gstStateCode.trim());
 
   const handleSave = async () => {
     setError('');
@@ -70,6 +78,8 @@ export default function CompanyConfigPage() {
           dateFormat,
           logoUrl: logoUrl.trim() === '' ? null : logoUrl.trim(),
           primaryColorHex: primaryColorHex.trim() === '' ? null : primaryColorHex.trim(),
+          companyGstin: companyGstin.trim() === '' ? null : companyGstin.trim().toUpperCase(),
+          gstStateCode: gstStateCode.trim() === '' ? null : gstStateCode.trim(),
         }),
       });
       qc.invalidateQueries({ queryKey: ['company-config'] });
@@ -137,6 +147,42 @@ export default function CompanyConfigPage() {
                 <span className="text-sm text-slate-700 capitalize">{mod}</span>
               </label>
             ))}
+          </div>
+        </section>
+
+        <section>
+          <h2 className="text-lg font-medium text-slate-800">GST Registration</h2>
+          <p className="text-sm text-slate-500">
+            Your supplier-side GSTIN and registered state — determines whether a
+            booking is charged CGST+SGST (intra-state) or IGST (inter-state).
+          </p>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700">GSTIN</label>
+              <input
+                type="text"
+                placeholder="09ABCDE1234F1Z5"
+                value={companyGstin}
+                onChange={(e) => setCompanyGstin(e.target.value)}
+                className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm font-mono ${
+                  gstinError ? 'border-red-400' : 'border-slate-300'
+                }`}
+              />
+              {gstinError && <p className="mt-1 text-xs text-red-600">Invalid GSTIN format</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">GST State Code</label>
+              <input
+                type="text"
+                placeholder="09"
+                value={gstStateCode}
+                onChange={(e) => setGstStateCode(e.target.value)}
+                className={`mt-1 block w-full rounded-md border px-3 py-2 text-sm ${
+                  stateCodeError ? 'border-red-400' : 'border-slate-300'
+                }`}
+              />
+              {stateCodeError && <p className="mt-1 text-xs text-red-600">Must be a 2-digit code, e.g. 09</p>}
+            </div>
           </div>
         </section>
 
@@ -228,7 +274,7 @@ export default function CompanyConfigPage() {
 
         <button
           onClick={handleSave}
-          disabled={saving || colorError}
+          disabled={saving || colorError || gstinError || stateCodeError}
           className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Save Configuration'}

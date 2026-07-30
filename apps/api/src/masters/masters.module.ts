@@ -3,6 +3,7 @@ import { createMasterModule } from './master.factory';
 import { GstRateModule } from './gst-rate/gst-rate.module';
 import { TdsRuleModule } from './tds-rule/tds-rule.module';
 import { SmsTemplateModule } from './sms-template/sms-template.module';
+import { LetterTemplateModule } from './letter-template/letter-template.module';
 
 const SIMPLE_MASTERS = [
   { modelName: 'UnitType', routePath: 'unit-types', apiTag: 'Unit Types' },
@@ -22,8 +23,15 @@ const SIMPLE_MASTERS = [
   { modelName: 'ChargeType', routePath: 'charge-types', apiTag: 'Charge Types' },
   { modelName: 'InterestRule', routePath: 'interest-rules', apiTag: 'Interest Rules' },
   { modelName: 'TransferFeeRule', routePath: 'transfer-fee-rules', apiTag: 'Transfer Fee Rules' },
-  { modelName: 'PaymentPlanTemplate', routePath: 'payment-plan-templates', apiTag: 'Payment Plan Templates' },
+  // The only SIMPLE_MASTERS model whose Prisma model actually has a
+  // `description` column — see MasterModuleConfig.supportsDescription.
+  { modelName: 'PaymentPlanTemplate', routePath: 'payment-plan-templates', apiTag: 'Payment Plan Templates', supportsDescription: true },
   { modelName: 'TicketCategory', routePath: 'ticket-categories', apiTag: 'Ticket Categories' },
+  // LetterTemplate is NOT here — its Prisma model requires subject/body/
+  // entityType, which createMasterSchema doesn't provide at all (a 500,
+  // not a validation error, for every create attempt); it has its own
+  // module (mirroring SmsTemplateModule's existing precedent for masters
+  // that need fields beyond name/description/isActive/sortOrder).
 ] as const;
 
 const simpleMasterModules = SIMPLE_MASTERS.map((config) =>
@@ -31,6 +39,6 @@ const simpleMasterModules = SIMPLE_MASTERS.map((config) =>
 );
 
 @Module({
-  imports: [...simpleMasterModules, GstRateModule, TdsRuleModule, SmsTemplateModule],
+  imports: [...simpleMasterModules, GstRateModule, TdsRuleModule, SmsTemplateModule, LetterTemplateModule],
 })
 export class MastersModule {}

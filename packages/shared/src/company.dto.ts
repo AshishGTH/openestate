@@ -9,8 +9,19 @@ export const updateCompanySchema = z
 
 export type UpdateCompanyDto = z.infer<typeof updateCompanySchema>;
 
+// Format only (2-digit state code + 10-char PAN + entity code + 'Z' +
+// check digit) — the GSTIN check-digit is a mod-36 algorithm; deferred
+// rather than risking a wrong implementation silently rejecting real
+// GSTINs (worse than no check at all). See docs/todo.md.
+const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+
 export const updateCompanyConfigSchema = z
   .object({
+    // Supplier-side GST identity (CompanyConfig.companyGstin/gstStateCode)
+    // — read by BookingService's frozen CGST/SGST-vs-IGST split (Phase 4)
+    // but had no way to be set outside the seed script until now.
+    companyGstin: z.string().regex(GSTIN_REGEX, 'Invalid GSTIN format').nullable().optional(),
+    gstStateCode: z.string().regex(/^[0-9]{2}$/, 'Must be a 2-digit state code').nullable().optional(),
     labelOverrides: z
       .record(z.string().max(100), z.string().max(100))
       .optional(),
