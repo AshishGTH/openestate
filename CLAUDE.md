@@ -2234,3 +2234,339 @@ this is a log, not a design doc.
   `VITE_API_URL`) or routed through nginx. At least one manual
   browser-based login should be run against the real Docker stack before
   any future release tag, not only against dev servers.
+
+### Native install becomes primary; Docker demoted to contributor/CI tool
+
+- **Direction change, not a Docker removal.** Native install (admin's own
+  PostgreSQL/Redis, systemd, standard Linux paths — the "Zabbix model") is
+  now the only user-facing install path; `deploy/docker-compose.yml`,
+  `docker-compose.test.yml`, the Dockerfiles, and CI's
+  `compose-healthcheck` job are all untouched and keep working exactly as
+  before — they just lost their doc links from `README.md`/
+  `docs/docs/installation.md`, which now describe `deploy/native/` only.
+  `CONTRIBUTING.md` gained the Docker section instead, scoped explicitly
+  to local test infrastructure.
+- **One systemd unit, not two.** `apps/api/src/main.ts` runs the HTTP API
+  and every BullMQ processor (`queues.module.ts`'s six queues) in the same
+  `NestFactory.create(AppModule)` process — confirmed before designing the
+  unit file, since a wrong assumption here would have meant either a
+  missing worker unit (jobs silently never processed) or a redundant one
+  double-consuming the same queues.
+- **`deploy/native/lib.sh` centralizes the build+deploy sequence**
+  (`build_release()`) so `install-native.sh` and `upgrade-native.sh` don't
+  duplicate it. It reproduces `deploy/docker/api.Dockerfile`'s exact
+  proven sequence outside Docker: `pnpm --filter @openestate/api build`,
+  `pnpm --filter @openestate/api deploy --prod <dir>`, then manually
+  copying `packages/db`/`packages/shared`/`packages/plugin-sdk`/
+  `plugins/generic-sales`'s `dist/` + `package.json` back in (gitignored
+  `dist/` output is excluded by `pnpm deploy`'s git-tracked-files
+  selection, exactly the reason the Dockerfile already has to do this same
+  manual copy) plus the generated Prisma query-engine binary out of the
+  build's own `node_modules/.pnpm` store. `VITE_API_URL` is explicitly
+  exported as an **empty string** (not left unset) before building
+  `apps/web`/`apps/portal` — `import.meta.env.VITE_API_URL ?? 'http://localhost:3000'`
+  only falls through on `null`/`undefined`, not `""`, so leaving the var
+  truly unset at build time would have baked the dev-server fallback URL
+  into the production bundle instead of same-origin empty-string routing.
+- **Migrate/seed run as the Postgres `postgres` OS user via local peer
+  auth, not as the `openestate` service account.** The obvious-looking
+  `sudo -u openestate ... DATABASE_URL=postgresql://postgres@...` shape
+  doesn't work: Ubuntu's default `pg_hba.conf` maps `peer` auth by
+  matching the connecting OS user's name to the Postgres role name, and
+  `postgres` (the fresh cluster's only passwordless superuser) has no
+  password set for TCP/password auth by default — only local peer auth
+  works for it out of the box. `install-native.sh`/`upgrade-native.sh`
+  therefore `sudo -u postgres env DATABASE_URL=...` for the migrate/seed
+  step specifically (mirroring `setup-database.sh`'s own local default),
+  which requires the just-built release directory to be `o+rX` (added
+  explicitly after `chown -R openestate:openestate`) so the `postgres` OS
+  user can read and execute it.
+- **`apps/portal/vite.config.ts` bakes `base: '/portal/'` into the build**
+  (confirmed by reading the file before writing the nginx config, not
+  assumed) — so the native nginx site's `/portal/` location must use
+  `alias` (which replaces the matched prefix with the target dir),
+  not `root` (which would append the full request URI, doubling the
+  `/portal/` segment). `apps/web/vite.config.ts` has no `base` override,
+  so its `/` location uses plain `root`.
+- **Upgrade never attempts an automatic database rollback** — only
+  `CURRENT_LINK`'s code symlink is rolled back on a failed post-cutover
+  healthcheck. Consistent with this file's own forward-only-migrations
+  rule (Phase 4): a migration failure leaves the *previous* release
+  running against the *new* schema rather than attempting to undo it, and
+  `upgrade-native.sh`'s pre-upgrade `backup-native.sh` call exists for a
+  human-decided manual restore, never an automatic one.
+- **Consistent mutation error toasts via `QueryClient`'s `MutationCache`,
+  not per-call-site edits.** Neither app had a toast library or a global
+  mutation error handler; an audit found ~15+ inconsistent call sites
+  (some inline `setError()` banners, several bare fire-and-forget
+  `.mutate()` calls with zero error surfacing, and one —
+  `apps/portal/src/pages/Profile.tsx` — that captured `onError` but never
+  rendered it). `new QueryClient({ mutationCache: new MutationCache({
+  onError }) })` (not `defaultOptions.mutations.onError`, which a
+  mutation's own `onError` would silently override) fires for **every**
+  mutation app-wide in addition to any handler a component already has —
+  wiring it once in each app's `main.tsx` fixed every one of those call
+  sites, including future ones, without touching any of them. A small
+  self-contained `lib/toast.tsx` (`useSyncExternalStore`-backed, no new
+  dependency) is duplicated identically across `apps/web` and
+  `apps/portal` rather than introducing a new shared UI package for one
+  component — there is no existing FE-only shared package (`packages/shared`
+  is FE/BE type-sharing) and the two apps have no other UI-component
+  sharing precedent to extend.
+- **`downloadFile()` in both apps' `lib/api.ts` calls `toast.error()`
+  directly, not just improving its thrown message.** It isn't a TanStack
+  Query mutation, so `MutationCache`'s global handler never sees it — and
+  several call sites (e.g. `ReceiptEntry.tsx`'s PDF download after saving
+  a receipt) deliberately swallow the thrown error in a bare `catch {}` to
+  avoid blocking their own flow on a non-critical PDF failure, which
+  previously meant the user got zero feedback that the download failed.
+  Toasting inside `downloadFile()` itself fixes every such call site the
+  same "fix once, in the shared function" way as the `MutationCache`
+  change, without changing whether those call sites still swallow the
+  exception for flow-control purposes.
+- **`apps/web/src/pages/admin/Webhooks.tsx`'s `toggle`/`remove`/`sendTest`
+  were bare `await api(...)` with no `try/catch` at all** (an unhandled
+  promise rejection on failure, found during the same audit) — these
+  don't go through `useApiMutation`/`useMutation` so `MutationCache`
+  doesn't cover them either; wrapped individually in `try/catch` +
+  `toast.error()`, the minimal fix for the three non-mutation-hook call
+  sites the audit turned up outside the `useApiMutation` surface.
+
+### Native install — real VM verification (8 real bugs, none caught by static review)
+
+Static review (shellcheck, `nginx -t`, a careful read of every script)
+found nothing wrong with `deploy/native/*.sh`. Running `install-native.sh`
+for real, end to end, on a genuinely clean VM (user-provided, driven
+directly over SSH) found eight real bugs in the first few runs — recorded
+here because every one of them is exactly the class of bug the Phase
+6/7/8 "manual click-through" and "through-the-wire test" lessons already
+warned about: control-flow and environment-interaction bugs that only
+exist at the seams between tools, invisible to reading any single file in
+isolation.
+
+1. **No build-toolchain prerequisite check.** `argon2` has no prebuilt
+   binary for this platform/Node combination and falls back to compiling
+   from source via `node-gyp` during `pnpm install` — `api.Dockerfile`'s
+   build stage already knew this (`apt-get install -y python3 make g++`
+   before its own `pnpm install`), but `install-native.sh` never checked
+   for or installed them, so the very first real run failed deep inside
+   `pnpm install` with `gyp ERR! stack Error: not found: make` — which
+   then cascaded into "tsc: not found"/"nest: not found" everywhere else,
+   because a failed postinstall script leaves pnpm's own `node_modules/.bin`
+   linking incomplete for *everything*, not just the failing package.
+   Fixed by adding an explicit prerequisite check (`make`/`g++`/`python3`),
+   consistent with every other prerequisite in the script: checked and
+   failed loudly with the exact `apt-get` command, never silently
+   installed — same reasoning as Postgres/Redis/nginx, even though build
+   tools have no ongoing state to manage.
+2. **`build_release()`'s command-substitution return value was corrupted
+   by the build's own stdout.** `RELEASE_DIR="$(build_release ...)"`
+   captures *everything* written to stdout inside the function — pnpm's
+   own progress/postinstall output was never redirected away from it, so
+   `$RELEASE_DIR` ended up containing pages of pnpm log text instead of a
+   path, and every later `chown`/`ln -sfn` using it failed with garbled,
+   multi-line error output. Fixed by wrapping the whole build block in
+   `( ... ) >&2` — all of it becomes stderr (still fully visible in the
+   terminal), leaving only the one intentional `printf '%s' "$release_dir"`
+   on the real stdout channel the caller reads.
+3. **`NODE_ENV=production` (sourced from `openestate.env` before the
+   build step, so the *deployed app* gets it at runtime) leaked into the
+   *build itself*.** pnpm treats `NODE_ENV=production` as "skip
+   devDependencies" — which silently dropped `typescript`/`@nestjs/cli`/
+   `vite`, the exact root cause of bug 1's cascading "not found" errors
+   even *after* fixing bug 1's missing compiler. Docker's build stage
+   never hit this because its Dockerfile only sets `NODE_ENV=production`
+   in the later `runtime` stage, never in `deps`/`build`. Fixed with an
+   explicit `unset NODE_ENV` at the top of `build_release()`'s subshell.
+4. **pnpm's `node_modules/.bin/*` entries on Linux are POSIX shell
+   scripts, not JS files** — `node "${RELEASE_DIR}/api/node_modules/.bin/prisma"
+   migrate deploy` failed with `SyntaxError: missing ) after argument list`,
+   because `node` was trying to parse a `#!/bin/sh` wrapper script
+   (`basedir=$(dirname ...)`) as JavaScript. The original assumption (that
+   these could be safely wrapped in `node <path>` the same way
+   `dist/main.js` itself is invoked) was simply wrong. Fixed by invoking
+   `.bin/prisma`/`.bin/tsx` directly as executables (relying on their own
+   shebang + exec bit, both of which pnpm sets correctly) in
+   `install-native.sh` and `upgrade-native.sh`.
+5. **A real bash `set -e` propagation gap silently swallowed a build
+   failure instead of aborting.** `RELEASE_DIR="$(build_release ...)" ||
+   die "Build failed"` never fired even when the build's internal
+   subshell called `die` (which calls `exit 1`) — because the assignment
+   is itself in a tested context (followed by `||`), and that observably
+   suppressed `errexit` enforcement *inside* the subshell too: execution
+   continued past the failed step to the function's final `printf`,
+   returning a "successful" (but incomplete) release path to the caller.
+   This is the same general class of footgun as the Phase 6 commit 2
+   `AsyncLocalStorage.enterWith()` bug — an implicit propagation guarantee
+   that doesn't actually hold across a specific kind of boundary. Fixed by
+   never relying on implicit propagation here: `build_release()` now
+   captures `$?` explicitly right after the subshell and `return`s it
+   before reaching the `printf`, so `$(build_release ...) || die` is
+   correct regardless of how `-e` does or doesn't propagate into the
+   subshell.
+6. **The original Prisma-client-copy design (copy `.prisma/` from the
+   source checkout's pnpm store into the release's pnpm store, matching
+   `api.Dockerfile`'s cross-filesystem copy) was fragile in a way Docker's
+   version isn't, and broke in practice** — even once bugs 2–5 were
+   fixed, the glob-matched destination directory sometimes lacked a
+   `.prisma` subfolder at all, and the seed step failed with
+   `Cannot find module '.prisma/client/default'`. Docker's Dockerfile
+   *has* to copy across build/runtime stages (genuinely different
+   filesystems); `install-native.sh` doesn't — source and release live on
+   the same disk, in the same pnpm content-addressable store. Rather than
+   debug the exact cross-store glob mismatch further, switched to
+   **regenerating the Prisma client in place**: after `packages/db/prisma`
+   is copied into the release, run
+   `"${release_dir}/api/node_modules/.bin/prisma" generate --schema ...`
+   directly against the release's own tree. No cross-directory copying, no
+   glob-matching two independently-resolved pnpm store layouts against
+   each other — strictly simpler and, empirically, reliable across
+   multiple repeated clean-install runs.
+7. **`backup-native.sh` used `DATABASE_URL` (the RLS-enforced
+   `openestate_app` role) for `pg_dump`, and it failed on the very first
+   real backup**: `pg_dump: error: query failed: ERROR: query would be
+   affected by row-level security policy for table "applicant_addresses"`.
+   `pg_dump`'s own `COPY` queries have no way to `SET
+   app.current_company_id` the way the application's Prisma extension
+   does, so every RLS-protected table is unreadable under the app role
+   from outside the app. Fixed by dumping via `DATABASE_URL_SYSTEM`
+   (`openestate_system`, `BYPASSRLS`) instead — exactly the role this
+   project already has on hand for cross-tenant system operations.
+8. **`restore-native.sh`'s `DROP DATABASE` failed against a live
+   install**: `ERROR: database "openestate" is being accessed by other
+   users` — the running `openestate-api` systemd service holds open
+   connections. Fixed by having the script stop the service before the
+   drop/recreate/restore sequence and start it again afterward
+   (previously it only printed a reminder to restart manually, and didn't
+   stop it first at all).
+
+**Confirmed working end-to-end on the VM** after all eight fixes, across
+multiple repeated runs (including a full `uninstall.sh --purge` followed
+by a from-scratch reinstall, to prove idempotency rather than benefiting
+from leftover state): `install-native.sh` (fresh install, and safe re-run
+against existing env/database/user), real HTTP login through nginx with
+the seeded admin credential, real HTTP role creation (`POST /api/v1/roles`
+→ 201) proving the guard/validation/DB pipeline works end-to-end, the
+`/portal/` `alias`-based nginx routing serving a real built JS asset with
+the correct content-type, `journalctl -u openestate-api` showing pino's
+JSON lines, `upgrade-native.sh`'s full backup→build→migrate→cutover→
+healthcheck-gate sequence, the rollback mechanism specifically (verified
+by deliberately breaking the current release's `dist/main.js` and
+confirming symlink-back + restart recovers), `backup-native.sh` and
+`restore-native.sh` against a real backup bundle, and both `uninstall.sh`
+modes.
+
+**Environment notes, not bugs**: the VM used was Ubuntu 25.10, not the
+documented 22.04/24.04 targets (only 17 is packaged as `postgresql` on
+25.10, not `postgresql-16` — the script only checks that `psql` exists,
+not its exact version, so this didn't block anything, but it means
+`install-native.sh`'s own `postgresql-16`-specific error message would be
+slightly wrong advice on 25.10 specifically; 22.04/24.04 do have
+`postgresql-16` available, so left as-is rather than chasing a moving
+target). The VM also had no `curl` installed by default and uses
+`sudo-rs` (the Rust sudo rewrite) rather than classic `sudo` — neither
+affected `install-native.sh` itself (it never shells out to `curl`, and
+`sudo -S`/`sudo -u`/passwordless-via-`env` all behave identically under
+`sudo-rs`), but it's why every ad hoc verification command in this
+session used `node -e "fetch(...)"` instead of `curl`, matching the
+pattern the scripts and Docker's own `install.sh` already used for
+exactly this reason.
+
+### Mutation-error toast click-through — one real gap found, the rest a test-tooling false alarm
+
+Real browser click-through (both dev servers, real Postgres/Redis via
+`docker-compose.test.yml`, a fresh seed + `seed:portal-demo`) against
+three failing mutations, one per app surface:
+
+- **apps/web, Roles**: creating a role with a duplicate slug → toast
+  "Role slug already exists" (already correct before this session).
+- **apps/web, Webhooks**: creating an endpoint with an invalid URL/short
+  secret/no event types → **no toast appeared** —
+  `WebhooksPage.handleCreate` (a bare `api()` call, not a TanStack
+  mutation) had its own `try/catch` setting `formError` for the inline
+  banner, same as every other handler in this file before the
+  native-install toast audit, but unlike `toggle`/`remove`/`sendTest`
+  it was never given the matching `toast.error()` call — the earlier
+  audit's grep evidently missed this one call site. Fixed by adding
+  `toast.error((err as Error).message)` alongside the existing
+  `setFormError`, same pattern as its three siblings in the same file.
+- **apps/portal, Profile**: submitting an over-255-char email (passes
+  the `type="email"` input's native constraint validation, which
+  doesn't check length, but fails `createApplicantSchema`'s
+  `.max(255)`) → toast correctly appeared once tested against a clean
+  page load.
+
+**A real, separate bug found in the process, not scoped to one call
+site: every zod-validated 400 across BOTH apps showed the toast
+"Validation failed" — nestjs-zod's default `ZodValidationException`
+hardcodes that string regardless of which field actually failed.**
+Fixed in `apps/api/src/common/pipes/zod-validation.pipe.ts` — replaced
+the bare `nestjs-zod` re-export with `createZodValidationPipe({
+createValidationException })`, where the custom factory builds a
+`BadRequestException` whose `message` is the real per-issue detail
+(`` `${path.join('.')}: ${message}` ``, joined with `; ` across every
+failing field, e.g. `"url: Invalid url; secret: String must contain at
+least 16 character(s)"`) instead of the generic string, while still
+including the raw `errors` array for any programmatic consumer.
+`main.ts` now imports `ZodValidationPipe` from this local module
+instead of `nestjs-zod` directly — the only call site, so no other file
+needed changing.
+
+**A false alarm worth recording so a future session doesn't chase it
+again: the portal toast appeared to silently not render on the FIRST
+test attempt, with the network tab confirming a real 400 and the
+`MutationCache.onError` handler confirmed (via a temporary debug log)
+to be firing with the correct message — yet zero `[role=alert]`
+elements in the DOM.** Root cause was the debugging process itself, not
+the app: adding a `console.log` inside `apps/portal/src/lib/toast.tsx`
+(a file that exports both a plain object `toast` and a component
+`ToastContainer` from the same module) made Vite's Fast Refresh log
+`"toast" export is incompatible"` and hot-swap the module in place —
+creating a SECOND instance of the module's closured `toasts`/`listeners`
+state. `main.tsx`'s already-bound `onError` closure kept calling
+`.error()` on the OLD instance's `toast` export while the re-rendered
+`ToastContainer` subscribed to the NEW instance's `listeners` — two
+disconnected copies of state that used to be one. A full page reload
+(fresh single module graph) after adding the debug log reproduced the
+toast correctly, confirming the app code was never broken — only the
+debug session's own hot-reload had briefly forked it. Lesson: don't
+trust a DOM check for this toast module across an HMR boundary that
+touched `lib/toast.tsx` itself; reload fresh first.
+
+### Native install — CI job added, VM re-verified with this session's fixes
+
+- **`.github/workflows/ci.yml` gained a `native-install` job**: real
+  `ubuntu-latest` runner, apt-installs Postgres/Redis/Node 20/nginx/build
+  toolchain (the exact prerequisite list `install-native.sh` itself
+  checks for and refuses to silently install), runs `install-native.sh`
+  unmodified, then asserts `/api/v1/health` responds and a real
+  `POST /api/v1/auth/login` returns an `accessToken` — parsing the
+  seeded admin password out of the install log the same way a human
+  reading the terminal would. `compose-healthcheck` is untouched. This
+  turns the "8 real bugs, found once on a VM" finding above into a
+  permanently-enforced regression gate instead of a one-time proof.
+- **Re-verified on the same Ubuntu 25.10 VM** used for the original
+  8-bug pass, this time with the toast/zod-validation-message fixes from
+  this session included: `uninstall.sh --purge`, then `DROP DATABASE`/
+  `DROP ROLE` on `openestate`/`openestate_app`/`openestate_system` (user
+  confirmed — this deletes the prior session's data) for a genuinely
+  fresh run rather than a reseed-skipped re-run, then a clean checkout
+  synced over (the working tree at this point, tarred and `pscp`'d —
+  nothing was pushed to origin yet) and `install-native.sh` run with no
+  flags. Fresh build succeeded, `/api/v1/health` returned
+  `{"status":"ok","db":"ok","redis":"ok"}`, and a real HTTP login with
+  the freshly-seeded admin password returned a real JWT `accessToken` —
+  confirming this session's `ZodValidationPipe` change (a `main.ts`
+  import-path change) survived the native `pnpm --filter @openestate/api
+  build` step, not just the local dev server.
+- **A genuine Ubuntu 24.04/PostgreSQL 16 run was not performed this
+  session** — the VM provided was the same 25.10 box as before, not a
+  24.04 one. `docs/docs/installation.md` §2 and this file both describe
+  24.04+PG16 as verified based on the ORIGINAL VM session's own claim of
+  having tested it (not independently re-confirmed here) alongside this
+  session's fresh 25.10+PG17 re-verification. If that original claim is
+  ever in doubt, treat 24.04 as unverified until a real 24.04 box is
+  tested — don't extrapolate from the 25.10 result, since the whole
+  point of the two-platform note is that the scripts were checked
+  against two different default `postgresql` package versions, not two
+  identical environments with different labels.

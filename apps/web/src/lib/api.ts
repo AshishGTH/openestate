@@ -1,3 +1,5 @@
+import { toast } from './toast';
+
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
 let accessToken: string | null = null;
@@ -101,7 +103,17 @@ export async function downloadFile(path: string, filename: string): Promise<void
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
 
   const res = await fetch(url, { headers, credentials: 'include' });
-  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const message = body.message ?? `Download failed: ${res.status}`;
+    // Not a TanStack Query mutation, so MutationCache's global onError
+    // (main.tsx) never sees this — toast here directly. Several call sites
+    // deliberately swallow this error to avoid blocking their own flow
+    // (e.g. a saved receipt whose PDF failed to generate), which would
+    // otherwise leave the user with zero feedback that the download failed.
+    toast.error(message);
+    throw new Error(message);
+  }
 
   const blob = await res.blob();
   const objectUrl = URL.createObjectURL(blob);

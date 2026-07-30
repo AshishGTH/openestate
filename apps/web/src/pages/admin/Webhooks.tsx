@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
+import { toast } from '../../lib/toast';
 import DataTable, { type Column } from '../../components/DataTable';
 
 interface WebhookEndpoint {
@@ -57,27 +58,41 @@ export default function WebhooksPage() {
       setFormData({ name: '', url: '', secret: '', eventTypes: '' });
     } catch (err) {
       setFormError((err as Error).message);
+      toast.error((err as Error).message);
     }
   };
 
   const toggle = async (id: string, isActive: boolean) => {
-    await api(`/admin/webhook-endpoints/${id}/${isActive ? 'disable' : 'enable'}`, { method: 'POST' });
-    qc.invalidateQueries({ queryKey: ['webhook-endpoints'] });
+    try {
+      await api(`/admin/webhook-endpoints/${id}/${isActive ? 'disable' : 'enable'}`, { method: 'POST' });
+      qc.invalidateQueries({ queryKey: ['webhook-endpoints'] });
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
   };
 
   const remove = async (id: string) => {
     if (!confirm('Delete this webhook endpoint? Its delivery history will be deleted too.')) return;
-    await api(`/admin/webhook-endpoints/${id}`, { method: 'DELETE' });
-    qc.invalidateQueries({ queryKey: ['webhook-endpoints'] });
-    if (selectedId === id) setSelectedId(null);
+    try {
+      await api(`/admin/webhook-endpoints/${id}`, { method: 'DELETE' });
+      qc.invalidateQueries({ queryKey: ['webhook-endpoints'] });
+      if (selectedId === id) setSelectedId(null);
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
   };
 
   const sendTest = async (id: string) => {
     setTestMessage('Sending…');
-    await api(`/admin/webhook-endpoints/${id}/test`, { method: 'POST' });
-    setTestMessage('Test event queued — check the delivery list below in a few seconds.');
-    setSelectedId(id);
-    setTimeout(() => qc.invalidateQueries({ queryKey: ['webhook-deliveries', id] }), 1500);
+    try {
+      await api(`/admin/webhook-endpoints/${id}/test`, { method: 'POST' });
+      setTestMessage('Test event queued — check the delivery list below in a few seconds.');
+      setSelectedId(id);
+      setTimeout(() => qc.invalidateQueries({ queryKey: ['webhook-deliveries', id] }), 1500);
+    } catch (err) {
+      setTestMessage('');
+      toast.error((err as Error).message);
+    }
   };
 
   const columns: Column<WebhookEndpoint>[] = [

@@ -5,6 +5,32 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.1.1]
+
+### Added
+
+- **Native install path** (`deploy/native/`): `install-native.sh` sets up
+  OpenEstate as a systemd service behind nginx, talking to a PostgreSQL
+  and Redis you already run — no Docker involved in production. Also
+  ships `setup-database.sh` (standalone DB/role setup for a DBA-managed
+  Postgres), `upgrade-native.sh` (backup → build → migrate → cutover,
+  with automatic rollback on a failed healthcheck), `backup-native.sh` /
+  `restore-native.sh`, and `uninstall.sh`. Docker Compose is unaffected
+  and still fully supported — it's now positioned as a contributor tool
+  for the test suite rather than the primary production path; see
+  `docs/docs/installation.md` and `CONTRIBUTING.md`.
+- A CI job (`native-install` in `.github/workflows/ci.yml`) runs the full
+  native install on a real `ubuntu-latest` runner — installs PostgreSQL,
+  Redis, Node 20, nginx, and a build toolchain, runs `install-native.sh`,
+  and asserts the health endpoint responds and a login succeeds over real
+  HTTP — so the native path is verified on every push, not just once by
+  hand.
+- Consistent, user-visible toasts on failed mutations across both
+  `apps/web` and `apps/portal` (`lib/toast.tsx` + a `MutationCache`-based
+  global handler in each app's `main.tsx`), replacing a mix of silent
+  failures, inline-only banners, and unhandled promise rejections found
+  during an audit of ~15+ call sites.
+
 ### Fixed
 
 - **Login failed on every fresh Docker Compose install with "Cannot POST
@@ -16,6 +42,38 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   — doubling it. Since Vite bakes this value into the built JS bundle at
   image-build time, existing installs need `git pull` +
   `docker compose up -d --build` (not just a restart) to pick up the fix.
+- **Every validation error (400) showed the generic toast "Validation
+  failed" instead of saying what was actually wrong**, across both apps
+  — nestjs-zod's default exception hardcodes that message regardless of
+  which field failed. The API now returns the real per-field reason
+  (e.g. `"url: Invalid url; secret: String must contain at least 16
+  character(s)"`).
+- A handful of mutations (webhook endpoint creation in `apps/web`, three
+  non-mutation-hook webhook actions, PDF downloads in both apps) failed
+  silently or inline-only, with no toast — fixed as part of the same
+  audit.
+- Eight real bugs in the native-install scripts, found only by running
+  `install-native.sh` end-to-end on a genuinely clean VM — none caught by
+  shellcheck, `nginx -t`, or a careful read of the scripts: a missing
+  build-toolchain prerequisite check (`argon2` needs `make`/`g++`/
+  `python3`); a build failure silently swallowed by a `set -e`
+  propagation gap; `NODE_ENV=production` leaking into the build and
+  dropping devDependencies; the build's own stdout corrupting a command
+  substitution; `node <script>` failing on pnpm's shell-script `.bin`
+  shims; a fragile cross-store Prisma client copy replaced with
+  regenerating the client in place; `backup-native.sh` failing under RLS
+  by dumping via the wrong role; and `restore-native.sh` failing to drop
+  a database still held open by the running service. Full detail in
+  `CLAUDE.md`'s decisions log.
+
+### Verified
+
+- Ubuntu 24.04 LTS with PostgreSQL 16, and Ubuntu 25.10 with PostgreSQL
+  17 — both confirmed end-to-end: fresh install, safe re-install, real
+  HTTP login and role creation, upgrade with rollback, backup/restore,
+  and both uninstall modes. The scripts check for `psql` presence, not
+  an exact major version, so this isn't expected to be an exhaustive
+  platform list — just what's actually been run.
 
 ## [0.1.0] — first tagged release
 

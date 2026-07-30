@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { ZodValidationPipe } from 'nestjs-zod';
+import { ZodValidationPipe } from './common/pipes/zod-validation.pipe';
 import { AppModule } from './app.module';
 
 // Money is stored as BigInt paise everywhere per CLAUDE.md, but native

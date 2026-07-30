@@ -1,0 +1,37 @@
+[Unit]
+Description=OpenEstate API (HTTP + background workers)
+Documentation=https://github.com/openestate/openestate
+# Soft dependency: BullMQ workers and the HTTP API run in this one process
+# (apps/api/src/main.ts — a single NestFactory.create(AppModule)), so there
+# is no separate worker unit to order against.
+#
+# postgresql.service / redis-server.service are the Ubuntu package default
+# unit names for a LOCAL install. If DATABASE_URL/REDIS_URL in
+# openestate.env point at a remote host instead, these two lines are
+# meaningless (systemd only tracks local units) — drop them with:
+#   systemctl edit openestate-api
+# and an empty override for Wants=/After=.
+After=network.target postgresql.service redis-server.service
+Wants=postgresql.service redis-server.service
+
+[Service]
+Type=simple
+User=openestate
+Group=openestate
+EnvironmentFile=/etc/openestate/openestate.env
+WorkingDirectory=/opt/openestate/current/api
+ExecStart=/usr/bin/node dist/main.js
+Restart=always
+RestartSec=5
+SyslogIdentifier=openestate-api
+
+# Light sandboxing: the service only ever needs to write to its own
+# uploads directory and (optionally) file-based logs; everything else,
+# including its own code under /opt/openestate/current, is read-only to it.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/openestate/uploads /var/log/openestate
+
+[Install]
+WantedBy=multi-user.target

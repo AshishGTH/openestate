@@ -4,8 +4,9 @@
 customer portal, broker portal — built to be adapted to other industries via
 plugins, never by forking core code.**
 
-OpenEstate is AGPL-3.0 licensed. Run it yourself with a single
-`docker compose up`, like you would Zabbix or Wazuh.
+OpenEstate is AGPL-3.0 licensed. Install it natively on your own server —
+your own PostgreSQL and Redis, a systemd service, standard Linux paths —
+like you would Zabbix or Wazuh, not a stack of containers you don't control.
 
 > **Status: Phase 0 — scaffolding.** The core product (auth, inventory,
 > pre-sales, post-sales ledger, brokers, portals, plugins) lands in the phases
@@ -30,26 +31,28 @@ OpenEstate is AGPL-3.0 licensed. Run it yourself with a single
 
 ## Quickstart
 
-### Docker Compose
+### Native install (Ubuntu 22.04/24.04 — recommended)
+
+Prerequisites: PostgreSQL 16, Redis, Node.js 20 (via NodeSource), and
+nginx, installed and running (see the
+[Installation Guide](docs/docs/installation.md#2-before-you-start--requirements)
+for the exact commands). This project never installs or manages your
+database or cache for you — it connects to what you already run.
 
 ```bash
-git clone https://github.com/AshishGTH/openestate.git
-cd openestate/deploy
-./install.sh
+git clone https://github.com/AshishGTH/openestate.git /opt/openestate-src
+cd /opt/openestate-src/deploy/native
+sudo ./install-native.sh --server-name crm.yourcompany.com
 ```
 
-`install.sh` needs to run from inside a cloned copy of the repo (it isn't
-set up to be piped straight from `curl` yet). It checks for Docker,
-generates `deploy/.env` with strong random secrets, builds and starts the
-stack, runs migrations and seed data, then prints the URL to open plus a
-one-time random admin password. See the
+This creates a dedicated `openestate` system user, builds the app from
+source, sets up the database roles, installs a systemd service
+(`openestate-api`) and an nginx site, runs migrations + seed data, then
+prints the URL to open plus a one-time random admin password. See the
 [Installation Guide](docs/docs/installation.md) for the full SOP —
 first-login checklist, backups, upgrades, and troubleshooting.
 
-**Prerequisites:** Docker + Docker Compose v2. For local development without
-containers you'll also want Node.js 20+ and pnpm.
-
-### Local development (no Docker for the app code)
+### Local development (dev servers, not a production install)
 
 ```bash
 pnpm install
@@ -85,19 +88,18 @@ flowchart TB
     end
 
     subgraph Edge
-        Nginx[nginx reverse proxy :8080]
+        Nginx[nginx — static files + reverse proxy to the API]
     end
 
     subgraph Apps
-        Web[apps/web — staff admin SPA]
-        Portal[apps/portal — customer + broker SPA]
-        Api[apps/api — NestJS REST API]
+        Web[apps/web dist — staff admin SPA, static files]
+        Portal[apps/portal dist — customer + broker SPA, static files]
+        Api[apps/api — NestJS REST API, systemd service]
     end
 
     subgraph Data
-        Postgres[(PostgreSQL 16 + RLS)]
-        Redis[(Redis 7 — BullMQ queues)]
-        Minio[(MinIO — optional S3-compatible storage)]
+        Postgres[(PostgreSQL 16 + RLS — admin-managed)]
+        Redis[(Redis 7 — BullMQ queues — admin-managed)]
     end
 
     subgraph Extensibility
@@ -107,12 +109,11 @@ flowchart TB
 
     Staff --> Nginx
     Customer --> Nginx
-    Nginx --> Web
-    Nginx --> Portal
-    Nginx --> Api
+    Nginx -- static files --> Web
+    Nginx -- static files --> Portal
+    Nginx -- /api/* --> Api
     Api --> Postgres
     Api --> Redis
-    Api --> Minio
     Api --> Plugins
     Api --> Webhooks
 ```
@@ -127,7 +128,10 @@ packages/db     Prisma schema, migrations, seed data
 packages/shared Types, zod schemas, constants shared FE/BE
 packages/sdk    Generated TypeScript API client (from OpenAPI)
 plugins/        First-party plugins (lead sources, messaging, telephony)
-deploy/         docker-compose.yml, Dockerfiles, nginx conf, install.sh
+deploy/native/  Native install: install-native.sh, systemd unit, nginx
+                config, backup/restore/upgrade/uninstall scripts
+deploy/         docker-compose.yml, Dockerfiles — contributor test
+                infrastructure only, see CONTRIBUTING.md
 docs/           Docusaurus site: install, admin, API, plugin dev
 ```
 
