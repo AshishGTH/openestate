@@ -377,19 +377,59 @@ jobs:
           echo "$RESPONSE" | grep -q '"accessToken"' || { echo "::error::login response had no accessToken: $RESPONSE"; exit 1; }
           echo "Login over HTTP succeeded."
 
-      - name: Dump service logs on failure
+      - name: Dump journalctl on failure
         if: failure()
         run: |
           echo "::group::journalctl -u openestate-api"
           sudo journalctl -u openestate-api -n 300 --no-pager || echo "(unit not found / never started)"
           echo "::endgroup::"
-          echo "::error::journalctl -u openestate-api (last 20 lines):"
-          (sudo journalctl -u openestate-api -n 20 --no-pager 2>/dev/null || echo "(unit not found / never started)") | while IFS= read -r line; do
+          # Each step gets its own separate 10-annotation cap (see the
+          # earlier commit fixing the same truncation on the install-log
+          # step) — kept to 8 lines + this header so nothing here gets
+          # silently dropped the way a 20-line dump would.
+          echo "::error::journalctl -u openestate-api (last 8 lines):"
+          (sudo journalctl -u openestate-api -n 8 --no-pager 2>/dev/null || echo "(unit not found / never started)") | while IFS= read -r line; do
             echo "::error::${line}"
           done
+
+      - name: Dump nginx/postgres status on failure
+        if: failure()
+        run: |
           echo "::group::systemctl status postgresql"
           sudo systemctl status postgresql --no-pager || true
           echo "::endgroup::"
           echo "::group::nginx -T"
           sudo nginx -T || true
           echo "::endgroup::"
+
+      - name: Check dmesg for segfaults on failure
+        if: failure()
+        run: |
+          echo "::group::dmesg segfault entries"
+          sudo dmesg -T 2>/dev/null | grep -iE 'segfault|general protection' || echo "(none / dmesg unavailable)"
+          echo "::endgroup::"
+          # Names the exact crashing binary/library + offset — the single
+          # most useful signal for a native-addon (argon2) SIGSEGV, which
+          # is otherwise invisible: systemd's own log only shows
+          # "Main process exited, code=dumped, status=11/SEGV", never why.
+          echo "::error::dmesg segfault entries (names the exact crashing binary/library):"
+          (sudo dmesg -T 2>/dev/null | grep -iE 'segfault|general protection' || echo "(none found)") | tail -n 8 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+
+      - name: Argon2 isolated smoke test on failure
+        if: failure()
+        run: |
+          # Isolates whether the crash is argon2's native module specifically
+          # (this project's one native dependency requiring a compile/
+          # prebuilt-binary step — see the prerequisite check for it above)
+          # vs. something else in main.js's broader require graph, run as
+          # the exact user/cwd/node binary the systemd unit itself uses.
+          ARGON2_OUT="$( (cd /opt/openestate/current/api && sudo -u openestate /usr/bin/node -e "require('argon2').hash('test').then(h=>console.log('argon2 OK:',h)).catch(e=>{console.error('argon2 FAILED:',e);process.exit(1)})") 2>&1; echo "exit=$?" )"
+          echo "::group::argon2 isolated smoke test (as the openestate user, same node/cwd as the service)"
+          echo "$ARGON2_OUT"
+          echo "::endgroup::"
+          echo "::error::argon2 isolated smoke test result:"
+          echo "$ARGON2_OUT" | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
