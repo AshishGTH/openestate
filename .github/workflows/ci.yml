@@ -417,6 +417,27 @@ jobs:
             echo "::error::${line}"
           done
 
+      - name: Bare node smoke test on failure
+        if: failure()
+        run: |
+          # The coredump backtrace from a prior run pointed at Node's own
+          # inspector I/O thread startup (uv__sem_wait / StartIoThreadMain)
+          # — a thread every node process spins up unconditionally at
+          # startup to listen for SIGUSR1, nothing argon2-specific. That
+          # means the earlier "isolated" argon2 smoke test may never have
+          # isolated anything: if a completely bare `node -e` also
+          # segfaults here, this is a NodeSource-built Node 20 issue on
+          # this runner, not an app dependency issue at all — worth
+          # knowing before chasing argon2 further.
+          BARE_OUT="$( /usr/bin/node -e "console.log('bare node OK')" 2>&1; echo "exit=$?" )"
+          echo "::group::bare node smoke test (no argon2, no app code)"
+          echo "$BARE_OUT"
+          echo "::endgroup::"
+          echo "::error::bare node smoke test result:"
+          echo "$BARE_OUT" | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+
       - name: Argon2 isolated smoke test on failure
         if: failure()
         run: |
