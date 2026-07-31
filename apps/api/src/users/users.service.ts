@@ -116,6 +116,7 @@ export class UsersService {
             id: true,
             email: true,
             name: true,
+            phone: true,
             createdAt: true,
           },
         }),

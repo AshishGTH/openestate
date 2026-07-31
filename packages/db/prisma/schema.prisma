@@ -258,6 +258,7 @@ model CustomFieldDefinition {
   label      String   @db.VarChar(255)
   fieldType  String   @map("field_type") @db.VarChar(20)
   options    Json?
+  defaultValue String? @map("default_value") @db.VarChar(500)
   isRequired Boolean  @default(false) @map("is_required")
   sortOrder  Int      @default(0) @map("sort_order")
   isActive   Boolean  @default(true) @map("is_active")
