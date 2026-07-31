@@ -2692,3 +2692,60 @@ harness.ts`'s `cleanupCompany()` needed the same treatment as its
 existing `inquiry_sources`/`custom_field_definitions` comments describe
 — extended with every master table this new test is the first to ever
 populate.
+
+### CI native-install SIGSEGV — root cause not found; four hypotheses tested and ruled out
+
+After the three fixes above landed, the job progressed cleanly through
+migrations/seed/nginx and then hit a new, different failure: the
+deployed API crash-loops on startup with SIGSEGV
+(`journalctl`: `Main process exited, code=dumped, status=11/SEGV`),
+never becoming healthy. Confirmed via an isolated smoke test
+(`require('argon2').hash('test')`, run standalone as the same user/
+cwd/node binary the systemd unit uses) that this is argon2's native
+module specifically, and confirmed via a real VM re-run of
+`upgrade-native.sh` (see the entry above) that it does **not**
+reproduce there — this is specific to GitHub's `ubuntu-latest` hosted-
+runner class.
+
+Four specific, individually-tested hypotheses, each ruled out with a
+real comparison (not inference):
+1. **Bad prebuilt binary** — forced `npm_config_build_from_source=true`
+   (node-gyp-build respects this, skips its bundled napi prebuild).
+   Confirmed the compile genuinely happened (step went from ~40s to
+   ~5min) and the isolated smoke test crashed identically anyway.
+2. **Threading bug in argon2's default `parallelism:4`** — a coredump
+   backtrace (`sudo coredumpctl info`) pointed at a semaphore-wait
+   frame (`uv__sem_wait`), which looked plausible since libargon2 uses
+   pthreads for p>1. Tested `parallelism:1` explicitly in the same
+   step as the default: both crashed identically (exit 139).
+3. **Node.js itself broken on this runner** — a completely bare
+   `node -e "console.log(1)"`, no argon2 or app code at all, ran clean
+   ("bare node OK", exit 0). Rules out a generic Node/libuv problem;
+   narrows it back to argon2 specifically despite (2) not confirming a
+   threading cause.
+4. **Version-specific regression** — this exact package has a real
+   history of version-tied native SIGSEGVs (e.g. ranisalt/node-
+   argon2#302, a Node16/Alpine regression). Bumped 0.45.0 → 0.45.1 (the
+   latest patch) in both `apps/api` and `packages/db` (the seed
+   script's own, separate resolution of the same dependency — also
+   still on 0.45.0, never actually exercised by this crash since
+   install-native.sh only warns, doesn't fail, if seeding fails).
+   Crashed identically.
+
+**Where this stands**: root cause still unknown. The coredump backtrace
+that motivated hypothesis 2 didn't survive ruling out threading —
+either the backtrace is misleading (a different thread's stack
+captured at coredump time than the one that actually faulted, common
+for heap-corruption-class bugs) or something about the Node/libuv
+semaphore machinery itself interacts badly with argon2's memory-hard
+computation specifically on this runner class in a way parallelism
+doesn't control. **Do not re-attempt hypotheses 1-4 without new
+evidence** — each was tested directly, not guessed. Reasonable next
+steps for a future session: try Node 22 LTS instead of 20 for the
+native-install path (a materially different V8/N-API build, unlike the
+patch-level argon2 bump); or get a symbolicated backtrace (install
+`libc6-dbg`/build argon2 with debug symbols so `coredumpctl`'s frames
+resolve to actual function names instead of raw offsets) before trying
+anything else blind. `docs/docs/installation.md`'s requirements section
+documents this honestly as an open gap rather than claiming
+ubuntu-latest is verified.
