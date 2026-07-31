@@ -240,6 +240,15 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     // Masters referenced by the financial rows above.
     'cancellation_rules', 'interest_rules', 'gst_rates', 'tds_rules', 'transfer_fee_rules',
     'payment_plan_milestones', 'payment_plan_templates', 'area_locations',
+    // Remaining SIMPLE_MASTERS/dedicated-module masters with no other
+    // table referencing them (or, for unit_types, only from 'units',
+    // already deleted above) — never previously exercised by this
+    // harness, same never-caught-until-first-use gap as inquiry_sources
+    // above, surfaced by the through-the-wire master-creation e2e test
+    // being the first to create rows here via the real HTTP API.
+    'unit_types', 'plc_types', 'inquiry_types', 'inquiry_temperatures', 'follow_up_types',
+    'communication_types', 'project_types', 'receipt_types', 'registration_types',
+    'document_types', 'banks', 'charge_types', 'sms_templates',
     // Phase 3 presales rows — reference applicants/inquiries, so must go
     // before 'applicants' below. Exposed by Phase 7's lead-inbound tests
     // being the first to combine this (financial-harness) cleanup with
