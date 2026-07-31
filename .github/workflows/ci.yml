@@ -353,8 +353,14 @@ jobs:
           echo "::group::Full install-native.sh output"
           sed 's/\x1b\[[0-9;]*m//g' /tmp/install-native.log 2>/dev/null || echo "(no log file at /tmp/install-native.log)"
           echo "::endgroup::"
-          echo "::error::install-native.sh failed — last 30 lines (ANSI codes stripped):"
-          sed 's/\x1b\[[0-9;]*m//g' /tmp/install-native.log 2>/dev/null | tail -n 30 | while IFS= read -r line; do
+          # GitHub caps annotations at 10 per step and keeps the first 10
+          # emitted, not the last — a previous run of this step emitted
+          # `tail -n 30` in chronological order and the surviving 10
+          # annotations were lines 30..21 from the end, nowhere near the
+          # actual failure. Emitting only the true last 9 lines (+ this
+          # header = 10) guarantees the failure itself survives the cap.
+          echo "::error::install-native.sh failed — last lines (ANSI codes stripped):"
+          sed 's/\x1b\[[0-9;]*m//g' /tmp/install-native.log 2>/dev/null | tail -n 9 | while IFS= read -r line; do
             echo "::error::${line}"
           done
 
