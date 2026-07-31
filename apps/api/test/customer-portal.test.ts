@@ -335,6 +335,29 @@ describeIf('Phase 6 customer-portal (commit 2)', () => {
     expect(second.buffer.equals(first.buffer)).toBe(true);
   });
 
+  it('generateLetterPdf: a template built for one document type used against another fails as a clean 400, not an unhandled 500 (real bug, found via a live native-install exercise)', async () => {
+    const applicantId = await makeApplicant(systemPrisma, fx.companyId);
+    const unitId = await makeUnit(systemPrisma, fx);
+    const bookingId = await makeBooking(applicantId, unitId, `MISMATCH-${Date.now()}`);
+
+    // Body uses DEMAND_LETTER-only merge fields (dueAmountFormatted etc.),
+    // but is requested against ALLOTMENT_LETTER below — resolveMergeFields
+    // throws a plain Error for this, which the service must translate.
+    const template = await systemPrisma.letterTemplate.create({
+      data: {
+        companyId: fx.companyId,
+        name: `Mismatched Template ${Date.now()}`,
+        subject: 'Payment due for {{bookingNumber}}',
+        body: 'Dear {{applicantName}}, please pay {{dueAmountFormatted}} by {{dueDate}}.',
+        entityType: 'DEMAND_LETTER',
+      },
+    });
+
+    await expect(
+      documents.generateLetterPdf(fx.companyId, GENERATED_DOCUMENT_TYPE.ALLOTMENT_LETTER, bookingId, template.id, fx.userId),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining('Unknown merge field') });
+  });
+
   // ── Whitelist enforcement (.strict() zod, not a post-parse loop) ──
 
   it('whitelist: a change-request payload containing pan is rejected by submitChangeRequestSchema at the validation boundary, not silently dropped', async () => {

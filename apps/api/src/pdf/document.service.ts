@@ -268,8 +268,18 @@ export class DocumentService {
     if (!template) throw new NotFoundException('Letter template not found');
 
     const context = await this.buildLetterContext(companyId, documentType, booking, installmentId);
-    const subject = resolveMergeFields(template.subject, documentType, context);
-    const body = resolveMergeFields(template.body, documentType, context);
+    // resolveMergeFields throws a plain Error (not an HttpException) on a
+    // token not in that document type's registry — e.g. a template built
+    // for DEMAND_LETTER passed to the allotment-letter endpoint. Left
+    // uncaught, that was a raw 500 "Internal server error" instead of a
+    // clean explanation of the actual mismatch.
+    let subject: string, body: string;
+    try {
+      subject = resolveMergeFields(template.subject, documentType, context);
+      body = resolveMergeFields(template.body, documentType, context);
+    } catch (err) {
+      throw new BadRequestException(err instanceof Error ? err.message : 'Template body has an unknown merge field');
+    }
 
     const buffer = await this.pdfService.render(
       buildLetterDocDefinition({ subject, body, companyName: booking.company.name, companyAddress: '' }),
