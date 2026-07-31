@@ -55,6 +55,18 @@ realistic demo data, not by review:
   +x`. Now tracked as mode `755`; the `native-install` CI job invokes
   the script exactly as documented (no `bash` prefix) so this class of
   regression fails CI instead of being silently bypassed.
+- `CustomFieldDefinition.defaultValue` — accepted by the create/update
+  schema since it was written, but no backing column ever existed, so
+  any real caller sending it 500'd. Added the missing column.
+- `POST /users` never returned the `phone` it had just saved — a
+  `select` allowlist copy/paste gap (present in `update()`, missing
+  from `create()`) left an admin with no way to confirm the phone
+  number was stored.
+
+Both found by a new through-the-wire creation test for every master
+type and admin-creatable entity (users, roles, custom fields) — the
+existing suite seeded rows directly, which is exactly why these and
+the bugs above survived to a tagged release.
 
 ## [0.1.1]
 
