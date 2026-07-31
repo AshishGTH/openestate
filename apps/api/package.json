@@ -23,7 +23,7 @@
     "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^10.4.15",
     "@nestjs/swagger": "^8.1.0",
-    "@nestjs/terminus": "^10.2.3",
+    "@nestjs/terminus": "^11.1.1",
     "@nestjs/throttler": "^6.3.0",
     "@openestate/db": "workspace:*",
     "@openestate/generic-sales": "workspace:*",
