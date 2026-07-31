@@ -11,7 +11,14 @@ export type LoginDto = z.infer<typeof loginSchema>;
 
 export const totpVerifySchema = z
   .object({
-    code: z.string().length(6).regex(/^\d+$/),
+    // Either a 6-digit TOTP code or an XXXXX-XXXXX recovery code
+    // (TotpService.generateRecoveryCodes()'s exact format). Recovery
+    // codes exist specifically for "lost my authenticator" — a
+    // digits-only schema here rejected every one of them with a 400
+    // before AuthService.verifyTotp()'s recovery-code check (which
+    // already handles this format correctly) ever ran, making the
+    // whole recovery path unusable through the real API.
+    code: z.string().regex(/^(\d{6}|[0-9A-F]{5}-[0-9A-F]{5})$/, 'Invalid code format'),
   })
   .strict();
 
