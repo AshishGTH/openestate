@@ -313,7 +313,38 @@ jobs:
         working-directory: deploy/native
         run: |
           set -o pipefail
-          sudo ./install-native.sh 2>&1 | tee /tmp/install-native.log
+          START=$(date +%s)
+          # -x traces every command install-native.sh runs — this job's
+          # own history (see the pipefail comment above) is a real
+          # 0-second false-success, so verbose tracing plus the duration
+          # guard below are deliberate, not just noise: if the exit code
+          # can't be trusted, the wall-clock time and the raw command
+          # trace are the backstop.
+          sudo bash -x ./install-native.sh 2>&1 | tee /tmp/install-native.log
+          END=$(date +%s)
+          DURATION=$((END - START))
+          echo "install-native.sh ran for ${DURATION}s"
+          # A genuine build (pnpm install alone is 30-60s, the full
+          # multi-package build several minutes more) can never
+          # legitimately finish in under a minute. Catches a false-0
+          # exit code the same class of masking bug this step already
+          # hit once, even if some future change reintroduces it a
+          # different way.
+          if [ "$DURATION" -lt 60 ]; then
+            echo "::error::install-native.sh reported success in only ${DURATION}s — too fast to be a real build+install, treating as a failure regardless of exit code"
+            exit 1
+          fi
+
+      - name: Show install-native.sh output on failure
+        if: failure()
+        run: |
+          echo "::group::Full install-native.sh output"
+          sed 's/\x1b\[[0-9;]*m//g' /tmp/install-native.log 2>/dev/null || echo "(no log file at /tmp/install-native.log)"
+          echo "::endgroup::"
+          echo "::error::install-native.sh failed — last 30 lines (ANSI codes stripped):"
+          sed 's/\x1b\[[0-9;]*m//g' /tmp/install-native.log 2>/dev/null | tail -n 30 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
 
       - name: Assert health endpoint responds over HTTP
         run: curl -fsS http://localhost/api/v1/health
@@ -331,7 +362,16 @@ jobs:
       - name: Dump service logs on failure
         if: failure()
         run: |
-          sudo journalctl -u openestate-api -n 300 --no-pager || true
+          echo "::group::journalctl -u openestate-api"
+          sudo journalctl -u openestate-api -n 300 --no-pager || echo "(unit not found / never started)"
+          echo "::endgroup::"
+          echo "::error::journalctl -u openestate-api (last 20 lines):"
+          (sudo journalctl -u openestate-api -n 20 --no-pager 2>/dev/null || echo "(unit not found / never started)") | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+          echo "::group::systemctl status postgresql"
           sudo systemctl status postgresql --no-pager || true
+          echo "::endgroup::"
+          echo "::group::nginx -T"
           sudo nginx -T || true
-          cat /tmp/install-native.log || true
+          echo "::endgroup::"
