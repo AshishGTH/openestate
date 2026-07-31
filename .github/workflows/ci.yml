@@ -433,3 +433,24 @@ jobs:
           echo "$ARGON2_OUT" | while IFS= read -r line; do
             echo "::error::${line}"
           done
+
+      - name: Coredump backtrace on failure
+        if: failure()
+        run: |
+          # dmesg found nothing on a prior run — expected, not a dead end:
+          # kernel.print-fatal-signals defaults off on Ubuntu, so a plain
+          # SIGSEGV never reaches dmesg at all; systemd-coredump (which DID
+          # catch it — "Failed with result 'core-dump'" in journalctl) is
+          # the real source for a backtrace naming the crashing frame.
+          sleep 2
+          echo "::group::coredumpctl list"
+          sudo coredumpctl list --no-pager 2>&1 || echo "(coredumpctl unavailable or no dumps)"
+          echo "::endgroup::"
+          BT="$(sudo coredumpctl info --no-pager 2>&1 | tail -n 40)"
+          echo "::group::coredumpctl info (most recent dump, full)"
+          echo "$BT"
+          echo "::endgroup::"
+          echo "::error::coredumpctl backtrace (names the crashing frame):"
+          echo "$BT" | tail -n 9 | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
