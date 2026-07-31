@@ -87,7 +87,7 @@ export class PostsalesReportsService {
 
     const receipts = await this.systemPrisma.receipt.findMany({
       where: receiptWhere,
-      include: { booking: { include: { primaryApplicant: true } } },
+      include: { booking: { include: { primaryApplicant: { omit: { panCiphertext: true, panKeyVersion: true } } } } },
       orderBy: { receiptDate: 'asc' },
     });
 
@@ -163,7 +163,7 @@ export class PostsalesReportsService {
   async applicantLedger(companyId: string, bookingId: string, scope: ReportScope) {
     const booking = await this.systemPrisma.booking.findFirst({
       where: { id: bookingId, ...this.bookingWhere(companyId, scope) },
-      include: { primaryApplicant: true },
+      include: { primaryApplicant: { omit: { panCiphertext: true, panKeyVersion: true } } },
     });
     if (!booking) throw new NotFoundException('Booking not found or not in scope');
 

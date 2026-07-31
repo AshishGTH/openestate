@@ -227,8 +227,8 @@ export class BookingService {
       where: { id, companyId },
       include: {
         unit: true,
-        primaryApplicant: true,
-        coApplicants: { include: { applicant: true } },
+        primaryApplicant: { omit: { panCiphertext: true, panKeyVersion: true } },
+        coApplicants: { include: { applicant: { omit: { panCiphertext: true, panKeyVersion: true } } } },
         costLines: { orderBy: { sortOrder: 'asc' } },
         paymentPlans: { where: { isActive: true }, include: { installments: { orderBy: { seq: 'asc' } } } },
       },

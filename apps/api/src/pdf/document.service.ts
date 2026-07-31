@@ -101,7 +101,7 @@ export class DocumentService {
     const receipt = await this.systemPrisma.receipt.findFirst({
       where: { id: receiptId, companyId },
       include: {
-        booking: { include: { primaryApplicant: true, company: true } },
+        booking: { include: { primaryApplicant: { omit: { panCiphertext: true, panKeyVersion: true } }, company: true } },
         allocations: { include: { installment: true } },
       },
     });
@@ -134,7 +134,7 @@ export class DocumentService {
     const booking = await this.systemPrisma.booking.findFirst({
       where: { id: bookingId, companyId },
       include: {
-        primaryApplicant: true,
+        primaryApplicant: { omit: { panCiphertext: true, panKeyVersion: true } },
         company: true,
         unit: { include: { floor: { include: { tower: { include: { project: true } } } } } },
       },
@@ -257,7 +257,7 @@ export class DocumentService {
     const booking = await this.systemPrisma.booking.findFirst({
       where: { id: bookingId, companyId },
       include: {
-        primaryApplicant: true,
+        primaryApplicant: { omit: { panCiphertext: true, panKeyVersion: true } },
         company: true,
         unit: { include: { floor: { include: { tower: { include: { project: true } } } } } },
       },

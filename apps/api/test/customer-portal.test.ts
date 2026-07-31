@@ -238,6 +238,25 @@ describeIf('Phase 6 customer-portal (commit 2)', () => {
     expect(coApplicantView.coApplicants.map((a: { id: string }) => a.id)).toEqual([primaryId]);
   });
 
+  it('getProfile() never returns panCiphertext/panKeyVersion for self or co-applicants (real bug: a customer\'s own portal session could read their encrypted PAN blob, found via a live exercise)', async () => {
+    const primaryId = await makeApplicant(systemPrisma, fx.companyId);
+    const coApplicantId = await makeApplicant(systemPrisma, fx.companyId);
+    await systemPrisma.applicant.update({ where: { id: primaryId }, data: { panCiphertext: 'fake-ciphertext', panMasked: 'XXXXX1234F' } });
+    const unitId = await makeUnit(systemPrisma, fx);
+    const bookingId = await makeBooking(primaryId, unitId, `PANLEAK-${Date.now()}`);
+    await systemPrisma.bookingCoApplicant.create({
+      data: { companyId: fx.companyId, bookingId, applicantId: coApplicantId },
+    });
+
+    const view = await asPortalApplicant(primaryId, () => profileService.getProfile(fx.companyId, primaryId));
+    expect(view.self).not.toHaveProperty('panCiphertext');
+    expect(view.self).not.toHaveProperty('panKeyVersion');
+    for (const co of view.coApplicants as Array<Record<string, unknown>>) {
+      expect(co).not.toHaveProperty('panCiphertext');
+      expect(co).not.toHaveProperty('panKeyVersion');
+    }
+  });
+
   it('co-applicant visibility (GeneratedDocument twin): a co-applicant can download a shared booking\'s document — regression for the PORTAL_SCOPED_MODELS under-fetch bug', async () => {
     const primaryId = await makeApplicant(systemPrisma, fx.companyId);
     const coApplicantId = await makeApplicant(systemPrisma, fx.companyId);

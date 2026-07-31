@@ -46,6 +46,12 @@ export class ApplicantService {
         skip,
         take: limit,
         orderBy: sortBy ? { [sortBy]: sortOrder } : { createdAt: 'desc' },
+        // panMasked is the display value; the encrypted blob has no
+        // legitimate reason to ever leave the server (nothing in this
+        // service decrypts an Applicant's PAN — unlike Broker.revealPan
+        // — so there's no internal caller depending on it being present
+        // here either).
+        omit: { panCiphertext: true, panKeyVersion: true },
       }),
       this.systemPrisma.applicant.count({ where }),
     ]);
@@ -59,6 +65,7 @@ export class ApplicantService {
   async findOne(companyId: string, id: string) {
     const item = await this.systemPrisma.applicant.findFirst({
       where: { id, companyId },
+      omit: { panCiphertext: true, panKeyVersion: true },
     });
     if (!item) throw new NotFoundException('Applicant not found');
     return item;

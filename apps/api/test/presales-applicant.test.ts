@@ -121,6 +121,25 @@ describeIf('Applicant dedup, consent, merge', () => {
       expect(panEncryption.decrypt(raw.panCiphertext)).toBe('ABCDE1234F');
     });
 
+    it('findOne()/findAll() never return the ciphertext — only panMasked (real bug: the API response included the raw encrypted blob, found via a live exercise)', async () => {
+      const applicant = await applicantService.create(companyId, {
+        name: 'PAN Response Test',
+        primaryPhone: '9876510061',
+        alternatePhones: [],
+        pan: 'ABCDE1234F',
+      });
+
+      const one = await applicantService.findOne(companyId, applicant.id);
+      expect(one).not.toHaveProperty('panCiphertext');
+      expect(one).not.toHaveProperty('panKeyVersion');
+      expect(one.panMasked).toBe('XXXXX1234F');
+
+      const all = await applicantService.findAll(companyId, { page: 1, limit: 50 });
+      const listed = all.data.find((a) => a.id === applicant.id);
+      expect(listed).not.toHaveProperty('panCiphertext');
+      expect(listed).not.toHaveProperty('panKeyVersion');
+    });
+
     it('update() re-encrypts a changed PAN', async () => {
       const applicant = await applicantService.create(companyId, {
         name: 'PAN Update Test',

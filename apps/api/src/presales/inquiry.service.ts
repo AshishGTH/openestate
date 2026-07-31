@@ -68,7 +68,7 @@ export class InquiryService {
         skip,
         take: limit,
         orderBy: sortBy ? { [sortBy]: sortOrder } : { createdAt: 'desc' },
-        include: { applicant: true, project: true, temperature: true, assignedTo: true },
+        include: { applicant: { omit: { panCiphertext: true, panKeyVersion: true } }, project: true, temperature: true, assignedTo: true },
       }),
       this.systemPrisma.inquiry.count({ where }),
     ]);
@@ -87,7 +87,7 @@ export class InquiryService {
     const item = await this.systemPrisma.inquiry.findFirst({
       where,
       include: {
-        applicant: true,
+        applicant: { omit: { panCiphertext: true, panKeyVersion: true } },
         project: true,
         source: true,
         inquiryType: true,
@@ -115,7 +115,7 @@ export class InquiryService {
         status: { in: ['OPEN', 'CONTINUED'] },
         nextFollowupAt: { lte: endOfToday },
       },
-      include: { applicant: true, project: true, temperature: true },
+      include: { applicant: { omit: { panCiphertext: true, panKeyVersion: true } }, project: true, temperature: true },
       orderBy: { nextFollowupAt: 'asc' },
     });
   }

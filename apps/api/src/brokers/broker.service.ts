@@ -35,6 +35,11 @@ export class BrokerService {
         skip,
         take: limit,
         orderBy: sortBy ? { [sortBy]: sortOrder } : { name: 'asc' },
+        // panMasked is the display value; the encrypted blob has no
+        // legitimate reason to leave the server outside the dedicated,
+        // audited revealPan() action below (which reads it via its own
+        // query, not this one).
+        omit: { panCiphertext: true, panKeyVersion: true },
       }),
       this.systemPrisma.broker.count({ where }),
     ]);
@@ -46,6 +51,7 @@ export class BrokerService {
     const broker = await this.systemPrisma.broker.findFirst({
       where: { id, companyId },
       include: { bankDetails: true },
+      omit: { panCiphertext: true, panKeyVersion: true },
     });
     if (!broker) throw new NotFoundException('Broker not found');
     return broker;
@@ -121,9 +127,17 @@ export class BrokerService {
     return this.systemPrisma.brokerBankDetail.findMany({ where: { companyId, brokerId }, orderBy: { isPrimary: 'desc' } });
   }
 
-  /** Decrypted PAN — only for the rare "reveal" action, never in a list response. */
+  /**
+   * Decrypted PAN — only for the rare "reveal" action, never in a list
+   * response. Queries panCiphertext directly rather than going through
+   * findOne(), which deliberately omits it for every other caller.
+   */
   async revealPan(companyId: string, id: string): Promise<string | null> {
-    const broker = await this.findOne(companyId, id);
+    const broker = await this.systemPrisma.broker.findFirst({
+      where: { id, companyId },
+      select: { panCiphertext: true },
+    });
+    if (!broker) throw new NotFoundException('Broker not found');
     if (!broker.panCiphertext) return null;
     return this.panEncryption.decrypt(broker.panCiphertext);
   }
