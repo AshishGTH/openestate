@@ -19,15 +19,18 @@ export class PortalProfileService {
 
   async getProfile(companyId: string, applicantId: string) {
     return withTenantTx(this.tenantPrisma, companyId, async (tx) => {
-      const self = await tx.applicant.findFirstOrThrow({ where: { id: applicantId } });
+      const self = await tx.applicant.findFirstOrThrow({
+        where: { id: applicantId },
+        omit: { panCiphertext: true, panKeyVersion: true },
+      });
 
       const bookings = await tx.booking.findMany({
         where: {
           OR: [{ primaryApplicantId: applicantId }, { coApplicants: { some: { applicantId } } }],
         },
         include: {
-          primaryApplicant: true,
-          coApplicants: { include: { applicant: true } },
+          primaryApplicant: { omit: { panCiphertext: true, panKeyVersion: true } },
+          coApplicants: { include: { applicant: { omit: { panCiphertext: true, panKeyVersion: true } } } },
         },
       });
 
