@@ -5,6 +5,46 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+Found by a full production-readiness pass — driving a freshly-installed
+native deployment through real HTTP calls across every module with
+realistic demo data, not by review:
+
+- Company config had no way to set `companyGstin`/`gstStateCode` after
+  the initial seed, despite the frozen booking service already reading
+  `gstStateCode` to decide CGST+SGST vs IGST. Added, with GSTIN format
+  validation (checksum digit deferred — see `docs/todo.md`) and a
+  Company Config UI section.
+- Health endpoint's `version` field was hardcoded `0.1.0` in every real
+  deployment (`npm_package_version` is only set by `pnpm run`, never by
+  systemd's/Docker's direct `node dist/main.js`). Now reads
+  `package.json` directly.
+- 18 of 19 generic master types (unit types, inquiry sources, charge
+  types, etc.) 500'd on any create/update call that included a
+  description — `createMasterSchema`'s optional `description` field is
+  only backed by a real column on `PaymentPlanTemplate`; the shared
+  factory blindly spread the whole dto into Prisma's `data`. Fixed once,
+  at the root, in the factory.
+- `DocumentType`, `InterestRule`, and `TransferFeeRule` couldn't be
+  created via the API at all — each has its own required, non-nullable
+  columns (`entityType`; `rateType`/`ratePercent`/`frequency`;
+  `feeType`) that the generic master schema never had, so every attempt
+  500'd on a Prisma "Argument missing" error instead of failing
+  validation cleanly. The shared factory now supports a per-model
+  `extraFields` schema extension.
+- `LetterTemplate` had no working create path at all — zero templates
+  could ever exist, blocking demand/allotment/reminder letter generation
+  entirely. It was routed through the generic master factory (whose
+  schema has no `subject`/`entityType`/`body`) instead of a dedicated
+  module; given one, mirroring the existing `SmsTemplateModule`
+  precedent, with merge-field validation at save time.
+- Duplicate master names (any of the 18+ shared-factory types) returned
+  a raw 500 instead of a clean "already exists" 400 — nothing in this
+  codebase had ever caught Prisma's P2002 unique-constraint error for
+  these dynamically-keyed services (unlike `RolesService`/`UsersService`,
+  which pre-check via `findFirst`). Mapped once, in the factory.
+
 ## [0.1.1]
 
 ### Added
