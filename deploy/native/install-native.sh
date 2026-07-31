@@ -207,7 +207,16 @@ sed "s#__SERVER_NAME__#${SERVER_NAME}#" "${SCRIPT_DIR}/nginx/openestate.conf.tem
 ln -sf /etc/nginx/sites-available/openestate /etc/nginx/sites-enabled/openestate
 rm -f /etc/nginx/sites-enabled/default
 nginx -t || die "nginx config test failed — check /etc/nginx/sites-available/openestate"
-systemctl reload nginx
+# `systemctl reload` only signals an already-running master process — it
+# fails outright ("nginx.service is not active, cannot reload") if apt
+# installed nginx without starting it, which happens on some hardened/
+# minimal images (seen on a real ubuntu-latest GitHub Actions runner;
+# the earlier-checked `command -v nginx` only proves the package is
+# installed, never that the service is up). `reload-or-restart` reloads
+# when already active and does a full start otherwise, correct either
+# way and idempotent on re-runs.
+systemctl enable nginx
+systemctl reload-or-restart nginx
 
 log "Waiting for the API to become healthy..."
 if wait_for_health "http://127.0.0.1:3000/api/v1/health" 60; then
