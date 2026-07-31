@@ -44,6 +44,17 @@ realistic demo data, not by review:
   codebase had ever caught Prisma's P2002 unique-constraint error for
   these dynamically-keyed services (unlike `RolesService`/`UsersService`,
   which pre-check via `findFirst`). Mapped once, in the factory.
+- `deploy/native/install-native.sh` (and every other native deploy
+  script an admin is documented to run directly — `upgrade-native.sh`,
+  `backup-native.sh`, `restore-native.sh`, `uninstall.sh`,
+  `setup-database.sh`) was git-tracked without the executable bit.
+  A genuinely fresh `git clone` followed by the documented `sudo
+  ./install-native.sh` failed immediately with "Permission denied"
+  (exit 126) trying to exec `setup-database.sh`. Never caught by hand
+  verification because that checkout had a local, uncommitted `chmod
+  +x`. Now tracked as mode `755`; the `native-install` CI job invokes
+  the script exactly as documented (no `bash` prefix) so this class of
+  regression fails CI instead of being silently bypassed.
 
 ## [0.1.1]
 

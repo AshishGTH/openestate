@@ -314,13 +314,25 @@ jobs:
         run: |
           set -o pipefail
           START=$(date +%s)
-          # -x traces every command install-native.sh runs — this job's
-          # own history (see the pipefail comment above) is a real
-          # 0-second false-success, so verbose tracing plus the duration
-          # guard below are deliberate, not just noise: if the exit code
-          # can't be trusted, the wall-clock time and the raw command
-          # trace are the backstop.
-          sudo bash -x ./install-native.sh 2>&1 | tee /tmp/install-native.log
+          # Invoked exactly as the docs tell a real admin to run it (`sudo
+          # ./install-native.sh`, NOT `sudo bash install-native.sh`) — a
+          # `bash` prefix would exec the script as bash's file argument,
+          # which doesn't require the executable bit and so silently
+          # masked a real bug this job caught once: install-native.sh's
+          # own git-tracked mode (and setup-database.sh's, which it execs
+          # directly) was 100644, no +x. A genuinely fresh `git clone` +
+          # documented `sudo ./install-native.sh` failed with exit 126
+          # ("Permission denied") the moment it tried to exec
+          # setup-database.sh — invisible on the VM this was verified on
+          # because that checkout had accumulated a local chmod that was
+          # never committed. Fixed by setting the tracked mode to 100755
+          # for every deploy/native script real users invoke directly
+          # (install/upgrade/backup/restore/uninstall/setup-database —
+          # lib.sh stays 644, it's only ever sourced). This step must keep
+          # testing the exact documented invocation so a regression here
+          # (e.g. a future script losing +x again) fails CI instead of
+          # being quietly bypassed by a `bash` wrapper.
+          sudo ./install-native.sh 2>&1 | tee /tmp/install-native.log
           END=$(date +%s)
           DURATION=$((END - START))
           echo "install-native.sh ran for ${DURATION}s"
