@@ -469,28 +469,32 @@ jobs:
           # /etc/openestate/openestate.env is mode 640 root:openestate —
           # readable by systemd itself (which runs EnvironmentFile= as
           # root, PID 1, before dropping to User=openestate) but NOT by
-          # the openestate user directly, which a first attempt at this
-          # step (`sudo -u openestate ... source ...`) discovered the hard
-          # way: "Permission denied", silently proceeding with an EMPTY
-          # environment and crashing for that reason instead of proving
-          # anything. Read the file as root, then hand the vars to the
-          # openestate-run node process explicitly via `env`.
+          # the openestate user directly. Read as root, hand vars to the
+          # openestate-run process explicitly via `env`.
           ENV_VARS="$(sudo grep -v '^\s*#' /etc/openestate/openestate.env | grep -v '^\s*$')"
-          STANDALONE_OUT="$(
-            cd /opt/openestate/current/api
-            sudo -u openestate env $ENV_VARS timeout 8 /usr/bin/node dist/main.js 2>&1
-            echo "node exit=$?"
-          )"
-          echo "::group::standalone (non-systemd) node dist/main.js, same user/cwd/env as the unit"
-          echo "$STANDALONE_OUT"
+
+          # A prior run of this step (identical user/cwd/env) confirmed
+          # `node dist/main.js` crashes standalone too — ruling systemd's
+          # unit file (sandboxing, resource limits, EnvironmentFile
+          # handling) out entirely as the cause. This run instead ladders
+          # from trivial to full-app, all in this exact same context, to
+          # find where the crash actually starts:
+          BARE_OUT="$(cd /opt/openestate/current/api && sudo -u openestate env $ENV_VARS timeout 8 /usr/bin/node -e "console.log('bare-in-context OK')" 2>&1; echo "exit=$?")"
+          REQUIRE_OUT="$(cd /opt/openestate/current/api && sudo -u openestate env $ENV_VARS timeout 8 /usr/bin/node -e "require('argon2'); console.log('require-only OK')" 2>&1; echo "exit=$?")"
+          HASH_OUT="$(cd /opt/openestate/current/api && sudo -u openestate env $ENV_VARS timeout 8 /usr/bin/node -e "require('argon2').hash('t').then(()=>console.log('hash OK')).catch(e=>{console.error('hash FAILED',e);process.exit(1)})" 2>&1; echo "exit=$?")"
+          MAIN_OUT="$(cd /opt/openestate/current/api && sudo -u openestate env $ENV_VARS timeout 8 /usr/bin/node dist/main.js 2>&1; echo "exit=$?")"
+
+          echo "::group::isolation ladder (all: same user/cwd/env as the systemd unit)"
+          echo "-- 1. bare node, no argon2, no app code --"; echo "$BARE_OUT"
+          echo "-- 2. require('argon2') only, no hash call --"; echo "$REQUIRE_OUT"
+          echo "-- 3. require('argon2').hash() --"; echo "$HASH_OUT"
+          echo "-- 4. node dist/main.js (full app) --"; echo "$MAIN_OUT"
           echo "::endgroup::"
-          # exit=124 means `timeout` killed a still-running (i.e. healthy)
-          # process — the expected outcome if this does NOT reproduce the
-          # crash. Anything else (in particular 139) means it crashes
-          # standalone too, ruling systemd itself out.
-          echo "::error::standalone API launch result (exit=124 means it was still running when killed — good; 139 means SIGSEGV same as under systemd):"
-          echo "$STANDALONE_OUT" | tail -n 9 | while IFS= read -r line; do
-            echo "::error::${line}"
+
+          for pair in "1-bare:$BARE_OUT" "2-require-only:$REQUIRE_OUT" "3-hash:$HASH_OUT" "4-full-app:$MAIN_OUT"; do
+            label="${pair%%:*}"
+            out="${pair#*:}"
+            echo "::error::ladder ${label}: $(echo "$out" | tail -n 1)"
           done
 
       - name: Coredump backtrace on failure
