@@ -2570,3 +2570,52 @@ touched `lib/toast.tsx` itself; reload fresh first.
   point of the two-platform note is that the scripts were checked
   against two different default `postgresql` package versions, not two
   identical environments with different labels.
+
+### Full production-readiness pass — 6 real bugs across two verification layers
+
+A full pass driving a freshly-installed native deployment through real
+HTTP calls across every module (company config through masters, roles,
+inventory, presales, the full financial core, brokers, both portals,
+plugins/webhooks/leads, admin) with realistic demo data — not review —
+found and fixed 6 real bugs beyond the 8 install-script bugs above, none
+of them install-script issues: the GSTIN/state-code config gap, the
+health endpoint's hardcoded version, 18-of-19 master types 500ing on a
+description field, 3 master types missing required fields entirely
+(same root cause as the LetterTemplate module gap), a letter-template/
+document-type merge-field mismatch crashing to a raw 500, and — found
+during a stricter re-read of "confirm PAN is encrypted at rest and
+masked in list views" than a first pass gave it — panCiphertext leaking
+into API responses across ~10 call sites. Full detail in each fix's own
+commit message; CHANGELOG.md's `[Unreleased]` section has the
+user-facing summary.
+
+**Tried and reverted: a global Prisma Client `omit` default for
+panCiphertext/panKeyVersion** (`packages/db/src/index.ts`, in
+`createTenantPrismaClient`/`createSystemPrismaClient`) — the obviously
+"correct" root-cause fix once the leak turned out to span ~10 call sites
+across 7 files, since Prisma 6 supports exactly this via a constructor
+option. Type-checking failed: the omit-parameterized `PrismaClient<{
+omit: {...} }>` type is not assignable to the plain `PrismaClient` type
+`tenant.extension.ts`'s `tenantExtension()`/`audit.extension.ts`'s
+`auditExtension()` were written against, so `base.$extends(...)` no
+longer type-checks once `base` carries a non-empty `omit` option — a
+real incompatibility between Prisma's typed-omit feature and this
+codebase's existing `$extends` composition, not a typo. Reverted in
+favor of per-query `omit` at every real call site instead (more code,
+but each instance independently type-checks and is independently
+tested). **Revisit the global approach only alongside updating
+`tenantExtension()`/`auditExtension()`'s own type signatures to be
+omit-shape-generic** — attempting the global default again without that
+will hit the identical error.
+
+**Real environmental hazard hit twice this session, unrelated to the
+product: both Docker Desktop and the verification VM went down mid-session
+with no warning** (Docker's named pipe vanished; the VM stopped answering
+ARP) — coincided with a background-task session interruption, so likely
+an environment-level event (host sleep/restart) rather than either
+service failing independently. Recovery was mundane (restart Docker
+Desktop; user power-cycled the VM) but cost real time mid-verification.
+Not a product issue — noted here only so a future session recognizes
+the symptom (`docker ps` failing with a missing named-pipe path; `ping`
+replies of "Destination host unreachable" from one's own gateway IP for
+the VM's address specifically) instead of re-diagnosing from scratch.
