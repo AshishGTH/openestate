@@ -290,15 +290,30 @@ jobs:
 
       - name: Wait for Postgres and Redis
         run: |
-          for i in $(seq 1 30); do sudo -u postgres pg_isready && break; sleep 1; done
-          for i in $(seq 1 30); do redis-cli ping | grep -q PONG && break; sleep 1; done
+          for i in $(seq 1 30); do sudo -u postgres pg_isready && break; [ "$i" -eq 30 ] && { echo "::error::Postgres never became ready"; exit 1; }; sleep 1; done
+          for i in $(seq 1 30); do redis-cli ping | grep -q PONG && break; [ "$i" -eq 30 ] && { echo "::error::Redis never became ready"; exit 1; }; sleep 1; done
 
       # install-native.sh runs setup-database.sh itself as part of the
       # documented flow (see deploy/native/install-native.sh) — this is
       # the same single command an admin runs, not a CI-only shortcut.
+      #
+      # `set -o pipefail` matters here, not just style: a real first run
+      # of this job reported this step as a 0-second success while
+      # install-native.sh had actually failed near-instantly — GitHub
+      # Actions' default bash `run:` doesn't set pipefail, so
+      # `cmd | tee file`'s reported exit code was tee's (always 0), not
+      # install-native.sh's. The health-check step below caught the
+      # resulting broken install, but the real failure reason was masked
+      # by this step reporting green. Same class of bug CLAUDE.md's
+      # "Native install — 8 real bugs" entry documents for the script
+      # itself (bug #2/#5, stdout-capture and errexit-propagation
+      # footguns) — this one was in the CI YAML wrapping it, not the
+      # script.
       - name: Run install-native.sh (builds the app, runs setup-database.sh, installs systemd + nginx)
         working-directory: deploy/native
-        run: sudo ./install-native.sh 2>&1 | tee /tmp/install-native.log
+        run: |
+          set -o pipefail
+          sudo ./install-native.sh 2>&1 | tee /tmp/install-native.log
 
       - name: Assert health endpoint responds over HTTP
         run: curl -fsS http://localhost/api/v1/health
