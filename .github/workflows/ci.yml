@@ -438,34 +438,55 @@ jobs:
             echo "::error::${line}"
           done
 
-      - name: Argon2 isolated smoke test on failure
+      - name: Standalone (non-systemd) API launch test on failure
         if: failure()
         run: |
-          # Isolates whether the crash is argon2's native module specifically
-          # (this project's one native dependency requiring a compile/
-          # prebuilt-binary step — see the prerequisite check for it above)
-          # vs. something else in main.js's broader require graph, run as
-          # the exact user/cwd/node binary the systemd unit itself uses.
-          # Default options use parallelism:4 (argon2's own package
-          # default), which libargon2 implements via pthreads for p>1 — a
-          # coredump backtrace from a prior run pointed at a semaphore-wait
-          # frame, consistent with a threading bug/incompatibility under a
-          # constrained-CPU virtualized runner. Also tries parallelism:1
-          # (single-threaded) in the same run for a direct comparison.
-          ARGON2_OUT="$( (cd /opt/openestate/current/api && sudo -u openestate /usr/bin/node -e "require('argon2').hash('test').then(h=>console.log('argon2 default-parallelism OK:',h)).catch(e=>{console.error('argon2 default-parallelism FAILED:',e);process.exit(1)})") 2>&1; echo "exit=$?" )"
-          ARGON2_P1_OUT="$( (cd /opt/openestate/current/api && sudo -u openestate /usr/bin/node -e "const a=require('argon2'); a.hash('test',{type:a.argon2id,parallelism:1}).then(h=>console.log('argon2 parallelism:1 OK:',h)).catch(e=>{console.error('argon2 parallelism:1 FAILED:',e);process.exit(1)})") 2>&1; echo "exit=$?" )"
-          echo "::group::argon2 isolated smoke tests (as the openestate user, same node/cwd as the service)"
-          echo "-- default parallelism (4) --"
-          echo "$ARGON2_OUT"
-          echo "-- parallelism:1 --"
-          echo "$ARGON2_P1_OUT"
+          # Four hypotheses already ruled out this investigation, each with
+          # a real comparison: bad prebuilt binary, argon2's threading
+          # (parallelism:1 crashed identically to the default), Node.js
+          # itself (a bare `node -e` runs clean), and a version-specific
+          # regression (0.45.0 -> 0.45.1 crashed identically). Not
+          # re-tested here.
+          #
+          # New angle: the coredump backtrace lands in Node's inspector
+          # I/O thread startup (uv__sem_wait), not argon2 code — which
+          # could mean the crash isn't about argon2 at all, but about how
+          # the process is *launched* under systemd on this runner
+          # (ProtectSystem=strict/NoNewPrivileges=true sandboxing,
+          # resource limits, or an environment variable leaking in via
+          # EnvironmentFile — NODE_OPTIONS or an inspector flag would fit
+          # this exact backtrace). This step runs the real API binary the
+          # exact same way (user, cwd, env vars from the same file)
+          # WITHOUT systemd's unit-file wrapping, to isolate that variable
+          # directly: if it runs clean here but SIGSEGVs under systemd,
+          # the unit file is the next thing to bisect, not the app or its
+          # dependencies.
+          # sudo strips the runner shell's own environment by default (no
+          # -E), so this doesn't inherit whatever the Actions runner itself
+          # may have set — printed anyway so a leak is visible, not assumed
+          # absent.
+          echo "runner shell NODE_OPTIONS=${NODE_OPTIONS:-<unset>}"
+          STANDALONE_OUT="$(
+            sudo -u openestate bash -c '
+              echo "pre-source NODE_OPTIONS=${NODE_OPTIONS:-<unset>}"
+              set -a
+              source /etc/openestate/openestate.env
+              set +a
+              echo "post-source NODE_OPTIONS=${NODE_OPTIONS:-<unset>}"
+              cd /opt/openestate/current/api
+              timeout 8 /usr/bin/node dist/main.js
+              echo "node exit=$?"
+            ' 2>&1
+          )"
+          echo "::group::standalone (non-systemd) node dist/main.js, same user/cwd/env as the unit"
+          echo "$STANDALONE_OUT"
           echo "::endgroup::"
-          echo "::error::argon2 smoke test — default parallelism:"
-          echo "$ARGON2_OUT" | while IFS= read -r line; do
-            echo "::error::${line}"
-          done
-          echo "::error::argon2 smoke test — parallelism:1:"
-          echo "$ARGON2_P1_OUT" | while IFS= read -r line; do
+          # exit=124 means `timeout` killed a still-running (i.e. healthy)
+          # process — the expected outcome if this does NOT reproduce the
+          # crash. Anything else (in particular 139) means it crashes
+          # standalone too, ruling systemd itself out.
+          echo "::error::standalone API launch result (exit=124 means it was still running when killed — good; 139 means SIGSEGV same as under systemd):"
+          echo "$STANDALONE_OUT" | tail -n 9 | while IFS= read -r line; do
             echo "::error::${line}"
           done
 
