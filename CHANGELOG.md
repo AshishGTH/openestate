@@ -77,6 +77,19 @@ realistic demo data, not by review:
   `select` allowlist copy/paste gap (present in `update()`, missing
   from `create()`) left an admin with no way to confirm the phone
   number was stored.
+- Two-factor login was completely broken: the login response's
+  2FA-pending branch never set the CSRF cookie `totp/verify` requires
+  (so no 2FA-enabled account could ever finish logging in), and the
+  code-verification schema only accepted 6 digits, rejecting every
+  recovery code's `XXXXX-XXXXX` format before it reached the
+  already-correct recovery-code check. Found by live verification of
+  the enrollment/login/recovery-code flow, not review.
+- `install-native.sh`'s build crashed the deployed app with a SIGSEGV
+  crash-loop on a real ubuntu-latest CI run — traced to argon2's
+  prebuilt native module specifically (an isolated smoke test crashed
+  identically outside the app). Now forces a from-source rebuild
+  (`npm_config_build_from_source=true`), the same fallback the
+  build-toolchain prerequisite check already exists for.
 
 The latter two found by a new through-the-wire creation test for every
 master type and admin-creatable entity (users, roles, custom fields) —
