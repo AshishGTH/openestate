@@ -2619,3 +2619,76 @@ Not a product issue — noted here only so a future session recognizes
 the symptom (`docker ps` failing with a missing named-pipe path; `ping`
 replies of "Destination host unreachable" from one's own gateway IP for
 the VM's address specifically) instead of re-diagnosing from scratch.
+
+### CI native-install job — three real bugs, found only by making the job's own failure readable
+
+The `native-install` CI job (added in the previous entry) was failing
+silently: the step ran `cmd | tee file`, whose reported exit code was
+`tee`'s (always 0) since GitHub Actions' default bash doesn't set
+`pipefail` — the job reported a 0-second "success" that was actually an
+instant failure the health-check step caught downstream, with no way to
+see why. Fixing that required three iterations, each surfacing a real
+bug that `gh`'s log API (rate-limited/invalid token all session — use
+`WebFetch` on the public `.../actions/runs/<id>` and `.../job/<id>` HTML,
+or the unauthenticated `api.github.com/.../check-runs/<id>/annotations`
+endpoint, which works from this network even when `gh` doesn't) couldn't
+have shown without first making the step honest:
+
+1. **`deploy/native/*.sh` git-tracked without the executable bit**
+   (mode `644`, not `755`). A genuinely fresh clone + the documented
+   `sudo ./install-native.sh` dies at exit 126 the instant it execs
+   `setup-database.sh`. Invisible on the verification VM because that
+   checkout had a local, uncommitted `chmod +x` — this was NEVER
+   actually tested via a fresh clone before this session, on the VM or
+   in CI. Fixed: `git update-index --chmod=+x` on every script an admin
+   runs directly (`install/upgrade/backup/restore/uninstall/setup-
+   database`); `lib.sh` stays `644` (only ever `source`d). The CI step
+   itself was also switched from `sudo bash -x ./install-native.sh` to
+   the plain documented `sudo ./install-native.sh` — the `bash` prefix
+   doesn't need the +x bit either, so keeping it would have silently
+   re-masked this exact bug class on any future regression.
+2. **GitHub's `::error::` annotation cap is 10 per step, keeping the
+   *first* 10 emitted, not the last 10.** A `tail -n 30 | while read
+   line; do echo ::error::$line; done` step reliably shows build-
+   progress noise from 30–21 lines before the end, never the actual
+   failure line closest to the end. Fixed by emitting only the true
+   last ~9 lines. Worth remembering for any future "dump the tail as
+   annotations" diagnostic step in this or another repo's CI.
+3. **`run_as_superuser()`'s `prisma migrate deploy`/seed calls ran from
+   the git checkout's own directory, not a directory the `postgres` OS
+   user can traverse.** Prisma 6.19+ auto-discovers a `prisma.config.*`
+   file in `cwd` before running any command; the discovery `lstat()`
+   fails `EACCES` (not `ENOENT`) when an ancestor directory isn't
+   world-traversable, and Prisma treats that as a hard failure instead
+   of "no config, proceed." GitHub Actions runners check out under
+   `/home/runner` (mode `0750`) — the VM's checkout lived under `/opt`
+   (world-traversable all the way down), which is why this was never
+   caught there. Fixed by running from `RELEASE_DIR` instead, which the
+   script already `chmod -R o+rX`s for exactly this "run as the
+   `postgres` OS user" reason. Same duplicated function existed
+   verbatim in `upgrade-native.sh` and got the identical fix — a real
+   customer upgrading on a host where their checkout lives under a
+   similarly-restricted home directory would hit this in production.
+
+Also added: a wall-clock duration guard (`< 60s` fails the step
+regardless of exit code) as defense-in-depth against a future variant
+of bug type 1 above — a genuine build+install can never legitimately
+finish that fast.
+
+**Closed the "tests seed directly" gap named as the root cause of the
+5 setup-blocking bugs in the previous entry**: added
+`apps/api/test/e2e-master-creation.test.ts`, one real-HTTP creation
+test per master type (all 22) and per other admin-creatable entity
+(users, roles, custom fields), each with a realistic payload including
+optional fields. It found two more bugs on its first run, both invisible
+to every direct-service-call test in the suite because they live
+exactly at the HTTP-to-Prisma boundary those tests skip:
+`CustomFieldDefinition.defaultValue` was accepted by the Zod schema
+with no backing column (any real caller sending it 500'd), and
+`UsersService.create()`'s `select` allowlist omitted `phone` (present
+in `update()`'s — a copy/paste gap, not intentional) so a newly-created
+user's phone number never came back in the response. `postsales-
+harness.ts`'s `cleanupCompany()` needed the same treatment as its
+existing `inquiry_sources`/`custom_field_definitions` comments describe
+— extended with every master table this new test is the first to ever
+populate.
