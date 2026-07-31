@@ -466,17 +466,20 @@ jobs:
           # may have set — printed anyway so a leak is visible, not assumed
           # absent.
           echo "runner shell NODE_OPTIONS=${NODE_OPTIONS:-<unset>}"
+          # /etc/openestate/openestate.env is mode 640 root:openestate —
+          # readable by systemd itself (which runs EnvironmentFile= as
+          # root, PID 1, before dropping to User=openestate) but NOT by
+          # the openestate user directly, which a first attempt at this
+          # step (`sudo -u openestate ... source ...`) discovered the hard
+          # way: "Permission denied", silently proceeding with an EMPTY
+          # environment and crashing for that reason instead of proving
+          # anything. Read the file as root, then hand the vars to the
+          # openestate-run node process explicitly via `env`.
+          ENV_VARS="$(sudo grep -v '^\s*#' /etc/openestate/openestate.env | grep -v '^\s*$')"
           STANDALONE_OUT="$(
-            sudo -u openestate bash -c '
-              echo "pre-source NODE_OPTIONS=${NODE_OPTIONS:-<unset>}"
-              set -a
-              source /etc/openestate/openestate.env
-              set +a
-              echo "post-source NODE_OPTIONS=${NODE_OPTIONS:-<unset>}"
-              cd /opt/openestate/current/api
-              timeout 8 /usr/bin/node dist/main.js
-              echo "node exit=$?"
-            ' 2>&1
+            cd /opt/openestate/current/api
+            sudo -u openestate env $ENV_VARS timeout 8 /usr/bin/node dist/main.js 2>&1
+            echo "node exit=$?"
           )"
           echo "::group::standalone (non-systemd) node dist/main.js, same user/cwd/env as the unit"
           echo "$STANDALONE_OUT"
