@@ -446,12 +446,26 @@ jobs:
           # prebuilt-binary step — see the prerequisite check for it above)
           # vs. something else in main.js's broader require graph, run as
           # the exact user/cwd/node binary the systemd unit itself uses.
-          ARGON2_OUT="$( (cd /opt/openestate/current/api && sudo -u openestate /usr/bin/node -e "require('argon2').hash('test').then(h=>console.log('argon2 OK:',h)).catch(e=>{console.error('argon2 FAILED:',e);process.exit(1)})") 2>&1; echo "exit=$?" )"
-          echo "::group::argon2 isolated smoke test (as the openestate user, same node/cwd as the service)"
+          # Default options use parallelism:4 (argon2's own package
+          # default), which libargon2 implements via pthreads for p>1 — a
+          # coredump backtrace from a prior run pointed at a semaphore-wait
+          # frame, consistent with a threading bug/incompatibility under a
+          # constrained-CPU virtualized runner. Also tries parallelism:1
+          # (single-threaded) in the same run for a direct comparison.
+          ARGON2_OUT="$( (cd /opt/openestate/current/api && sudo -u openestate /usr/bin/node -e "require('argon2').hash('test').then(h=>console.log('argon2 default-parallelism OK:',h)).catch(e=>{console.error('argon2 default-parallelism FAILED:',e);process.exit(1)})") 2>&1; echo "exit=$?" )"
+          ARGON2_P1_OUT="$( (cd /opt/openestate/current/api && sudo -u openestate /usr/bin/node -e "const a=require('argon2'); a.hash('test',{type:a.argon2id,parallelism:1}).then(h=>console.log('argon2 parallelism:1 OK:',h)).catch(e=>{console.error('argon2 parallelism:1 FAILED:',e);process.exit(1)})") 2>&1; echo "exit=$?" )"
+          echo "::group::argon2 isolated smoke tests (as the openestate user, same node/cwd as the service)"
+          echo "-- default parallelism (4) --"
           echo "$ARGON2_OUT"
+          echo "-- parallelism:1 --"
+          echo "$ARGON2_P1_OUT"
           echo "::endgroup::"
-          echo "::error::argon2 isolated smoke test result:"
+          echo "::error::argon2 smoke test — default parallelism:"
           echo "$ARGON2_OUT" | while IFS= read -r line; do
+            echo "::error::${line}"
+          done
+          echo "::error::argon2 smoke test — parallelism:1:"
+          echo "$ARGON2_P1_OUT" | while IFS= read -r line; do
             echo "::error::${line}"
           done
 
