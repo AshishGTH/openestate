@@ -40,12 +40,41 @@ an integration.
   names in its error messages.
 - **Tested platforms**: Ubuntu 24.04 LTS with PostgreSQL 16, and Ubuntu
   25.10 with PostgreSQL 17 — both verified end-to-end (fresh install,
-  real HTTP login, upgrade/rollback, backup/restore, uninstall). The
-  scripts only check that a `psql` client is present, never an exact
-  major version, so newer Ubuntu releases that ship a newer default
-  PostgreSQL (25.10 ships 17, not 16) work without any script changes —
-  `sudo apt-get install -y postgresql` is enough; only pin
-  `postgresql-16` specifically if you need that exact major version.
+  real HTTP login, upgrade/rollback, backup/restore, uninstall) on a
+  real VM. The scripts only check that a `psql` client is present,
+  never an exact major version, so newer Ubuntu releases that ship a
+  newer default PostgreSQL (25.10 ships 17, not 16) work without any
+  script changes — `sudo apt-get install -y postgresql` is enough; only
+  pin `postgresql-16` specifically if you need that exact major version.
+  A later session additionally verified `upgrade-native.sh` fresh
+  end-to-end on that same 24.04 VM (first real exercise of that script),
+  plus full application-level flows (2FA/TOTP enrollment and recovery
+  codes, broker NOC → cancel → commission clawback → statement PDF) —
+  none of these are install-script concerns, but they confirm the
+  deployed app itself is sound on 24.04, not just the installer.
+  **Known gap**: this VM-based verification is the reason 24.04/PG16
+  support is documented as tested at all; a `native-install` CI job
+  (`.github/workflows/ci.yml`) runs the same install on a real
+  `ubuntu-latest` GitHub-hosted runner on every push as the *ongoing*
+  automated guarantee, but as of this writing that job is red — the
+  deployed API crash-loops (SIGSEGV, `status=11/SEGV` in `journalctl`)
+  specifically on that hosted-runner class, isolated to argon2's native
+  module (`require('argon2').hash()` crashes identically outside the
+  app entirely) and confirmed *not* reproducible on the VM. Four
+  specific causes were tested and ruled out, each with a real coredump/
+  exit-code comparison, not by inference: a bad prebuilt binary
+  (forcing a from-source rebuild crashes identically), a threading bug
+  in argon2's default 4-way parallelism (`parallelism:1` crashes
+  identically), Node.js itself (a completely bare `node -e` runs
+  clean), and a version-specific regression (0.45.0 → 0.45.1 crashes
+  identically). The actual cause is still unknown — a coredump
+  backtrace pointed at a generic Node/libuv semaphore-wait frame, which
+  didn't point at argon2's own code and didn't survive being ruled out
+  above either. Next step for whoever picks this up: try a different
+  Node major version (22 LTS) for the native-install path, or file this
+  exact backtrace upstream. Until that job is green, treat
+  ubuntu-latest specifically (as opposed to Ubuntu 24.04 in general) as
+  unverified; a real VM/server install is not known to be affected.
 - Architecture: x86_64 (amd64). ARM is not yet officially supported.
 - Minimum: 2 vCPU, 4 GB RAM, 40 GB disk. Recommended for a real company:
   4 vCPU, 8 GB RAM, 80 GB+ disk (grows with document/receipt volume).
