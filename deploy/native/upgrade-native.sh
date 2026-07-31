@@ -72,12 +72,20 @@ source "$ENV_FILE"
 set +a
 
 run_as_superuser() {
-  if [ -n "$DB_HOST" ]; then
-    PGPASSWORD="${PG_SUPERUSER_PASSWORD:?Set PG_SUPERUSER_PASSWORD when using --db-host}" \
-      env DATABASE_URL="postgresql://${PG_SUPERUSER:-postgres}:${PG_SUPERUSER_PASSWORD}@${DB_HOST}:5432/openestate" "$@"
-  else
-    sudo -u postgres env DATABASE_URL="postgresql://postgres@localhost/openestate?host=/var/run/postgresql" "$@"
-  fi
+  # See install-native.sh: run from RELEASE_DIR (already o+rX), not this
+  # script's own cwd — Prisma 6.19+'s cwd-relative prisma.config.*
+  # auto-discovery lstat()s and gets EACCES, not ENOENT, when an ancestor
+  # of the checkout isn't traversable by the `postgres` OS user, which
+  # aborts the migrate step entirely.
+  (
+    cd "$RELEASE_DIR" || exit 1
+    if [ -n "$DB_HOST" ]; then
+      PGPASSWORD="${PG_SUPERUSER_PASSWORD:?Set PG_SUPERUSER_PASSWORD when using --db-host}" \
+        env DATABASE_URL="postgresql://${PG_SUPERUSER:-postgres}:${PG_SUPERUSER_PASSWORD}@${DB_HOST}:5432/openestate" "$@"
+    else
+      sudo -u postgres env DATABASE_URL="postgresql://postgres@localhost/openestate?host=/var/run/postgresql" "$@"
+    fi
+  )
 }
 
 log "Running database migrations (before cutover — old release keeps running against the new, backward-compatible schema until it's swapped)..."

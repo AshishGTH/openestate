@@ -164,12 +164,24 @@ chown -h "${APP_USER}:${APP_GROUP}" "$CURRENT_LINK"
 # matches setup-database.sh's own local default). Remote: requires a real
 # password, same as setup-database.sh's remote path.
 run_as_superuser() {
-  if [ -n "$DB_HOST" ]; then
-    PGPASSWORD="${PG_SUPERUSER_PASSWORD:?Set PG_SUPERUSER_PASSWORD when using --db-host}" \
-      env DATABASE_URL="postgresql://${PG_SUPERUSER:-postgres}:${PG_SUPERUSER_PASSWORD}@${DB_HOST}:5432/openestate" "$@"
-  else
-    sudo -u postgres env DATABASE_URL="postgresql://postgres@localhost/openestate?host=/var/run/postgresql" "$@"
-  fi
+  # Run from RELEASE_DIR, not the caller's cwd (SCRIPT_DIR — this git
+  # checkout). Prisma 6.19+ auto-discovers a prisma.config.* file in cwd
+  # before running any command, via an lstat() that fails EACCES (not
+  # ENOENT) if any ancestor directory isn't traversable by the `postgres`
+  # OS user — which SCRIPT_DIR's ancestors often aren't (e.g. GitHub
+  # Actions runners: the checkout lives under /home/runner, mode 0750).
+  # Prisma treats that EACCES as "failed to load config file" and aborts
+  # the whole migrate/seed step. RELEASE_DIR is already made o+rX above
+  # for exactly this "run as the postgres OS user" reason, so cd there.
+  (
+    cd "$RELEASE_DIR" || exit 1
+    if [ -n "$DB_HOST" ]; then
+      PGPASSWORD="${PG_SUPERUSER_PASSWORD:?Set PG_SUPERUSER_PASSWORD when using --db-host}" \
+        env DATABASE_URL="postgresql://${PG_SUPERUSER:-postgres}:${PG_SUPERUSER_PASSWORD}@${DB_HOST}:5432/openestate" "$@"
+    else
+      sudo -u postgres env DATABASE_URL="postgresql://postgres@localhost/openestate?host=/var/run/postgresql" "$@"
+    fi
+  )
 }
 
 log "Running database migrations (as superuser)..."
