@@ -139,3 +139,18 @@ subtly wrong implementation that silently rejects real, valid GSTINs —
 worse than no check at all for an admin trying to onboard their real
 company. Add real checksum verification once validated against a set of
 known-correct GSTIN/check-digit pairs (not from memory).
+
+## AreaLocation/Bank/ChargeType have real optional columns the API never exposes
+
+`AreaLocation.city/state/stateCode/pincode`, `Bank.ifscPrefix`, and
+`ChargeType.hsnSac/gstRateId` all exist as real, optional Prisma columns,
+but `createMasterSchema` (the generic factory schema all three use) only
+has `name`/`description`/`isActive`/`sortOrder` — there is no way to set
+any of these via the API today, so every row created through the admin
+UI/API has them permanently null. Lower priority than the required-field
+gaps already fixed this pass (nothing 500s — creation just silently
+can't populate these fields), but `AreaLocation.stateCode` specifically
+feeds the same CGST/SGST-vs-IGST place-of-supply logic as
+`CompanyConfig.gstStateCode` (Phase 4), so it's a real gap for a company
+with projects in multiple states. Same `extraFields` mechanism
+(`master.factory.ts`) would fix all three in one pass.
