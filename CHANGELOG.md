@@ -3,14 +3,40 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.1.2]
+
+**Upgrade from v0.1.1 as soon as practical.** Two bugs in that release
+are severe enough on their own to justify this one:
+
+- **Any account with 2FA enabled was permanently locked out of login**,
+  with no way back in — not even via a recovery code. The login
+  response's 2FA-pending branch never set the CSRF cookie `totp/verify`
+  requires, so every `totp/verify` call (including recovery-code
+  attempts) 403'd with "CSRF token mismatch," unconditionally, for
+  every account. **If you're running v0.1.1 and have 2FA enabled on
+  any staff account, upgrade before enrolling further users** — those
+  accounts have been unable to log in since enabling it, and existing
+  locked-out accounts will need a staff admin to disable 2FA for them
+  (`POST /auth/totp/disable`, or directly via the database) after
+  upgrading, since the fix doesn't retroactively unlock an in-progress
+  login attempt.
+- **A genuinely fresh install failed immediately** on the exact command
+  the docs tell you to run. Every `deploy/native/*.sh` script an admin
+  runs directly was git-tracked without the executable bit; `sudo
+  ./install-native.sh` right after `git clone` died at "Permission
+  denied" trying to exec `setup-database.sh`. Anyone who successfully
+  installed v0.1.1 did so from a checkout that had picked up a local,
+  uncommitted `chmod +x` somewhere along the way (e.g. copying files
+  instead of cloning) — a literal fresh clone was never viable.
 
 ### Fixed
 
-Found by a full production-readiness pass — driving a freshly-installed
-native deployment through real HTTP calls across every module with
-realistic demo data, not by review:
-
+- The 2FA lockout above also had a second, independent bug: the
+  code-verification schema only accepted 6 digits, rejecting every
+  recovery code's `XXXXX-XXXXX` format before it reached the
+  already-correct recovery-code check. Both fixed together; verified
+  live end-to-end (enroll, login-requires-code, wrong code rejected,
+  recovery code works once and is rejected on reuse).
 - Company config had no way to set `companyGstin`/`gstStateCode` after
   the initial seed, despite the frozen booking service already reading
   `gstStateCode` to decide CGST+SGST vs IGST. Added, with GSTIN format
@@ -44,17 +70,6 @@ realistic demo data, not by review:
   codebase had ever caught Prisma's P2002 unique-constraint error for
   these dynamically-keyed services (unlike `RolesService`/`UsersService`,
   which pre-check via `findFirst`). Mapped once, in the factory.
-- `deploy/native/install-native.sh` (and every other native deploy
-  script an admin is documented to run directly — `upgrade-native.sh`,
-  `backup-native.sh`, `restore-native.sh`, `uninstall.sh`,
-  `setup-database.sh`) was git-tracked without the executable bit.
-  A genuinely fresh `git clone` followed by the documented `sudo
-  ./install-native.sh` failed immediately with "Permission denied"
-  (exit 126) trying to exec `setup-database.sh`. Never caught by hand
-  verification because that checkout had a local, uncommitted `chmod
-  +x`. Now tracked as mode `755`; the `native-install` CI job invokes
-  the script exactly as documented (no `bash` prefix) so this class of
-  regression fails CI instead of being silently bypassed.
 - `install-native.sh`/`upgrade-native.sh`'s database migration step
   failed on any host where the git checkout lives under a directory
   tree the `postgres` OS user can't traverse (e.g. GitHub Actions
@@ -63,7 +78,8 @@ realistic demo data, not by review:
   running any command, and that lookup's `lstat()` fails `EACCES` (not
   `ENOENT`) in that case, which Prisma treats as a hard failure rather
   than "no config file, proceed." `run_as_superuser()` now runs from
-  the already-world-traversable `RELEASE_DIR` instead of the checkout.
+  the already-world-traversable release directory instead of the
+  checkout.
 - `install-native.sh`'s final `systemctl reload nginx` failed outright
   ("nginx.service is not active, cannot reload") on any host where apt
   installed nginx without starting it — the script only ever checked
@@ -77,24 +93,19 @@ realistic demo data, not by review:
   `select` allowlist copy/paste gap (present in `update()`, missing
   from `create()`) left an admin with no way to confirm the phone
   number was stored.
-- Two-factor login was completely broken: the login response's
-  2FA-pending branch never set the CSRF cookie `totp/verify` requires
-  (so no 2FA-enabled account could ever finish logging in), and the
-  code-verification schema only accepted 6 digits, rejecting every
-  recovery code's `XXXXX-XXXXX` format before it reached the
-  already-correct recovery-code check. Found by live verification of
-  the enrollment/login/recovery-code flow, not review.
-- `install-native.sh`'s build crashed the deployed app with a SIGSEGV
-  crash-loop on a real ubuntu-latest CI run — traced to argon2's
-  prebuilt native module specifically (an isolated smoke test crashed
-  identically outside the app). Now forces a from-source rebuild
-  (`npm_config_build_from_source=true`), the same fallback the
-  build-toolchain prerequisite check already exists for.
 
-The latter two found by a new through-the-wire creation test for every
-master type and admin-creatable entity (users, roles, custom fields) —
-the existing suite seeded rows directly, which is exactly why these
-and the bugs above survived to a tagged release.
+Everything above except the two headline bugs was found by a full
+production-readiness pass and a new through-the-wire creation test for
+every master type and admin-creatable entity (users, roles, custom
+fields) — the existing suite seeded rows directly, which is exactly why
+these bugs survived to a tagged release. Also added: real-HTTP creation
+coverage for all 22 master types plus users/roles/custom fields, and a
+`native-install` CI job that runs the full native install on a real
+`ubuntu-latest` runner on every push. That CI job is not yet green — a
+separate, CI-runner-specific issue (the deployed app crash-looping with
+SIGSEGV, isolated to argon2's native module, confirmed not to reproduce
+on a real server) is still open and tracked in `CLAUDE.md`; it does not
+affect real installs, only that one job's own coverage.
 
 ## [0.1.1]
 
