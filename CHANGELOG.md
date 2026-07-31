@@ -64,6 +64,12 @@ realistic demo data, not by review:
   `ENOENT`) in that case, which Prisma treats as a hard failure rather
   than "no config file, proceed." `run_as_superuser()` now runs from
   the already-world-traversable `RELEASE_DIR` instead of the checkout.
+- `install-native.sh`'s final `systemctl reload nginx` failed outright
+  ("nginx.service is not active, cannot reload") on any host where apt
+  installed nginx without starting it — the script only ever checked
+  that the `nginx` binary was present, never that the service was
+  running. Now `enable`s and `reload-or-restart`s it, correct whether
+  nginx was already running or not.
 - `CustomFieldDefinition.defaultValue` — accepted by the create/update
   schema since it was written, but no backing column ever existed, so
   any real caller sending it 500'd. Added the missing column.
