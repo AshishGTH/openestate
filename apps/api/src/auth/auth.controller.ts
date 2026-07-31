@@ -72,6 +72,14 @@ export class AuthController {
     const ip = req.ip ?? req.socket.remoteAddress;
     const result = await this.authService.login(dto, ip);
 
+    // Set before either branch: totp/verify is CSRF-guarded like any other
+    // mutation (CsrfGuard applies globally to non-GET/@Public() routes),
+    // but this response is the ONLY place a 2FA-pending session ever gets
+    // a chance to receive the cookie — the previous early-return skipped
+    // it entirely, so every 2FA-enabled account's totp/verify call 403'd
+    // with "CSRF token mismatch" and could never actually complete login.
+    setCsrfCookie(res);
+
     if (result.requiresTwoFactor) {
       return {
         requiresTwoFactor: true,
@@ -80,7 +88,6 @@ export class AuthController {
     }
 
     setRefreshCookie(res, result.refreshRaw, result.expiresAt);
-    setCsrfCookie(res);
     return { accessToken: result.accessToken };
   }
 
