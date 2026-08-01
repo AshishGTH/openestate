@@ -20,7 +20,7 @@
  * postsales-harness.ts and CLAUDE.md's Phase 6 commit 4 decisions on the
  * throwaway click-through fixture this script replaces).
  */
-import * as argon2 from 'argon2';
+import * as argon2 from '@node-rs/argon2';
 import { createSystemPrismaClient, createTenantPrismaClient, runWithTenant, withTenantTx } from '@openestate/db';
 import { SYSTEM_CLOCK } from '@openestate/shared';
 import { BookingService } from '../src/postsales/booking.service';
@@ -233,7 +233,7 @@ async function main() {
   await documents.generateStatementPdf(companyId, booking.id, admin.id);
 
   const customerUser = await systemPrisma.user.create({
-    data: { companyId, applicantId: customer.id, phone: CUSTOMER_PHONE, name: customer.name, passwordHash: await argon2.hash(CUSTOMER_PASSWORD, { type: argon2.argon2id }), roleId: customerRole.id, forcePasswordChange: false },
+    data: { companyId, applicantId: customer.id, phone: CUSTOMER_PHONE, name: customer.name, passwordHash: await argon2.hash(CUSTOMER_PASSWORD, { algorithm: argon2.Algorithm.Argon2id }), roleId: customerRole.id, forcePasswordChange: false },
   });
   const ticket = await runWithTenant({ companyId }, () =>
     withTenantTx(tenantPrisma, companyId, (tx) =>
@@ -261,7 +261,7 @@ async function main() {
   await documents.generateBrokerStatementPdf(companyId, broker.id, admin.id);
 
   const brokerUser = await systemPrisma.user.create({
-    data: { companyId, brokerId: broker.id, phone: BROKER_PHONE, name: broker.name, passwordHash: await argon2.hash(BROKER_PASSWORD, { type: argon2.argon2id }), roleId: brokerRole.id, forcePasswordChange: false },
+    data: { companyId, brokerId: broker.id, phone: BROKER_PHONE, name: broker.name, passwordHash: await argon2.hash(BROKER_PASSWORD, { algorithm: argon2.Algorithm.Argon2id }), roleId: brokerRole.id, forcePasswordChange: false },
   });
 
   console.log(

@@ -4,7 +4,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import * as argon2 from 'argon2';
+import * as argon2 from '@node-rs/argon2';
 import { PrismaClient } from '@openestate/db';
 import { SYSTEM_PRISMA } from '../database/database.module';
 import { TokenService } from './token.service';
@@ -242,7 +242,7 @@ export class AuthService {
       throw new UnauthorizedException('Current password is incorrect');
     }
 
-    const hash = await argon2.hash(newPassword, { type: argon2.argon2id });
+    const hash = await argon2.hash(newPassword, { algorithm: argon2.Algorithm.Argon2id });
     await this.prisma.user.update({
       where: { id: userId },
       data: {
@@ -255,7 +255,7 @@ export class AuthService {
   }
 
   async forceChangePassword(userId: string, newPassword: string) {
-    const hash = await argon2.hash(newPassword, { type: argon2.argon2id });
+    const hash = await argon2.hash(newPassword, { algorithm: argon2.Algorithm.Argon2id });
     await this.prisma.user.update({
       where: { id: userId },
       data: {

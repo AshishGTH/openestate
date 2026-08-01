@@ -39,7 +39,7 @@ import cookieParser from 'cookie-parser';
 import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
-import * as argon2 from 'argon2';
+import * as argon2 from '@node-rs/argon2';
 import { ALL_PERMISSIONS, ROLE_PERMISSIONS, SYSTEM_ROLES } from '@openestate/shared';
 import { makeClients, seedCompany, makePortalRole, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
 
@@ -198,7 +198,7 @@ describeIf('Phase 6 commit 4: portal-read throttle bucket over real HTTP', () =>
           applicantId: applId,
           phone,
           name,
-          passwordHash: await argon2.hash(CUSTOMER_PASSWORD, { type: argon2.argon2id }),
+          passwordHash: await argon2.hash(CUSTOMER_PASSWORD, { algorithm: argon2.Algorithm.Argon2id }),
           roleId: customerRoleId,
           forcePasswordChange: false,
         },

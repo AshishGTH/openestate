@@ -9,7 +9,7 @@ import { Queue, Worker } from 'bullmq';
 import Redis from 'ioredis';
 import { JwtService } from '@nestjs/jwt';
 import type { ConfigService } from '@nestjs/config';
-import * as argon2 from 'argon2';
+import * as argon2 from '@node-rs/argon2';
 import { SYSTEM_ROLES } from '@openestate/shared';
 import { TokenService } from '../src/auth/token.service';
 import { TotpService } from '../src/auth/totp.service';

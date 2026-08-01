@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
-import * as argon2 from 'argon2';
+import * as argon2 from '@node-rs/argon2';
 import { createSystemPrismaClient } from '../src/index';
 
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -39,7 +39,7 @@ describeIf('Auth: token rotation + reuse detection', () => {
     });
     roleId = role.id;
 
-    const hash = await argon2.hash('CorrectPassword1!', { type: argon2.argon2id });
+    const hash = await argon2.hash('CorrectPassword1!', { algorithm: argon2.Algorithm.Argon2id });
     const user = await prisma.user.create({
       data: {
         companyId,
@@ -194,7 +194,7 @@ describeIf('Auth: token rotation + reuse detection', () => {
     let user = await prisma.user.findUnique({ where: { id: userId } });
     expect(user!.forcePasswordChange).toBe(true);
 
-    const newHash = await argon2.hash('NewPassword2!', { type: argon2.argon2id });
+    const newHash = await argon2.hash('NewPassword2!', { algorithm: argon2.Algorithm.Argon2id });
     await prisma.user.update({
       where: { id: userId },
       data: { passwordHash: newHash, forcePasswordChange: false },
