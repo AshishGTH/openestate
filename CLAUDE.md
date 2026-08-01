@@ -2826,3 +2826,68 @@ crash would presumably still lurk for any real customer running a
 native (non-Docker) install on infrastructure that shares whatever
 characteristic of `ubuntu-latest` triggers this, which remains
 unidentified.
+
+### CI native-install SIGSEGV — RESOLVED: replaced argon2 with @node-rs/argon2
+
+Root cause was never identified (see the two investigations above —
+eight ruled-out causes, all pointing at argon2's own native code
+without pinning down why). Rather than keep guessing blind, evaluated
+and executed a replacement instead: this dependency had by this point
+caused two separate deployment failures (the Alpine/musl prebuild issue
+from Phase 8, and this one), which on its own justified treating it as
+a fragility problem worth removing rather than working around again.
+
+Before swapping, checked the one real blocker: **do existing stored
+password hashes remain verifiable?** Both `argon2` (ranisalt, the old
+package) and `@node-rs/argon2` (RustCrypto's Argon2 via napi-rs) target
+the standard PHC string format
+(`$argon2id$v=19$m=...,t=...,p=...$salt$hash`) — confirmed
+*empirically*, not just by reading docs: hashed a password with the old
+library, verified it with the new one (correct password → true, wrong
+password → false), and the reverse direction too. No migration path
+needed, no forced password reset.
+
+API shape checked against actual usage, not the full surface: this
+codebase only ever calls two functions, `hash(password, options)` and
+`verify(hashed, password, options)`, both async, same argument order in
+both libraries. The only change needed at any of the 14 call sites
+(3 production services, 9 test files, the seed script, and a demo-seed
+script — grepped for every `from 'argon2'` in the repo, not just the
+production ones) was the options shape: `{ type: argon2.argon2id }` ->
+`{ algorithm: argon2.Algorithm.Argon2id }`. `Algorithm` is declared as a
+TS `const enum` in the `.d.ts` but backed by a real runtime object
+(`module.exports.Algorithm = nativeBinding.Algorithm` in the package's
+own `index.js`), so it isn't just an ambient compile-time-only type —
+confirmed this doesn't break under vitest's esbuild-based transform
+(which doesn't reliably inline true const enums) by running the actual
+suite, not by reasoning about it.
+
+Full local verification before pushing: typecheck, lint, and the full
+suite (54 files / 381 tests) all green. Pushed, and the `native-install`
+CI job went **green** — first genuine pass, not a false-0-second
+success: the install step took 97s (real build+install, well past the
+60s duration guard), and the health-check and login-over-HTTP steps
+both actually executed and passed (login specifically requires a full
+hash-then-verify round trip against a real seeded password, so this is
+airtight proof the fix works end to end, not just that requiring the
+module doesn't crash).
+
+Cleaned up afterward: removed the now-dead argon2-specific CI diagnostic
+steps (bare-node smoke test, the standalone-launch isolation ladder,
+the Node 22 load test — all three were built to debug a package no
+longer in the dependency tree) while keeping the generic ones
+(journalctl/nginx/postgres dump, dmesg, coredump backtrace), which
+remain useful for any future crash-loop regardless of cause. Also
+removed the `npm_config_build_from_source` workaround from
+`deploy/native/lib.sh` (nothing left to force a from-source build of)
+and corrected `install-native.sh`'s build-toolchain prerequisite
+comment, which no longer applies to argon2 but still does to `sharp`
+(the one remaining native dependency, prebuilt-binary-first like
+argon2 was, with its own from-source fallback this prerequisite still
+guards).
+
+**Lesson for future sessions**: when a dependency has caused two
+separate, unrelated deployment failures (different root causes, same
+package), that's a signal to evaluate replacing it, not just fix the
+second incident and move on — especially when a portable,
+API-compatible, hash-format-compatible alternative exists.

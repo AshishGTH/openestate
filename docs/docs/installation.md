@@ -52,36 +52,19 @@ an integration.
   codes, broker NOC → cancel → commission clawback → statement PDF) —
   none of these are install-script concerns, but they confirm the
   deployed app itself is sound on 24.04, not just the installer.
-  **Known gap**: this VM-based verification is the reason 24.04/PG16
-  support is documented as tested at all; a `native-install` CI job
-  (`.github/workflows/ci.yml`) runs the same install on a real
-  `ubuntu-latest` GitHub-hosted runner on every push as the *ongoing*
-  automated guarantee, but as of this writing that job is red — the
-  deployed API crash-loops (SIGSEGV, `status=11/SEGV` in `journalctl`)
-  specifically on that hosted-runner class, and confirmed *not*
-  reproducible on the VM. Two time-boxed passes have narrowed this
-  down significantly without finding the root cause: the crash happens
-  in argon2's native module at **load time** (`require('argon2')`
-  alone crashes, before any `.hash()` call is ever made), independent
-  of build method (prebuilt vs from-source), hashing parameters
-  (parallelism), Node.js version (20 vs 22 — the same already-built
-  native binary crashes identically under both), the process launch
-  mechanism (systemd vs run standalone), and the argon2 package's patch
-  version (0.45.0 vs 0.45.1). Eight specific causes ruled out in total,
-  each with a real exit-code/coredump comparison, not by inference —
-  full list in `CLAUDE.md`'s decisions log. What's left unexplained is
-  the runner's own CPU/kernel/virtualization environment specifically.
-  Next steps for whoever picks this up: get a *symbolicated* backtrace
-  (this investigation never had debug symbols, only raw offsets) to
-  name the actual crashing function, or file it upstream — eight
-  ruled-out local hypotheses is strong evidence this isn't an
-  application bug. Switching the job to a container-based runner is a
-  possible pragmatic workaround, not a fix, and not a small change
-  (`install-native.sh` runs real `systemctl` against a real systemd,
-  which doesn't run cleanly in a stock container). Until that job is
-  green, treat
-  ubuntu-latest specifically (as opposed to Ubuntu 24.04 in general) as
-  unverified; a real VM/server install is not known to be affected.
+  A `native-install` CI job (`.github/workflows/ci.yml`) runs the same
+  install on a real `ubuntu-latest` GitHub-hosted runner on every push
+  as the ongoing automated guarantee, and is green: the install step
+  completes, and the health-check and login-over-HTTP steps both
+  actually execute and pass. (History for the curious: this job spent a
+  while red with a runner-specific SIGSEGV crash-loop, eventually traced
+  to the `argon2` password-hashing package's native module — never
+  fully root-caused despite two thorough investigations, but real
+  enough that it had by then caused two separate deployment failures on
+  two different platforms. Fixed by replacing it with `@node-rs/argon2`
+  — same PHC-format hashes, confirmed cross-compatible with existing
+  stored passwords before the swap, no migration needed. Full trail in
+  `CLAUDE.md`'s decisions log.)
 - Architecture: x86_64 (amd64). ARM is not yet officially supported.
 - Minimum: 2 vCPU, 4 GB RAM, 40 GB disk. Recommended for a real company:
   4 vCPU, 8 GB RAM, 80 GB+ disk (grows with document/receipt volume).
