@@ -43,6 +43,28 @@ Every endpoint needs: a zod DTO, an OpenAPI decorator, a permission guard,
 an e2e happy-path test, and one authz-failure test — see "Definition of
 done" in CLAUDE.md.
 
+**Auth-related PRs specifically** (`apps/api/src/auth/`,
+`apps/api/src/portal-auth/`, `apps/web/src/lib/api.ts`,
+`apps/portal/src/lib/api.ts`, or anything touching login/2FA/refresh/
+password-reset/CSRF): staff and portal auth are mirrored
+implementations by design, not by accident, and a fix or change to one
+side has shipped broken on the other side before (see CLAUDE.md's
+"Standing rule: staff and portal auth are mirrored implementations").
+Before opening the PR, confirm:
+
+- [ ] The equivalent staff-side or portal-side code path was checked
+      for the same defect/change, not assumed to be fine.
+- [ ] If only one side needed the change, the PR description says
+      *why* the other side doesn't (an intentional asymmetry, not an
+      oversight).
+- [ ] Every session-issuing or token-rotating branch (login, 2FA
+      verify, refresh, invite/reset-consume) on the side(s) you
+      touched still sets its CSRF cookie — an early return before that
+      call is the exact shape both prior incidents took.
+- [ ] `apps/web/src/lib/api.ts` and `apps/portal/src/lib/api.ts` were
+      diffed against each other if either changed — they're expected
+      to stay near-identical.
+
 ## Local test infrastructure
 
 **Docker is not part of OpenEstate's production install path** (that's

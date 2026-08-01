@@ -2891,3 +2891,42 @@ separate, unrelated deployment failures (different root causes, same
 package), that's a signal to evaluate replacing it, not just fix the
 second incident and move on — especially when a portable,
 API-compatible, hash-format-compatible alternative exists.
+
+### Standing rule: staff and portal auth are mirrored implementations — a defect found in one MUST be audited in the other, same commit
+
+**This has now been violated twice.** The 2FA CSRF-cookie bug
+(`AuthController.login()`'s 2FA-pending branch returning before
+`setCsrfCookie(res)` ran) was fixed staff-side one session and left
+broken portal-side for an entire session afterward — every 2FA-enabled
+customer and broker was locked out of login that whole time, the exact
+same failure mode already fixed and documented for staff. It was only
+caught because a later, unrelated bug report ("CSRF token mismatch on
+staff mutations") prompted an audit of "every branch that issues a
+session or rotates tokens," which happened to include the portal
+controller too. That audit should not have needed prompting by a
+second bug report.
+
+`apps/api/src/auth/` (staff) and `apps/api/src/portal-auth/` (portal)
+implement the same auth surface twice, deliberately, not by accident —
+different token pairs, different cookie names, different guard scoping
+(see Phase 6 decisions on why the CSRF mechanism itself is "shared,
+parametrized" rather than unified further). That duplication is a
+correct design choice, but it means every fix to one side is a
+question about the other side, not an assumption that it doesn't
+apply. Mirrored pairs to check on every future auth change:
+
+- `AuthController`/`AuthService` (staff) <-> `PortalAuthController`/
+  `PortalAuthService` (portal)
+- `auth.controller.ts`'s `setCsrfCookie()`/`setRefreshCookie()` <->
+  `portal-auth.controller.ts`'s `setPortalCsrfCookie()`/
+  `setPortalRefreshCookie()`
+- Every session-issuing/token-rotating endpoint: login, 2FA verify,
+  refresh, invite/reset-confirm (portal-only, no staff equivalent —
+  check whether that asymmetry is intentional, not assumed)
+- `apps/web/src/lib/api.ts` <-> `apps/portal/src/lib/api.ts` (the two
+  client-side `api()` functions are near-identical by design; a fix to
+  one's retry/refresh/CSRF logic almost certainly belongs in both —
+  see the CSRF-mismatch-after-refresh fix, which needed both)
+
+Added a checklist item to `CONTRIBUTING.md` for auth-related PRs so
+this is enforced by the PR template, not just remembered.
