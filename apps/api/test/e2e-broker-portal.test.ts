@@ -35,6 +35,14 @@ const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
 const shouldRun = !!(APP_URL && SYSTEM_URL);
 const describeIf = shouldRun ? describe : describe.skip;
 
+// portal-auth's rate limit (5 req/5min per IP, Redis-backed) is shared
+// globally across test files unless isolated — see e2e-portal-throttle
+// .test.ts's doc comment for the original precedent. This file's own
+// real portal logins were intermittently 429'd by e2e-portal.test.ts's
+// concurrent logins sharing the same default namespace (confirmed by a
+// full-suite run, not hypothetical). Same fix, same reasoning.
+process.env.THROTTLE_TEST_KEY_PREFIX = `e2e-broker-portal-${process.pid}-${Date.now()}-`;
+
 const BROKER_PASSWORD = 'BrokerPass123';
 const STAFF_PASSWORD = 'StaffPass123';
 

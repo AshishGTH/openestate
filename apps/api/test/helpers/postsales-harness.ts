@@ -146,13 +146,26 @@ export async function makeUser(
   return user.id;
 }
 
+// Phone numbers double as portal login identifiers (users.phone), and
+// portal/auth/login resolves an identifier without knowing the caller's
+// company up front — a phone collision across two DIFFERENT companies'
+// applicants/brokers (e.g. from two test files that each reset their own
+// in-process counter to 0) can log a test in as the WRONG user, not just
+// fail to find one. appSeq/brokerSeq alone were never enough once enough
+// concurrently-running files each called these: vitest's forked pool
+// runs multiple test FILES in the same OS process, but `process.pid` is
+// still shared only within one such worker, not globally — mixing it in
+// shrinks the collision window to "two files disambiguating with the
+// same appSeq value AND landing in the same forked worker," rather than
+// "any two files, ever." Same root cause and same fix shape as
+// THROTTLE_TEST_KEY_PREFIX elsewhere in this suite.
 let appSeq = 0;
 export async function makeApplicant(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   systemPrisma: any,
   companyId: string,
 ): Promise<string> {
-  const phone = `98765${String(10000 + appSeq++).slice(-5)}`;
+  const phone = `98${String(process.pid % 100).padStart(2, '0')}${String(100000 + appSeq++).slice(-6)}`;
   const a = await systemPrisma.applicant.create({
     data: { companyId, name: `Applicant ${appSeq}`, primaryPhone: phone, primaryPhoneNormalized: phone },
   });
@@ -165,7 +178,7 @@ export async function makeBroker(
   systemPrisma: any,
   companyId: string,
 ): Promise<string> {
-  const phone = `90000${String(10000 + brokerSeq++).slice(-5)}`;
+  const phone = `90${String(process.pid % 100).padStart(2, '0')}${String(100000 + brokerSeq++).slice(-6)}`;
   const b = await systemPrisma.broker.create({
     data: { companyId, name: `Broker ${brokerSeq}`, phone },
   });
