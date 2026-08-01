@@ -76,12 +76,22 @@ export class PortalAuthController {
   async login(@Body() dto: PortalLoginDto, @Res({ passthrough: true }) res: Response) {
     const result = await this.portalAuthService.login(dto);
 
+    // Set before either branch — same defect, same fix, as the staff-side
+    // AuthController.login() (see its own comment): totp/verify is
+    // CSRF-guarded like any other mutation, but this response is the only
+    // place a 2FA-pending portal session ever gets a chance to receive the
+    // cookie. The early return here skipped it entirely, so every
+    // 2FA-enabled portal account (customer or broker) has 403'd with
+    // "CSRF token mismatch" on totp/verify and could never actually
+    // complete login — never fixed on this side when the staff bug was
+    // fixed last session.
+    setPortalCsrfCookie(res);
+
     if (result.requiresTwoFactor) {
       return { requiresTwoFactor: true, tempToken: result.tempToken };
     }
 
     setPortalRefreshCookie(res, result.refreshRaw!, result.expiresAt!);
-    setPortalCsrfCookie(res);
     return { accessToken: result.accessToken };
   }
 

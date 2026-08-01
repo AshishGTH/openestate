@@ -69,6 +69,15 @@ export async function api<T = unknown>(
     const newToken = await refreshPromise;
     if (newToken) {
       headers.set('Authorization', `Bearer ${newToken}`);
+      // /portal/auth/refresh rotates the CSRF cookie (a new random value on
+      // every call — see portal-auth.controller.ts), so the `csrf` value
+      // read above, before this refresh happened, is now stale. See
+      // apps/web/src/lib/api.ts's identical fix for the full explanation —
+      // same bug, same root cause, same fix, in both clients.
+      const refreshedCsrf = getCsrfToken();
+      if (refreshedCsrf) {
+        headers.set('X-CSRF-Token', refreshedCsrf);
+      }
       res = await fetch(url, { ...options, headers, credentials: 'include' });
     }
   }
