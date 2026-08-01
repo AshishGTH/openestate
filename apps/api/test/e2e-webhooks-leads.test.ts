@@ -17,7 +17,7 @@ import cookieParser from 'cookie-parser';
 import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
-import * as argon2 from 'argon2';
+import * as argon2 from '@node-rs/argon2';
 import { ALL_PERMISSIONS, PERMISSIONS } from '@openestate/shared';
 import { makeClients, seedCompany, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
 
@@ -76,7 +76,7 @@ async function seedStaffUser(
     data: {
       companyId: fx.companyId,
       email,
-      passwordHash: await argon2.hash(STAFF_PASSWORD, { type: argon2.argon2id }),
+      passwordHash: await argon2.hash(STAFF_PASSWORD, { algorithm: argon2.Algorithm.Argon2id }),
       name: email,
       roleId: role.id,
       forcePasswordChange: false,

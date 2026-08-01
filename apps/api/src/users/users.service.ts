@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import * as argon2 from 'argon2';
+import * as argon2 from '@node-rs/argon2';
 import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import type {
@@ -98,7 +98,7 @@ export class UsersService {
       throw new BadRequestException('Email already in use');
     }
 
-    const hash = await argon2.hash(dto.password, { type: argon2.argon2id });
+    const hash = await argon2.hash(dto.password, { algorithm: argon2.Algorithm.Argon2id });
 
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>

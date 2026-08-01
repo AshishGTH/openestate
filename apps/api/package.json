@@ -31,7 +31,7 @@
     "@openestate/shared": "workspace:*",
     "@prisma/client": "^6.1.0",
     "@types/multer": "^2.2.0",
-    "argon2": "^0.45.1",
+    "@node-rs/argon2": "^2",
     "bullmq": "^5.80.9",
     "cookie-parser": "^1.4.7",
     "exceljs": "^4.4.0",

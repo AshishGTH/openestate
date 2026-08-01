@@ -45,7 +45,7 @@ import cookieParser from 'cookie-parser';
 import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
-import * as argon2 from 'argon2';
+import * as argon2 from '@node-rs/argon2';
 import { ALL_PERMISSIONS, ROLE_PERMISSIONS, SYSTEM_ROLES } from '@openestate/shared';
 import {
   makeClients,
@@ -146,7 +146,7 @@ describeIf('Phase 6 e2e: real HTTP through the full guard pipeline', () => {
       data: {
         companyId: fx.companyId,
         email: staffEmail,
-        passwordHash: await argon2.hash(STAFF_PASSWORD, { type: argon2.argon2id }),
+        passwordHash: await argon2.hash(STAFF_PASSWORD, { algorithm: argon2.Algorithm.Argon2id }),
         name: 'E2E Staff',
         roleId: staffRole.id,
         forcePasswordChange: false,
@@ -187,7 +187,7 @@ describeIf('Phase 6 e2e: real HTTP through the full guard pipeline', () => {
           applicantId: applId,
           phone,
           name,
-          passwordHash: await argon2.hash(CUSTOMER_PASSWORD, { type: argon2.argon2id }),
+          passwordHash: await argon2.hash(CUSTOMER_PASSWORD, { algorithm: argon2.Algorithm.Argon2id }),
           roleId: customerRoleId,
           forcePasswordChange: false,
         },

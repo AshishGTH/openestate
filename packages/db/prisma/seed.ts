@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { ALL_PERMISSIONS, SYSTEM_ROLES, ROLE_PERMISSIONS, ROLE_DISPLAY_NAMES } from '@openestate/shared';
-import * as argon2 from 'argon2';
+import * as argon2 from '@node-rs/argon2';
 
 const prisma = new PrismaClient();
 
@@ -74,7 +74,7 @@ async function main() {
 
   console.log('Creating admin user...');
   const adminPassword = generateAdminPassword();
-  const adminHash = await argon2.hash(adminPassword, { type: argon2.argon2id });
+  const adminHash = await argon2.hash(adminPassword, { algorithm: argon2.Algorithm.Argon2id });
   await prisma.user.create({
     data: {
       companyId: company.id,

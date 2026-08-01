@@ -61,20 +61,6 @@ build_release() {
     # its Dockerfile only sets NODE_ENV=production in the later runtime
     # stage, never in `deps`/`build`.
     unset NODE_ENV
-    # argon2's native module ships prebuilt N-API binaries (node-gyp-build)
-    # for common platform/libc combos, which is normally fine — N-API is
-    # ABI-stable across Node versions specifically to avoid needing this.
-    # But a real ubuntu-latest CI run segfaulted (SIGSEGV) on every use of
-    # the linux-x64/glibc prebuild, confirmed by an isolated smoke test
-    # crashing the same way outside the app entirely — some prebuild/host
-    # mismatch (CPU feature detection under a virtualized/hosted runner is
-    # a known troublespot for native crypto libraries) rather than an app
-    # bug. This is exactly the scenario the build-essential/python3
-    # prerequisite check above already exists for ("falls back to
-    # compiling from source") — forcing it here makes that the guaranteed
-    # path instead of a heuristic node-gyp-build only takes when it can't
-    # find a matching prebuild, which silently wasn't the problem here.
-    export npm_config_build_from_source=true
     log "Installing workspace dependencies..."
     pnpm install --frozen-lockfile
 

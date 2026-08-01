@@ -8,7 +8,7 @@ import {
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { randomUUID, createHash } from 'node:crypto';
-import * as argon2 from 'argon2';
+import * as argon2 from '@node-rs/argon2';
 import { PrismaClient } from '@openestate/db';
 import { SYSTEM_PRISMA } from '../database/database.module';
 import { TokenService } from '../auth/token.service';
@@ -196,7 +196,7 @@ export class PortalAuthService {
     const valid = await argon2.verify(user.passwordHash, currentPassword);
     if (!valid) throw new UnauthorizedException('Current password is incorrect');
 
-    const hash = await argon2.hash(newPassword, { type: argon2.argon2id });
+    const hash = await argon2.hash(newPassword, { algorithm: argon2.Algorithm.Argon2id });
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } });
     await this.tokenService.revokeAllForUser(userId);
   }
@@ -309,7 +309,7 @@ export class PortalAuthService {
       phone = broker.phone;
     }
 
-    const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+    const passwordHash = await argon2.hash(password, { algorithm: argon2.Algorithm.Argon2id });
 
     const existingUser = await this.prisma.user.findFirst({
       where: invite.applicantId ? { applicantId: invite.applicantId } : { brokerId: invite.brokerId },
@@ -376,7 +376,7 @@ export class PortalAuthService {
     `;
     if (claimed.length === 0) throw new UnauthorizedException('Invalid or expired reset token');
 
-    const passwordHash = await argon2.hash(dto.newPassword, { type: argon2.argon2id });
+    const passwordHash = await argon2.hash(dto.newPassword, { algorithm: argon2.Algorithm.Argon2id });
     await this.prisma.user.update({
       where: { id: reset.userId },
       data: { passwordHash, failedLoginAttempts: 0, lockedUntil: null },

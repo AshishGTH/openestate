@@ -70,16 +70,18 @@ command -v nginx >/dev/null 2>&1 || die "nginx not found. Install it:
   sudo apt-get install -y nginx"
 command -v openssl >/dev/null 2>&1 || die "openssl not found (needed to generate secrets). Install it: sudo apt-get install -y openssl"
 command -v git >/dev/null 2>&1 || die "git not found. Install it: sudo apt-get install -y git"
-# argon2 (password hashing) has no prebuilt binary for every platform/Node
-# combination and falls back to compiling from source via node-gyp during
-# `pnpm install` — the same reason deploy/docker/api.Dockerfile's build
-# stage installs these before its own `pnpm install`. Checked (and failed
-# loudly) here rather than silently apt-installed: unlike Postgres/Redis/
-# nginx this has no ongoing state to manage, but it's still a package
-# install decision left to the admin, consistent with every other
-# prerequisite in this script.
+# Password hashing (@node-rs/argon2) ships prebuilt binaries for every
+# platform this script targets and never needs this — but sharp (image
+# processing, used for document/photo handling) can still fall back to
+# compiling libvips from source via node-gyp if no matching prebuild is
+# found for a given platform/libc combination, the same reason deploy/
+# docker/api.Dockerfile's build stage installs these before its own
+# `pnpm install`. Checked (and failed loudly) here rather than silently
+# apt-installed: unlike Postgres/Redis/nginx this has no ongoing state to
+# manage, but it's still a package install decision left to the admin,
+# consistent with every other prerequisite in this script.
 if ! command -v make >/dev/null 2>&1 || ! command -v g++ >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
-  die "Build toolchain not found (make/g++/python3 — needed to compile the argon2 native module during install). Install it:
+  die "Build toolchain not found (make/g++/python3 — needed if any native dependency falls back to compiling from source during install). Install it:
   sudo apt-get install -y build-essential python3"
 fi
 
