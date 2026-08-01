@@ -58,21 +58,28 @@ an integration.
   `ubuntu-latest` GitHub-hosted runner on every push as the *ongoing*
   automated guarantee, but as of this writing that job is red — the
   deployed API crash-loops (SIGSEGV, `status=11/SEGV` in `journalctl`)
-  specifically on that hosted-runner class, isolated to argon2's native
-  module (`require('argon2').hash()` crashes identically outside the
-  app entirely) and confirmed *not* reproducible on the VM. Four
-  specific causes were tested and ruled out, each with a real coredump/
-  exit-code comparison, not by inference: a bad prebuilt binary
-  (forcing a from-source rebuild crashes identically), a threading bug
-  in argon2's default 4-way parallelism (`parallelism:1` crashes
-  identically), Node.js itself (a completely bare `node -e` runs
-  clean), and a version-specific regression (0.45.0 → 0.45.1 crashes
-  identically). The actual cause is still unknown — a coredump
-  backtrace pointed at a generic Node/libuv semaphore-wait frame, which
-  didn't point at argon2's own code and didn't survive being ruled out
-  above either. Next step for whoever picks this up: try a different
-  Node major version (22 LTS) for the native-install path, or file this
-  exact backtrace upstream. Until that job is green, treat
+  specifically on that hosted-runner class, and confirmed *not*
+  reproducible on the VM. Two time-boxed passes have narrowed this
+  down significantly without finding the root cause: the crash happens
+  in argon2's native module at **load time** (`require('argon2')`
+  alone crashes, before any `.hash()` call is ever made), independent
+  of build method (prebuilt vs from-source), hashing parameters
+  (parallelism), Node.js version (20 vs 22 — the same already-built
+  native binary crashes identically under both), the process launch
+  mechanism (systemd vs run standalone), and the argon2 package's patch
+  version (0.45.0 vs 0.45.1). Eight specific causes ruled out in total,
+  each with a real exit-code/coredump comparison, not by inference —
+  full list in `CLAUDE.md`'s decisions log. What's left unexplained is
+  the runner's own CPU/kernel/virtualization environment specifically.
+  Next steps for whoever picks this up: get a *symbolicated* backtrace
+  (this investigation never had debug symbols, only raw offsets) to
+  name the actual crashing function, or file it upstream — eight
+  ruled-out local hypotheses is strong evidence this isn't an
+  application bug. Switching the job to a container-based runner is a
+  possible pragmatic workaround, not a fix, and not a small change
+  (`install-native.sh` runs real `systemctl` against a real systemd,
+  which doesn't run cleanly in a stock container). Until that job is
+  green, treat
   ubuntu-latest specifically (as opposed to Ubuntu 24.04 in general) as
   unverified; a real VM/server install is not known to be affected.
 - Architecture: x86_64 (amd64). ARM is not yet officially supported.

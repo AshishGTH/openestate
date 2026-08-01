@@ -2749,3 +2749,80 @@ resolve to actual function names instead of raw offsets) before trying
 anything else blind. `docs/docs/installation.md`'s requirements section
 documents this honestly as an open gap rather than claiming
 ubuntu-latest is verified.
+
+### CI native-install SIGSEGV — second time-boxed pass, four more angles ruled out; crash pinned to argon2's native module load itself
+
+A second, explicitly time-boxed investigation, deliberately not
+re-testing any of the four hypotheses above. Starting point: the
+coredump backtrace lands in Node's own inspector-thread startup
+(`uv__sem_wait`), not argon2 code — raising the question of whether the
+crash is about argon2 at all, or about *how the process launches* on
+this runner.
+
+1. **Does the API crash standalone (outside systemd)?** Yes —
+   identically (SIGSEGV, exit 139), run as the exact same user/cwd/env
+   as the systemd unit but without any of systemd's own wrapping
+   (`ProtectSystem=strict`, `NoNewPrivileges=true`, resource limits,
+   `EnvironmentFile=` handling). This rules systemd's unit file out
+   entirely as the cause — not a hypothesis, a direct comparison. (A
+   first attempt at this test was confounded: `sudo -u openestate ...
+   source /etc/openestate/openestate.env` silently failed with
+   "Permission denied" — the file is `640 root:openestate`, readable by
+   systemd's own root-run `EnvironmentFile=` handling before it drops
+   privileges, but not by the `openestate` user reading it directly —
+   and the test proceeded with an empty environment, crashing for a
+   different, uninteresting reason. Fixed by reading the file as root
+   and passing the vars explicitly via `env` to the openestate-run
+   process, at which point it reproduced the crash for real.)
+2. **Bisecting the unit file** (was next per the investigation's
+   planned order) — skipped as moot once (1) showed the crash isn't
+   systemd-related at all.
+3. **Isolation ladder, same exact context as (1):** bare `node -e` runs
+   clean; `require('argon2')` **alone, with no `.hash()` call**,
+   crashes (exit 139); the full `dist/main.js` also crashes. This is
+   the most precise isolation of the whole investigation — the crash
+   happens at **native-module load time** (dlopen-equivalent, before
+   any actual Argon2 computation), which is consistent with something
+   in a static initializer or load-time CPU-feature-detection routine
+   in libargon2's compiled code, not with anything about hashing
+   parameters (already independently supported by the earlier
+   `parallelism:1` result).
+4. **Node 22 instead of 20** — argon2 is built `--napi` (N-API,
+   explicitly ABI-stable across Node versions/rebuilds by design), so
+   the *already-built* `argon2.node` from the Node 20 install was
+   loaded directly under a separately-downloaded Node 22 binary with no
+   rebuild. Crashed identically (exit 139). Rules out the Node.js
+   runtime/V8 version as a variable — the same compiled native binary
+   fails under two different Node majors.
+
+**Net result of both passes (eight ruled-out angles, zero fixes
+found):** the crash is in argon2's own compiled native code, at module
+load time, independent of build method (prebuilt vs from-source),
+hashing parameters (parallelism), Node.js version (20 vs 22), and the
+process launch mechanism (systemd vs standalone). What's left
+unexplained is the runner's own CPU/kernel/virtualization environment
+specifically — GitHub's `ubuntu-latest` hosted runners are the only
+place this has ever reproduced; it does not reproduce on the real VM
+this project is otherwise verified against. **Time-boxed as instructed
+— stopping here rather than continuing to iterate blind.**
+
+Recommended next steps for whoever picks this up, in rough order of
+effort: get a *symbolicated* backtrace (install `libc6-dbg`, build
+argon2 with debug symbols) to name the actual crashing function instead
+of a raw offset, since that's the one diagnostic this investigation
+never obtained; or file the exact backtrace + this ruled-out list
+upstream (ranisalt/node-argon2, or GitHub's own runner-image issue
+tracker) since eight ruled-out local hypotheses is strong evidence this
+isn't an application-side bug. A **pragmatic workaround** — switching
+the `native-install` job to run inside a container-based runner instead
+of directly on the VM-based `ubuntu-latest` image — was suggested and
+is worth trying, but note it is not a small change: `install-native.sh`
+runs real `systemctl` commands against a real systemd, which doesn't
+run cleanly inside a stock Docker container without a systemd-capable
+base image and elevated container privileges (cgroup access) — this
+would need its own careful setup and testing, not a one-line runner
+label swap. **This sidesteps the bug, it does not fix it** — the same
+crash would presumably still lurk for any real customer running a
+native (non-Docker) install on infrastructure that shares whatever
+characteristic of `ubuntu-latest` triggers this, which remains
+unidentified.
