@@ -69,6 +69,20 @@ export async function api<T = unknown>(
     const newToken = await refreshPromise;
     if (newToken) {
       headers.set('Authorization', `Bearer ${newToken}`);
+      // /auth/refresh rotates the CSRF cookie (a new random value on every
+      // call — see auth.controller.ts), so the `csrf` value read above,
+      // before this refresh happened, is now stale. Re-reading here is not
+      // optional: retrying with the old header value sends a real,
+      // well-formed token that simply no longer matches the now-rotated
+      // cookie, which CsrfGuard correctly rejects as "CSRF token mismatch"
+      // — not "missing", a genuine mismatch. This is the bug that made
+      // every mutation right after an access-token expiry (~15 min into a
+      // session, whenever JWT_ACCESS_EXPIRES_IN elapses) fail with a CSRF
+      // error on the VM.
+      const refreshedCsrf = getCsrfToken();
+      if (refreshedCsrf) {
+        headers.set('X-CSRF-Token', refreshedCsrf);
+      }
       res = await fetch(url, { ...options, headers, credentials: 'include' });
     }
   }
