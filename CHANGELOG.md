@@ -3,6 +3,23 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Replaced the `argon2` password-hashing dependency with
+  `@node-rs/argon2` (pure Rust via napi-rs). `argon2` had caused two
+  separate deployment failures on two different platforms (an
+  Alpine/musl prebuild issue, and a still-unexplained SIGSEGV
+  crash-loop on GitHub's `ubuntu-latest` CI runners — see `CLAUDE.md`
+  for the full, ultimately-inconclusive investigation); the replacement
+  ships prebuilt binaries for every platform this project targets and
+  never falls back to compiling from source. Existing stored password
+  hashes remain verifiable — both libraries use the same standard PHC
+  string format, confirmed by directly cross-verifying a real hash
+  between the two before switching. No action needed on upgrade, no
+  password resets.
+
 ## [0.1.2]
 
 **Upgrade from v0.1.1 as soon as practical.** Two bugs in that release

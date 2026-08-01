@@ -409,118 +409,13 @@ jobs:
           sudo dmesg -T 2>/dev/null | grep -iE 'segfault|general protection' || echo "(none / dmesg unavailable)"
           echo "::endgroup::"
           # Names the exact crashing binary/library + offset — the single
-          # most useful signal for a native-addon (argon2) SIGSEGV, which
-          # is otherwise invisible: systemd's own log only shows
-          # "Main process exited, code=dumped, status=11/SEGV", never why.
+          # most useful signal for a native-module SIGSEGV, which is
+          # otherwise invisible: systemd's own log only shows "Main
+          # process exited, code=dumped, status=11/SEGV", never why.
           echo "::error::dmesg segfault entries (names the exact crashing binary/library):"
           (sudo dmesg -T 2>/dev/null | grep -iE 'segfault|general protection' || echo "(none found)") | tail -n 8 | while IFS= read -r line; do
             echo "::error::${line}"
           done
-
-      - name: Bare node smoke test on failure
-        if: failure()
-        run: |
-          # The coredump backtrace from a prior run pointed at Node's own
-          # inspector I/O thread startup (uv__sem_wait / StartIoThreadMain)
-          # — a thread every node process spins up unconditionally at
-          # startup to listen for SIGUSR1, nothing argon2-specific. That
-          # means the earlier "isolated" argon2 smoke test may never have
-          # isolated anything: if a completely bare `node -e` also
-          # segfaults here, this is a NodeSource-built Node 20 issue on
-          # this runner, not an app dependency issue at all — worth
-          # knowing before chasing argon2 further.
-          BARE_OUT="$( /usr/bin/node -e "console.log('bare node OK')" 2>&1; echo "exit=$?" )"
-          echo "::group::bare node smoke test (no argon2, no app code)"
-          echo "$BARE_OUT"
-          echo "::endgroup::"
-          echo "::error::bare node smoke test result:"
-          echo "$BARE_OUT" | while IFS= read -r line; do
-            echo "::error::${line}"
-          done
-
-      - name: Standalone (non-systemd) API launch test on failure
-        if: failure()
-        run: |
-          # Four hypotheses already ruled out this investigation, each with
-          # a real comparison: bad prebuilt binary, argon2's threading
-          # (parallelism:1 crashed identically to the default), Node.js
-          # itself (a bare `node -e` runs clean), and a version-specific
-          # regression (0.45.0 -> 0.45.1 crashed identically). Not
-          # re-tested here.
-          #
-          # New angle: the coredump backtrace lands in Node's inspector
-          # I/O thread startup (uv__sem_wait), not argon2 code — which
-          # could mean the crash isn't about argon2 at all, but about how
-          # the process is *launched* under systemd on this runner
-          # (ProtectSystem=strict/NoNewPrivileges=true sandboxing,
-          # resource limits, or an environment variable leaking in via
-          # EnvironmentFile — NODE_OPTIONS or an inspector flag would fit
-          # this exact backtrace). This step runs the real API binary the
-          # exact same way (user, cwd, env vars from the same file)
-          # WITHOUT systemd's unit-file wrapping, to isolate that variable
-          # directly: if it runs clean here but SIGSEGVs under systemd,
-          # the unit file is the next thing to bisect, not the app or its
-          # dependencies.
-          # sudo strips the runner shell's own environment by default (no
-          # -E), so this doesn't inherit whatever the Actions runner itself
-          # may have set — printed anyway so a leak is visible, not assumed
-          # absent.
-          echo "runner shell NODE_OPTIONS=${NODE_OPTIONS:-<unset>}"
-          # /etc/openestate/openestate.env is mode 640 root:openestate —
-          # readable by systemd itself (which runs EnvironmentFile= as
-          # root, PID 1, before dropping to User=openestate) but NOT by
-          # the openestate user directly. Read as root, hand vars to the
-          # openestate-run process explicitly via `env`.
-          ENV_VARS="$(sudo grep -v '^\s*#' /etc/openestate/openestate.env | grep -v '^\s*$')"
-
-          # A prior run of this step (identical user/cwd/env) confirmed
-          # `node dist/main.js` crashes standalone too — ruling systemd's
-          # unit file (sandboxing, resource limits, EnvironmentFile
-          # handling) out entirely as the cause. This run instead ladders
-          # from trivial to full-app, all in this exact same context, to
-          # find where the crash actually starts:
-          BARE_OUT="$(cd /opt/openestate/current/api && sudo -u openestate env $ENV_VARS timeout 8 /usr/bin/node -e "console.log('bare-in-context OK')" 2>&1; echo "exit=$?")"
-          REQUIRE_OUT="$(cd /opt/openestate/current/api && sudo -u openestate env $ENV_VARS timeout 8 /usr/bin/node -e "require('argon2'); console.log('require-only OK')" 2>&1; echo "exit=$?")"
-          HASH_OUT="$(cd /opt/openestate/current/api && sudo -u openestate env $ENV_VARS timeout 8 /usr/bin/node -e "require('argon2').hash('t').then(()=>console.log('hash OK')).catch(e=>{console.error('hash FAILED',e);process.exit(1)})" 2>&1; echo "exit=$?")"
-          MAIN_OUT="$(cd /opt/openestate/current/api && sudo -u openestate env $ENV_VARS timeout 8 /usr/bin/node dist/main.js 2>&1; echo "exit=$?")"
-
-          echo "::group::isolation ladder (all: same user/cwd/env as the systemd unit)"
-          echo "-- 1. bare node, no argon2, no app code --"; echo "$BARE_OUT"
-          echo "-- 2. require('argon2') only, no hash call --"; echo "$REQUIRE_OUT"
-          echo "-- 3. require('argon2').hash() --"; echo "$HASH_OUT"
-          echo "-- 4. node dist/main.js (full app) --"; echo "$MAIN_OUT"
-          echo "::endgroup::"
-
-          for pair in "1-bare:$BARE_OUT" "2-require-only:$REQUIRE_OUT" "3-hash:$HASH_OUT" "4-full-app:$MAIN_OUT"; do
-            label="${pair%%:*}"
-            out="${pair#*:}"
-            echo "::error::ladder ${label}: $(echo "$out" | tail -n 1)"
-          done
-
-      - name: Node 22 argon2 load test on failure
-        if: failure()
-        run: |
-          # Ladder above (this same run) pinned the crash to module LOAD
-          # time — `require('argon2')` alone crashes, before any hash()
-          # call, ruling out threading/computation entirely (already known
-          # from the parallelism:1 test, now doubly confirmed). A load-time
-          # crash independent of algorithm parameters fits a native-code
-          # issue (e.g. CPU-feature-detection in a static initializer)
-          # more than anything Node-version-specific — but cheap to check:
-          # argon2 is built --napi (N-API, explicitly ABI-stable across
-          # Node versions and rebuilds), so the SAME already-built
-          # argon2.node can be loaded under a different Node binary
-          # without rebuilding anything, isolating the Node runtime itself
-          # as a variable.
-          curl -fsSL https://nodejs.org/dist/v22.11.0/node-v22.11.0-linux-x64.tar.xz -o /tmp/node22.tar.xz
-          sudo mkdir -p /opt/node22
-          sudo tar -xJf /tmp/node22.tar.xz -C /opt/node22 --strip-components=1
-          ENV_VARS="$(sudo grep -v '^\s*#' /etc/openestate/openestate.env | grep -v '^\s*$')"
-          NODE22_OUT="$(cd /opt/openestate/current/api && sudo -u openestate env $ENV_VARS timeout 8 /opt/node22/bin/node -e "require('argon2'); console.log('node22 require-only OK')" 2>&1; echo "exit=$?")"
-          echo "::group::require('argon2') under Node 22 instead of 20, same already-built module"
-          echo "$NODE22_OUT"
-          echo "::endgroup::"
-          echo "::error::Node 22 argon2 load test: $(echo "$NODE22_OUT" | tail -n 1)"
 
       - name: Coredump backtrace on failure
         if: failure()
