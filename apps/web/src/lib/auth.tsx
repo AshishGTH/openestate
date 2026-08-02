@@ -24,7 +24,7 @@ interface AuthContextValue extends AuthState {
     | { ok: false; requiresTwoFactor: true; tempToken: string }
     | { ok: false; error: string }
   >;
-  verifyTotp: (code: string) => Promise<{ ok: true } | { ok: false; error: string }>;
+  verifyTotp: (tempToken: string, code: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   logout: () => Promise<void>;
   hasPermission: (perm: string) => boolean;
 }
@@ -80,8 +80,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  const verifyTotp = useCallback(async (code: string) => {
+  const verifyTotp = useCallback(async (tempToken: string, code: string) => {
     try {
+      // The 2FA-pending login response never calls setAccessToken (there's
+      // no real session yet) — this call needs the short-lived tempToken
+      // as its own Bearer, not whatever (usually nothing) accessToken
+      // currently holds. Mirrors apps/portal/src/lib/auth.tsx's same fix.
+      setAccessToken(tempToken);
       const res = await api<{ accessToken: string }>('/auth/totp/verify', {
         method: 'POST',
         body: JSON.stringify({ code }),
