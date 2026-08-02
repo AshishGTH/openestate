@@ -5,6 +5,7 @@ import { PERMISSIONS } from '@openestate/shared';
 
 const NAV_ITEMS = [
   { label: 'Dashboard', to: '/', icon: 'H' },
+  { label: 'Settings', to: '/settings', icon: 'S' },
   {
     label: 'Post-sales',
     icon: 'P',

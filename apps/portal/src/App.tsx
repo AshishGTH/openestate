@@ -9,6 +9,7 @@ import InviteConsume from './pages/InviteConsume';
 import Profile from './pages/Profile';
 import Property from './pages/Property';
 import Account from './pages/Account';
+import Security from './pages/Security';
 import Tickets from './pages/Tickets';
 import TicketDetail from './pages/TicketDetail';
 import BrokerDashboard from './pages/BrokerDashboard';
@@ -38,6 +39,7 @@ export default function App() {
             <Route path="profile" element={<Profile />} />
             <Route path="property" element={<Property />} />
             <Route path="account" element={<Account />} />
+            <Route path="security" element={<Security />} />
             <Route path="tickets" element={<Tickets />} />
             <Route path="tickets/:id" element={<TicketDetail />} />
             <Route path="broker/dashboard" element={<BrokerDashboard />} />

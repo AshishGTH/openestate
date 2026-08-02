@@ -7,12 +7,14 @@ const CUSTOMER_TABS = [
   { to: '/property', label: 'Property', icon: '🏢' },
   { to: '/account', label: 'Account', icon: '💳' },
   { to: '/tickets', label: 'Support', icon: '💬' },
+  { to: '/security', label: 'Security', icon: '🔒' },
 ];
 
 const BROKER_TABS = [
   { to: '/broker/dashboard', label: 'Dashboard', icon: '📊' },
   { to: '/broker/nocs', label: 'NOCs', icon: '✅' },
   { to: '/broker/statement', label: 'Statement', icon: '📄' },
+  { to: '/security', label: 'Security', icon: '🔒' },
 ];
 
 /**
@@ -61,7 +63,7 @@ export default function AppShell() {
       </main>
 
       <nav className="fixed bottom-0 inset-x-0 z-10 bg-white border-t border-slate-200">
-        <div className="max-w-lg mx-auto grid grid-cols-4">
+        <div className="max-w-lg mx-auto grid grid-cols-5">
           {tabs.map((tab) => (
             <NavLink
               key={tab.to}
