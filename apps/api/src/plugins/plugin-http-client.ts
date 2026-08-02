@@ -75,7 +75,7 @@ export function createScopedHttpClient(pluginId: string, realSecrets: ReadonlyMa
     signal: AbortSignal,
   ): Promise<{ status: number; headers: Record<string, string>; body: Buffer; location: string | undefined }> {
     if (target.protocol !== 'http:' && target.protocol !== 'https:') {
-      throw new Error(`ctx.http: unsupported scheme "${target.protocol}" — only http/https are allowed`);
+      throw new Error(`ctx.http[${pluginId}]: unsupported scheme "${target.protocol}" — only http/https are allowed`);
     }
 
     const { address, family } = await dnsLookup(target.hostname);
@@ -108,7 +108,7 @@ export function createScopedHttpClient(pluginId: string, realSecrets: ReadonlyMa
           res.on('data', (chunk: Buffer) => {
             total += chunk.length;
             if (total > MAX_RESPONSE_BYTES) {
-              req.destroy(new Error('ctx.http: response exceeded 1MB cap'));
+              req.destroy(new Error(`ctx.http[${pluginId}]: response exceeded 1MB cap`));
               return;
             }
             chunks.push(chunk);
@@ -135,7 +135,7 @@ export function createScopedHttpClient(pluginId: string, realSecrets: ReadonlyMa
       req.on('socket', (socket: Socket) => {
         socket.once('lookup', (err, resolvedAddress) => {
           if (!err && resolvedAddress && resolvedAddress !== address) {
-            req.destroy(new Error('ctx.http: resolved address changed unexpectedly between validation and connect'));
+            req.destroy(new Error(`ctx.http[${pluginId}]: resolved address changed unexpectedly between validation and connect`));
           }
         });
       });
@@ -154,7 +154,7 @@ export function createScopedHttpClient(pluginId: string, realSecrets: ReadonlyMa
       }
 
       const controller = new AbortController();
-      const deadline = setTimeout(() => controller.abort(new Error(`ctx.http: total deadline of ${TOTAL_DEADLINE_MS}ms exceeded`)), TOTAL_DEADLINE_MS);
+      const deadline = setTimeout(() => controller.abort(new Error(`ctx.http[${pluginId}]: total deadline of ${TOTAL_DEADLINE_MS}ms exceeded`)), TOTAL_DEADLINE_MS);
 
       try {
         let target = new URL(options.url);

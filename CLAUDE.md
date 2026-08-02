@@ -3121,3 +3121,37 @@ access token. All test fixtures and the manually-copied script were
 removed afterward — the real deployment path for this file is a future
 `git pull`/`upgrade-native.sh` once these commits reach wherever that
 VM's remote points, not a one-off `scp`.
+
+### Lint rules added because an unused prop was a real bug's static signal
+
+The `TotpVerify.tsx` `tempToken` prop (see the standing-rule entry
+above) was declared in `Props` and never destructured — a static,
+mechanically-detectable signal that the wiring was incomplete, sitting
+in the diff the whole time. `@typescript-eslint/no-unused-vars` could
+never have caught it: that rule only flags an unused *local binding*,
+and a prop that's never even destructured has no binding to flag. Added
+`eslint-plugin-react`'s `no-unused-prop-types`, scoped to
+`apps/web/**/*.tsx` and `apps/portal/**/*.tsx` (root `eslint.config.mjs`),
+which checks the prop *type* against what the component body actually
+reads — confirmed it flags the exact original pattern via a throwaway
+scratch-file test before wiring it in for real. Also tightened
+`@typescript-eslint/no-unused-vars`'s `args` option from the default
+`'after-used'` to `'all'`, repo-wide, so an unused parameter is flagged
+regardless of position, not just trailing ones.
+
+Running both against the full repo surfaced exactly one other instance,
+in `apps/api/src/plugins/plugin-http-client.ts`: `createScopedHttpClient`
+took a `pluginId` parameter and never used it in any of the four errors
+it throws in its own scope, unlike the sibling capability closures in
+`plugin-runtime.service.ts` (`PluginCapabilityError(pluginId, ...)`),
+which do attribute errors to the triggering plugin. Fixed by threading
+`pluginId` into all four (`ctx.http[${pluginId}]: ...`) — a real,
+if minor, "declared with intent, never wired in" gap, same shape as the
+lockout bug, just far lower stakes. Left `resolveSecretHeaders` and
+`assertPublicAddress` alone; those are deliberately pure/standalone
+helpers (per their own doc comments) with no `pluginId` in scope, and
+adding one would be an unrequested signature change to code kept pure
+specifically so it stays directly unit-testable.
+
+Both frontends lint clean with the new rules; verified via `pnpm -r lint`
+across the whole monorepo, not just the two apps that prompted this.
