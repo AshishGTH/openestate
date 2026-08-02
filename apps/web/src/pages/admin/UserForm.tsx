@@ -63,6 +63,9 @@ export default function UserForm() {
     [['users'], ['user', id!]],
   );
 
+  const forceResetMutation = useApiMutation<unknown, void>('POST', `/users/${id}/force-password-reset`);
+  const [resetSent, setResetSent] = useState(false);
+
   const onSubmit = async (data: CreateUserDto) => {
     setError('');
     try {
@@ -170,6 +173,30 @@ export default function UserForm() {
           </button>
         </div>
       </form>
+
+      {isEdit && (
+        <div className="mt-8 rounded-md border border-slate-200 p-4">
+          <h2 className="text-sm font-medium text-slate-900">Password</h2>
+          <p className="mt-1 text-xs text-slate-500">
+            Sends this user a reset link. Their current password stays valid until they use it —
+            you never see or set their password directly.
+          </p>
+          {resetSent && (
+            <p className="mt-2 text-xs text-green-700">Reset link sent.</p>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setResetSent(false);
+              forceResetMutation.mutate(undefined, { onSuccess: () => setResetSent(true) });
+            }}
+            disabled={forceResetMutation.isPending}
+            className="mt-3 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+          >
+            {forceResetMutation.isPending ? 'Sending…' : 'Force password reset'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

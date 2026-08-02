@@ -2,7 +2,9 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import ProtectedRoute from './components/ProtectedRoute';
 import AppShell from './components/AppShell';
 import Login from './pages/Login';
+import ResetPassword from './pages/ResetPassword';
 import Dashboard from './pages/Dashboard';
+import Settings from './pages/Settings';
 import UsersPage from './pages/admin/Users';
 import UserForm from './pages/admin/UserForm';
 import RolesPage from './pages/admin/Roles';
@@ -30,10 +32,12 @@ export default function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
             <Route index element={<Dashboard />} />
+            <Route path="settings" element={<Settings />} />
             <Route path="admin/users" element={<UsersPage />} />
             <Route path="admin/users/:id" element={<UserForm />} />
             <Route path="admin/roles" element={<RolesPage />} />
