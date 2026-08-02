@@ -5,11 +5,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as argon2 from '@node-rs/argon2';
+import { createHash } from 'node:crypto';
 import { PrismaClient } from '@openestate/db';
 import { SYSTEM_PRISMA } from '../database/database.module';
 import { TokenService } from './token.service';
 import { TotpService } from './totp.service';
-import type { LoginDto } from '@openestate/shared';
+import type { LoginDto, PasswordResetConfirmDto } from '@openestate/shared';
 
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
@@ -131,6 +132,14 @@ export class AuthService {
     throw new UnauthorizedException('Invalid TOTP code');
   }
 
+  async getMe(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { id: true, email: true, name: true, totpEnabled: true },
+    });
+    return user;
+  }
+
   async setupTotp(userId: string) {
     const { secret, otpauthUrl } = this.totpService.generateSecret();
     const encrypted = this.totpService.encrypt(secret);
@@ -232,6 +241,7 @@ export class AuthService {
     userId: string,
     currentPassword: string,
     newPassword: string,
+    currentRefreshToken?: string,
   ) {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
@@ -251,7 +261,42 @@ export class AuthService {
       },
     });
 
-    await this.tokenService.revokeAllForUser(userId);
+    // Leaves the session that made this request alone — only OTHER
+    // sessions are revoked (see TokenService.revokeAllForUserExceptToken).
+    if (currentRefreshToken) {
+      await this.tokenService.revokeAllForUserExceptToken(userId, currentRefreshToken);
+    } else {
+      await this.tokenService.revokeAllForUser(userId);
+    }
+  }
+
+  /**
+   * Confirms an admin-triggered reset link (see UsersService.forcePasswordReset
+   * — staff-target branch only; portal targets reuse PortalAuthService's own
+   * confirmPasswordReset against PortalPasswordReset instead). Public route,
+   * no auth — the token itself is the credential.
+   */
+  async confirmPasswordReset(dto: PasswordResetConfirmDto): Promise<void> {
+    const tokenHash = createHash('sha256').update(dto.token).digest('hex');
+    const reset = await this.prisma.passwordReset.findFirst({ where: { tokenHash } });
+
+    if (!reset || reset.consumedAt || reset.expiresAt < new Date()) {
+      throw new UnauthorizedException('Invalid or expired reset token');
+    }
+
+    const claimed = await this.prisma.$queryRaw<Array<{ id: string }>>`
+      UPDATE password_resets SET consumed_at = now()
+      WHERE id = ${reset.id}::uuid AND consumed_at IS NULL
+      RETURNING id
+    `;
+    if (claimed.length === 0) throw new UnauthorizedException('Invalid or expired reset token');
+
+    const passwordHash = await argon2.hash(dto.newPassword, { algorithm: argon2.Algorithm.Argon2id });
+    await this.prisma.user.update({
+      where: { id: reset.userId },
+      data: { passwordHash, forcePasswordChange: false, failedLoginAttempts: 0, lockedUntil: null },
+    });
+    await this.tokenService.revokeAllForUser(reset.userId);
   }
 
   async forceChangePassword(userId: string, newPassword: string) {

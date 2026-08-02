@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Param,
@@ -27,6 +28,7 @@ import { PortalAuthService } from './portal-auth.service';
 import { Public } from '../auth/guards/jwt-auth.guard';
 import { PORTAL_CSRF_COOKIE } from '../auth/csrf-cookie-names';
 import { PortalAuthThrottlerGuard } from './portal-throttler.guard';
+import { PasswordChangeThrottlerGuard } from '../auth/guards/password-change-throttler.guard';
 
 class PortalLoginDto extends createZodDto(portalLoginSchema) {}
 class PortalInviteConsumeDto extends createZodDto(portalInviteConsumeSchema) {}
@@ -111,6 +113,13 @@ export class PortalAuthController {
     return { accessToken: result.accessToken };
   }
 
+  @Get('me')
+  @ApiOperation({ summary: 'Current portal user (for Security settings)' })
+  async me(@Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.portalAuthService.getMe(user.sub);
+  }
+
   @Post('totp/setup')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Begin portal TOTP 2FA setup' })
@@ -173,11 +182,18 @@ export class PortalAuthController {
   }
 
   @Post('change-password')
+  @UseGuards(PasswordChangeThrottlerGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Change portal password' })
   async changePassword(@Body() dto: PortalChangePasswordDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    await this.portalAuthService.changePassword(user.sub, dto.currentPassword, dto.newPassword);
+    const currentRefreshToken = req.cookies?.[PORTAL_REFRESH_COOKIE];
+    await this.portalAuthService.changePassword(
+      user.sub,
+      dto.currentPassword,
+      dto.newPassword,
+      currentRefreshToken,
+    );
   }
 
   @Public()
