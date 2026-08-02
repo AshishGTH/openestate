@@ -3027,6 +3027,30 @@ surface:
    after `/auth/refresh` rotated the cookie.
 4. `change-password` revoking the caller's own session along with
    every other one — see the password-change entry above.
+5. **Found the very next time this rule was actually followed**:
+   `AuthContext.verifyTotp()`/`PortalAuthService`'s portal equivalent
+   never sent the 2FA-pending login's `tempToken` as the `Authorization`
+   header on the `totp/verify` call — `login()`'s 2FA-pending branch
+   returns `tempToken` but never calls `setAccessToken()` (there's no
+   real session yet), and `verifyTotp(code)` took no token parameter at
+   all, so the request went out with whatever `accessToken` already held
+   (nothing, for a fresh login). Staff's `TotpVerify.tsx` even received
+   `tempToken` as a prop and never used it — dead prop, still declared.
+   Server-side: instant, silent 401 (`JwtAuthGuard` rejects before the
+   controller runs), ~3ms response time. Any 2FA-enabled user, staff or
+   portal, was **completely unable to log in** — not a degraded
+   experience, a hard lockout, on both sides, since Phase 6. Never
+   caught because `e2e-csrf-refresh.test.ts`'s "mutation after 2FA
+   login" tests attach `Authorization: Bearer ${tempToken}` themselves
+   via supertest — they exercise the server's `totp/verify` handler
+   directly and have no way to catch a bug in the client code that's
+   supposed to attach that header, no matter how much they pass. Found
+   by doing exactly what this rule prescribes: logging out and back in
+   with a code, in a real browser, on the portal, because that flow had
+   *never once* been through-browser tested on either side. Fixed by
+   threading `tempToken` through `Login.tsx` → `verifyTotp(tempToken,
+   code)` → `setAccessToken(tempToken)` before the call, mirrored
+   identically on both `apps/web` and `apps/portal`.
 
 Every one of these was found by actually exercising the flow — in a
 browser, or through a real-HTTP e2e test that drives the full
@@ -3035,12 +3059,40 @@ test suite that already existed at the time each bug shipped. Auth
 bugs in this codebase are specifically the kind that unit tests and
 code review don't catch: they live in the interaction between cookie
 rotation, guard ordering, and which branch of a controller method
-actually runs, not in any single function's logic.
+actually runs, not in any single function's logic. Bug 5 sharpens this
+further: an e2e test can drive the server's auth pipeline perfectly and
+still be structurally blind to a client-side bug, if the test builds
+the request by hand instead of going through the actual frontend code
+that's supposed to build it. A passing "2FA login" test in this repo
+proves the *server* handles a correctly-formed request — it has never
+proven a real browser can produce one.
 
 **Standing rule**: any change touching `apps/api/src/auth/`,
-`apps/api/src/portal-auth/`, `apps/web/src/lib/api.ts`, or
-`apps/portal/src/lib/api.ts` gets a real browser click-through of the
-affected flow on BOTH staff and portal before commit — log in, do the
-mutation, refresh, whatever the change touches — regardless of how
-much test coverage already exists. Passing tests are necessary, not
-sufficient, for this surface specifically.
+`apps/api/src/portal-auth/`, `apps/web/src/lib/api.ts`,
+`apps/portal/src/lib/api.ts`, or either app's `lib/auth.tsx` gets a
+real browser click-through of the affected flow on BOTH staff and
+portal before commit — log in, do the mutation, refresh, whatever the
+change touches — regardless of how much test coverage already exists.
+Passing tests are necessary, not sufficient, for this surface
+specifically.
+
+Also found in the same session, not auth-specific but worth recording:
+`AuthProvider`'s mount-time `useEffect` (both apps, identical shape)
+calls `/auth/refresh` unconditionally with no guard against
+double-invocation. React 18 `StrictMode` (both apps use it) double-fires
+effects in dev, so **every page load fires two concurrent refresh
+calls** on the same refresh token. One wins and rotates it; the other
+presents the now-superseded token, which `TokenService.rotateRefreshToken`
+correctly treats as possible replay and revokes the *entire family* —
+clearing both the refresh and CSRF cookies in its response. Because the
+two promises aren't sequenced, whichever one's `.catch()` resolves last
+can overwrite a just-established valid session with `{user: null}`,
+logging a freshly-authenticated user straight back out. Confirmed
+dev-only (StrictMode's double-invoke is stripped in production builds),
+so it doesn't affect deployed behavior — but it means a hard page reload
+during local dev is not a reliable way to check "does the session
+persist," and it's a live illustration of exactly how fragile this
+refresh-rotation reuse-detection is under any real concurrent-refresh
+scenario (two tabs, a flaky retry). Not fixed this session — flagged
+here rather than papered over, since the underlying race is real even
+if this particular trigger is dev-only.

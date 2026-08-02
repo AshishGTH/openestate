@@ -10,6 +10,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [needsTotp, setNeedsTotp] = useState(false);
+  const [tempToken, setTempToken] = useState('');
 
   if (isLoading) {
     return (
@@ -28,12 +29,13 @@ export default function Login() {
     setSubmitting(true);
     try {
       if (needsTotp) {
-        const result = await verifyTotp(totpCode);
+        const result = await verifyTotp(tempToken, totpCode);
         if (!result.ok) setError(result.error);
       } else {
         const result = await login(identifier, password);
         if (!result.ok) {
           if ('requiresTwoFactor' in result) {
+            setTempToken(result.tempToken);
             setNeedsTotp(true);
           } else {
             setError(result.error);

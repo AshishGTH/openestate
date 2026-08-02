@@ -9,7 +9,7 @@ interface Props {
   onBack: () => void;
 }
 
-export default function TotpVerify({ onBack }: Props) {
+export default function TotpVerify({ tempToken, onBack }: Props) {
   const { verifyTotp } = useAuth();
   const [error, setError] = useState('');
 
@@ -21,7 +21,7 @@ export default function TotpVerify({ onBack }: Props) {
 
   const onSubmit = async (data: TotpVerifyDto) => {
     setError('');
-    const result = await verifyTotp(data.code);
+    const result = await verifyTotp(tempToken, data.code);
     if (!result.ok) {
       setError(result.error);
     }
