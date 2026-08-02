@@ -41,6 +41,15 @@ export const forceChangePasswordSchema = z
 
 export type ForceChangePasswordDto = z.infer<typeof forceChangePasswordSchema>;
 
+export const passwordResetConfirmSchema = z
+  .object({
+    token: z.string().min(1),
+    newPassword: z.string().min(8).max(128),
+  })
+  .strict();
+
+export type PasswordResetConfirmDto = z.infer<typeof passwordResetConfirmSchema>;
+
 export const tokenResponseSchema = z.object({
   accessToken: z.string(),
   expiresIn: z.number(),

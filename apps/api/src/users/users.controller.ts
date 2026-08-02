@@ -85,4 +85,13 @@ export class UsersController {
     const user = req.user as JwtPayload;
     return this.usersService.reactivate(user.companyId, id);
   }
+
+  @Post(':id/force-password-reset')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequirePermissions(PERMISSIONS.ADMIN_USER_UPDATE)
+  @ApiOperation({ summary: "Force a password reset for another user (issues a reset link, never sets one directly)" })
+  forcePasswordReset(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.usersService.forcePasswordReset(user.companyId, id, user.sub);
+  }
 }

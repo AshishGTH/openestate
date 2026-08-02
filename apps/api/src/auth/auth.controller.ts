@@ -1,12 +1,14 @@
 import {
   Body,
   Controller,
+  Get,
   HttpCode,
   HttpStatus,
   Post,
   Req,
   Res,
   UnauthorizedException,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
@@ -16,16 +18,19 @@ import {
   totpVerifySchema,
   changePasswordSchema,
   forceChangePasswordSchema,
+  passwordResetConfirmSchema,
 } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { AuthService } from './auth.service';
 import { Public } from './guards/jwt-auth.guard';
 import { STAFF_CSRF_COOKIE } from './csrf-cookie-names';
+import { PasswordChangeThrottlerGuard } from './guards/password-change-throttler.guard';
 
 class LoginDto extends createZodDto(loginSchema) {}
 class TotpVerifyDto extends createZodDto(totpVerifySchema) {}
 class ChangePasswordDto extends createZodDto(changePasswordSchema) {}
 class ForceChangePasswordDto extends createZodDto(forceChangePasswordSchema) {}
+class PasswordResetConfirmDto extends createZodDto(passwordResetConfirmSchema) {}
 
 const REFRESH_COOKIE = 'openestate_refresh';
 const CSRF_COOKIE = STAFF_CSRF_COOKIE;
@@ -107,6 +112,13 @@ export class AuthController {
     return { accessToken: result.accessToken };
   }
 
+  @Get('me')
+  @ApiOperation({ summary: 'Current staff user (for Security settings)' })
+  async me(@Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.authService.getMe(user.sub);
+  }
+
   @Post('totp/setup')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Begin TOTP 2FA setup' })
@@ -182,15 +194,27 @@ export class AuthController {
   }
 
   @Post('change-password')
+  @UseGuards(PasswordChangeThrottlerGuard)
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Change password' })
   async changePassword(@Body() dto: ChangePasswordDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
+    const currentRefreshToken = req.cookies?.[REFRESH_COOKIE];
     await this.authService.changePassword(
       user.sub,
       dto.currentPassword,
       dto.newPassword,
+      currentRefreshToken,
     );
+  }
+
+  @Public()
+  @UseGuards(PasswordChangeThrottlerGuard)
+  @Post('password-reset/confirm')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Confirm an admin-issued password reset link' })
+  async confirmPasswordReset(@Body() dto: PasswordResetConfirmDto) {
+    await this.authService.confirmPasswordReset(dto);
   }
 
   @Post('force-change-password')

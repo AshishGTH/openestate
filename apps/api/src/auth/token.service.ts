@@ -126,6 +126,28 @@ export class TokenService {
     });
   }
 
+  /**
+   * Same as revokeAllForUser, but leaves the CALLER's own session family
+   * alone — for change-password, which must not log the user themselves
+   * out. exceptRawToken is the raw refresh token from the request's own
+   * cookie; if it doesn't resolve to a live token (missing/expired/already
+   * rotated-away), falls back to revoking everything, same as
+   * revokeAllForUser — there's no "current session" to preserve.
+   */
+  async revokeAllForUserExceptToken(userId: string, exceptRawToken: string): Promise<void> {
+    const hash = this.hashToken(exceptRawToken);
+    const current = await this.prisma.refreshToken.findFirst({ where: { tokenHash: hash } });
+
+    await this.prisma.refreshToken.updateMany({
+      where: {
+        userId,
+        isRevoked: false,
+        ...(current ? { family: { not: current.family } } : {}),
+      },
+      data: { isRevoked: true },
+    });
+  }
+
   private hashToken(raw: string): string {
     return createHash('sha256').update(raw).digest('hex');
   }

@@ -94,6 +94,7 @@ model Company {
   brokerNocs               BrokerNoc[]
   portalInvites            PortalInvite[]
   portalPasswordResets     PortalPasswordReset[]
+  passwordResets           PasswordReset[]
   applicantChangeRequests  ApplicantChangeRequest[]
   ticketCategories         TicketCategory[]
   tickets                  Ticket[]
@@ -166,6 +167,29 @@ model User {
   @@unique([companyId, email])
   @@index([companyId, phone])
   @@map("users")
+}
+
+/// Admin-triggered password reset for a STAFF user (portal-user targets
+/// reuse the existing PortalPasswordReset flow instead — see
+/// UsersService.forcePasswordReset). Same hashed/single-use/expiring
+/// shape as PortalPasswordReset; createdById records which admin
+/// triggered it. Rows are created synchronously by the request handler
+/// (unlike PortalPasswordReset's async processor) — no identifier lookup
+/// happens here, so there's no timing-equality concern to protect.
+model PasswordReset {
+  id          String    @id @default(uuid()) @db.Uuid
+  companyId   String    @map("company_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tokenHash   String    @map("token_hash") @db.VarChar(64)
+  expiresAt   DateTime  @map("expires_at")
+  consumedAt  DateTime? @map("consumed_at")
+  createdById String    @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@index([tokenHash])
+  @@map("password_resets")
 }
 
 model RefreshToken {

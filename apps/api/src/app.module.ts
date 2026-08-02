@@ -95,6 +95,10 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
           { ttl: 60_000, limit: 100 },
           { name: 'portal-auth', ttl: 300_000, limit: 5 },
           { name: 'portal-read', ttl: 60_000, limit: 60 },
+          // Password-change/reset-confirm across staff and portal — see
+          // PasswordChangeThrottlerGuard's doc comment for why one bucket
+          // covers all three routes.
+          { name: 'password-change', ttl: 300_000, limit: 5 },
           // Phase 7 commit 2: per-API-key limit, not a global constant —
           // the resolver reads the LeadApiKeyGuard-populated
           // req.leadApiKey (that guard runs first in the route's guard

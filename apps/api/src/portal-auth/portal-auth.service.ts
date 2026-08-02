@@ -130,6 +130,14 @@ export class PortalAuthService {
     throw new UnauthorizedException('Invalid TOTP code');
   }
 
+  async getMe(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { id: true, email: true, phone: true, name: true, totpEnabled: true },
+    });
+    return user;
+  }
+
   async setupTotp(userId: string) {
     const { secret, otpauthUrl } = this.totpService.generateSecret();
     const encrypted = this.totpService.encrypt(secret);
@@ -191,14 +199,27 @@ export class PortalAuthService {
     await this.tokenService.revokeAllForUser(userId);
   }
 
-  async changePassword(userId: string, currentPassword: string, newPassword: string) {
+  async changePassword(
+    userId: string,
+    currentPassword: string,
+    newPassword: string,
+    currentRefreshToken?: string,
+  ) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     const valid = await argon2.verify(user.passwordHash, currentPassword);
     if (!valid) throw new UnauthorizedException('Current password is incorrect');
 
     const hash = await argon2.hash(newPassword, { algorithm: argon2.Algorithm.Argon2id });
     await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } });
-    await this.tokenService.revokeAllForUser(userId);
+
+    // Leaves the session that made this request alone — mirrors the
+    // staff-side fix in AuthService.changePassword (see CLAUDE.md's
+    // mirrored-auth standing rule).
+    if (currentRefreshToken) {
+      await this.tokenService.revokeAllForUserExceptToken(userId, currentRefreshToken);
+    } else {
+      await this.tokenService.revokeAllForUser(userId);
+    }
   }
 
   /**
