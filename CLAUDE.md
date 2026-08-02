@@ -3155,3 +3155,57 @@ specifically so it stays directly unit-testable.
 
 Both frontends lint clean with the new rules; verified via `pnpm -r lint`
 across the whole monorepo, not just the two apps that prompted this.
+
+### Standing rule extended: frontend request-construction changes need a browser click-through, not just tests
+
+The narrower auth-specific rule above generalizes. Every bug found this
+session in the client's own request-building code — `verifyTotp`
+missing the `tempToken` Authorization header, the stale CSRF header on
+401-retry — shares one root cause: **an e2e supertest builds the HTTP
+request by hand** (`.set('Authorization', ...)`, `.set('X-CSRF-Token',
+...)`), so it proves the *server* handles a correctly-formed request. It
+has no way to prove the *frontend* code that's supposed to build that
+request actually does — the test and the app code it's meant to
+exercise never touch. This is structural, not a coverage gap closeable
+by writing more supertests: no amount of server-side e2e testing can
+verify client-side request construction, because the test never runs
+the client.
+
+**Standing rule**: any change to *how the frontend constructs a
+request* — headers, auth, payload shape, file upload, anything in
+`apps/web/src/lib/api.ts` or `apps/portal/src/lib/api.ts` or a
+component that builds a request outside them — requires a real browser
+click-through of the affected flow before commit, not just passing
+tests. This subsumes and extends the narrower auth-only rule above.
+
+**Audit of existing instances, done immediately rather than waiting to
+find them one at a time** (grepped both frontends for every `fetch`
+call, every manual `Authorization`/`X-CSRF-Token`/header construction,
+every `mutationFn`/`queryFn`, every file-upload input):
+
+- Every `fetch()` call in both apps lives inside their own
+  `lib/api.ts` (4 each: the refresh helper, the main retry-wrapped
+  call, the 401-retry, `downloadFile`) — no component calls `fetch`
+  directly.
+- Every `Authorization`/`X-CSRF-Token` header is set inside
+  `lib/api.ts` only — no component sets an auth header by hand.
+- Every `mutationFn` and `queryFn` across both apps' entire `src/`
+  trees calls the shared `api()` client — zero direct bypasses found.
+  This is exactly the shape of bug this audit was looking for, and
+  none currently exist.
+- No file-upload UI exists in either frontend yet (`<input
+  type="file">` is absent from both) — so there's no FormData/
+  multipart bypass to check; the class doesn't exist yet, not "exists
+  and is clean."
+- **Flagged, not fixed**: `downloadFile()` (in both `lib/api.ts`
+  files, 6 call sites total — `Applicant360.tsx`, `DuesDashboard.tsx`,
+  `BrokerDetail.tsx`, `Reports.tsx` on staff; `Account.tsx`,
+  `BrokerStatement.tsx` on portal) sets the Authorization header
+  correctly but, unlike the main `api()` function, has no 401-retry/
+  refresh logic. If a user's access token happens to expire at the
+  exact moment they click a download link, the download fails with a
+  raw 401 instead of silently refreshing and retrying like every other
+  request in the app does. Low severity (a visible error + manual
+  retry, not a lockout) but the same *shape* as the bugs already
+  found — a code path that doesn't fully mirror the main client's
+  behavior. Left unfixed per instruction to report, not fix blindly.
