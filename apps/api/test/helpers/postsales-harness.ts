@@ -236,7 +236,21 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     // explicitly anyway; tickets before ticket_categories because
     // tickets_category_id_fkey is RESTRICT.
     'ticket_messages', 'tickets', 'ticket_categories', 'applicant_change_requests',
-    'portal_password_resets', 'portal_invites', 'construction_update_media', 'construction_updates',
+    // password_resets: admin-triggered staff-target resets (see
+    // UsersService.forcePasswordReset) — same RESTRICT-onto-companies
+    // shape as portal_password_resets right above.
+    'password_resets', 'portal_password_resets', 'portal_invites', 'construction_update_media', 'construction_updates',
+    // Phase 7 rows — same never-caught-until-first-use gap as several
+    // tables below: their companies_id_fkey was CASCADE in the migration
+    // that first created them but schema.prisma never specified
+    // onDelete: Cascade, a drift that a later migration (unrelated to
+    // Phase 7) reconciled to match schema.prisma's real RESTRICT default,
+    // surfacing this harness's implicit reliance on the old CASCADE
+    // behavior. Delivery attempts/deliveries before their own parents;
+    // applicant_documents before both 'document_types' (masters section
+    // below) and 'applicants' (near the end) since it RESTRICTs onto both.
+    'webhook_delivery_attempts', 'webhook_deliveries', 'webhook_endpoints',
+    'lead_source_api_keys', 'plugin_installations', 'applicant_documents',
     // Phase 5: broker/commission rows — reference bookings/brokers/projects,
     // so must go before those are deleted below. Nothing references these.
     'commission_ledger_entries', 'broker_nocs', 'broker_booking_commissions', 'commission_payments',
