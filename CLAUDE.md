@@ -3096,3 +3096,28 @@ refresh-rotation reuse-detection is under any real concurrent-refresh
 scenario (two tabs, a flaky retry). Not fixed this session — flagged
 here rather than papered over, since the underlying race is real even
 if this particular trigger is dev-only.
+
+### `reset-admin-password.sh` — verified end-to-end on the VM
+
+Per this session's own Phase 8 history, the reset-admin-password.sh
+logic was already proven correct locally (hash → SQL write → argon2
+verify round-trip) — what was unproven was script *mechanics* under
+real conditions, exactly the class that broke three separate times in
+Phase 8 (missing `+x`, Prisma `EACCES`, nginx not started). Since this
+is the break-glass path for a locked-out super admin, it has to work
+when nothing else does, so it was run for real: copied to
+`/opt/openestate-src/deploy/native/` on the 10.10.10.46 VM, invoked
+under `sudo` from a clean shell exactly as documented, against a
+dedicated throwaway staff user (never against the real
+`admin@demo-realty.com`, to avoid disrupting anyone's live session on
+that box). Confirmed: reads `DATABASE_URL_SYSTEM` from
+`/etc/openestate/openestate.env` correctly under `sudo`; connects as
+`openestate_system`; rejects a portal-linked email with a clear message
+and non-zero exit, leaving that row untouched; resets the target's
+password and clears `force_password_change`; revokes their existing
+refresh token; and the new password works for a real
+`POST /auth/login` over HTTP, returning a normal, fully-permissioned
+access token. All test fixtures and the manually-copied script were
+removed afterward — the real deployment path for this file is a future
+`git pull`/`upgrade-native.sh` once these commits reach wherever that
+VM's remote points, not a one-off `scp`.
