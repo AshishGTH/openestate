@@ -2930,3 +2930,117 @@ apply. Mirrored pairs to check on every future auth change:
 
 Added a checklist item to `CONTRIBUTING.md` for auth-related PRs so
 this is enforced by the PR template, not just remembered.
+
+### Password-change, admin force-reset, and CLI break-glass recovery
+
+Implemented staff and portal together, per the standing rule above.
+
+- `POST /auth/change-password` and `/portal/auth/change-password`
+  already existed but revoked ALL of the user's sessions on success,
+  including the one that just made the request — contradicts "log
+  everywhere else out, stay logged in here" (the correct, expected
+  behavior). Added `TokenService.revokeAllForUserExceptToken(userId,
+  currentRawRefreshToken)`: looks up the calling session's refresh
+  token family and excludes it from the revoke. Both controllers now
+  read the refresh cookie and pass it through; falls back to
+  revoke-everything if no refresh token is present (e.g. a stale
+  session), same as before.
+- New shared `password-change` throttler bucket (5 req/5min,
+  `PasswordChangeThrottlerGuard`, tracked by `req.user?.sub ?? req.ip`)
+  — one bucket/guard reused across staff change-password, portal
+  change-password, and the new staff reset-confirm endpoint below,
+  rather than three near-identical guards.
+- Admin "force password reset for another user"
+  (`POST /users/:id/force-password-reset`, `ADMIN_USER_UPDATE`) issues
+  a reset link, never sets or reveals a password. Branches on the
+  target: a portal-linked user (applicantId/brokerId set) reuses the
+  *existing* self-service `PortalPasswordReset` model and confirm
+  endpoint unchanged; a staff target uses a new `PasswordReset` model
+  (staff had no reset-link mechanism at all before this) plus a new
+  public `POST /auth/password-reset/confirm` on `AuthController`,
+  mirroring the portal confirm flow exactly. Sent synchronously
+  (`UsersService.forcePasswordReset`), not via the portal's BullMQ
+  queue — unlike self-service `requestPasswordReset`, there's no
+  identifier-guessing/timing concern here, the admin already knows
+  this is a real user by id.
+- `deploy/native/reset-admin-password.sh`: break-glass CLI for a
+  locked-out super admin, run as root directly on the VM. Bypasses the
+  API/login/2FA entirely — hashes a new (generated or `--password`)
+  password with the release's own `@node-rs/argon2` and writes it via
+  `DATABASE_URL_SYSTEM` (BYPASSRLS), then revokes existing sessions.
+  Staff users only (`applicant_id`/`broker_id` both null); portal
+  users go through the normal reset flows instead. `chmod 755`,
+  git-tracked as `100755` (see the executable-bit lesson two entries
+  up — this one was set correctly from the start).
+- Added a self-service `GET /auth/me` / `GET /portal/auth/me`
+  (`{ id, email, name, totpEnabled }`) — neither side had any way for
+  the logged-in user to read back their own 2FA status, needed for the
+  new Security settings pages below to render correctly on load rather
+  than assuming "not enrolled".
+- New frontend: a Security section on both `apps/web` (`/settings`)
+  and `apps/portal` (`/security`) combining change-password with 2FA
+  enroll/disable. Neither app had ANY 2FA enrollment UI before this —
+  only login-time TOTP verify existed — so this is new UI on both
+  sides, not wiring up something that already existed. No QR-code
+  image (no QR library in the repo and the backend's own
+  `totpSetupResponse.qrDataUrl` field has never actually been
+  populated — `TotpService.generateSecret()` only returns
+  `{ secret, otpauthUrl }`); the manual-entry secret is enough since
+  every authenticator app accepts it, and adding a QR renderer for
+  this was judged not worth a new dependency.
+- Bug this surfaced, unrelated to the feature itself: `cleanupCompany`
+  (the shared e2e test-fixture teardown) was missing six tables —
+  `webhook_endpoints`, `webhook_deliveries`, `webhook_delivery_attempts`,
+  `lead_source_api_keys`, `plugin_installations`, `applicant_documents`
+  — and started throwing FK-violation errors on every test file that
+  touches them, the moment the `password_resets` migration's schema-drift
+  reconciliation (see below) changed their `company_id` FK from the
+  CASCADE it was accidentally created with to the RESTRICT
+  `schema.prisma` actually specifies. Fixed by adding all six to the
+  explicit delete list, in dependency order. This was latent breakage
+  waiting to happen regardless of this session's changes — CASCADE on
+  a company delete was never a deliberate design choice for these
+  tables (everything else uses explicit RESTRICT + explicit cleanup),
+  just a migration that predated the schema.prisma update and was
+  never regenerated. The `add_password_reset` migration also reconciles
+  a larger set of pre-existing FK/index drift across ~35 unrelated
+  tables (confirmed via `git diff` that none of it came from this
+  session's own schema edit) — normal `prisma migrate dev` catch-up
+  behavior against a schema that had accumulated unmigrated edits, not
+  something to be alarmed by if seen again.
+
+### Standing rule: auth changes require a real browser click-through before commit
+
+Auth is the highest-defect area of this codebase. Four real bugs found
+across three sessions, all in the login/2FA/refresh/change-password
+surface:
+
+1. The 2FA CSRF-cookie bug, staff side (`setCsrfCookie()` skipped on
+   the 2FA-pending early return in `AuthController.login()`).
+2. The identical bug, portal side — fixed staff-side one session,
+   shipped still broken on `PortalAuthController.login()` the next,
+   locking out every 2FA-enabled portal account. This is the exact
+   failure the mirrored-auth standing rule above exists to prevent.
+3. A stale CSRF header on the client's 401-retry-after-refresh path
+   (`apps/web/src/lib/api.ts` / `apps/portal/src/lib/api.ts`) — the
+   retry updated the Authorization header but not the CSRF header
+   after `/auth/refresh` rotated the cookie.
+4. `change-password` revoking the caller's own session along with
+   every other one — see the password-change entry above.
+
+Every one of these was found by actually exercising the flow — in a
+browser, or through a real-HTTP e2e test that drives the full
+guard/cookie pipeline — never by reading the code, and never by the
+test suite that already existed at the time each bug shipped. Auth
+bugs in this codebase are specifically the kind that unit tests and
+code review don't catch: they live in the interaction between cookie
+rotation, guard ordering, and which branch of a controller method
+actually runs, not in any single function's logic.
+
+**Standing rule**: any change touching `apps/api/src/auth/`,
+`apps/api/src/portal-auth/`, `apps/web/src/lib/api.ts`, or
+`apps/portal/src/lib/api.ts` gets a real browser click-through of the
+affected flow on BOTH staff and portal before commit — log in, do the
+mutation, refresh, whatever the change touches — regardless of how
+much test coverage already exists. Passing tests are necessary, not
+sufficient, for this surface specifically.

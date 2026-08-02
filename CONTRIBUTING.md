@@ -64,6 +64,13 @@ Before opening the PR, confirm:
 - [ ] `apps/web/src/lib/api.ts` and `apps/portal/src/lib/api.ts` were
       diffed against each other if either changed — they're expected
       to stay near-identical.
+- [ ] You clicked through the affected flow in a real browser, on
+      both staff and portal, before opening the PR — not just ran the
+      tests. Every real auth bug found in this codebase so far was
+      caught by exercising the flow, none by reading the code or by
+      the tests that already existed at the time (see CLAUDE.md's
+      "Standing rule: auth changes require a real browser
+      click-through before commit").
 
 ## Local test infrastructure
 
