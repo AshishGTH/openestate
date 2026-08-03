@@ -7,9 +7,13 @@ import Pagination from '../../components/Pagination';
 import { INTEREST_RATE_TYPE, LETTER_TEMPLATE_ENTITY_TYPES, MERGE_FIELD_REGISTRY } from '@openestate/shared';
 
 const MASTER_TABLES = [
+  { key: 'unit-types', label: 'Unit Types' },
+  { key: 'plc-types', label: 'PLC Types' },
   { key: 'inquiry-sources', label: 'Inquiry Sources' },
   { key: 'inquiry-types', label: 'Inquiry Types' },
+  { key: 'inquiry-temperatures', label: 'Inquiry Temperatures' },
   { key: 'follow-up-types', label: 'Follow-Up Types' },
+  { key: 'ticket-categories', label: 'Ticket Categories' },
   { key: 'communication-types', label: 'Communication Types' },
   { key: 'project-types', label: 'Project Types' },
   { key: 'receipt-types', label: 'Receipt Types' },

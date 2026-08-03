@@ -26,6 +26,10 @@ import PluginsPage from './pages/admin/Plugins';
 import PluginDetailPage from './pages/admin/PluginDetail';
 import WebhooksPage from './pages/admin/Webhooks';
 import LeadApiKeysPage from './pages/admin/LeadApiKeys';
+import ProjectsPage from './pages/inventory/Projects';
+import ProjectDetailPage from './pages/inventory/ProjectDetail';
+import InquiriesPage from './pages/presales/Inquiries';
+import InquiryDetailPage from './pages/presales/InquiryDetail';
 
 export default function App() {
   return (
@@ -60,6 +64,12 @@ export default function App() {
             <Route path="postsales/reports" element={<ReportsPage />} />
             <Route path="postsales/brokers" element={<BrokersPage />} />
             <Route path="postsales/brokers/:brokerId" element={<BrokerDetail />} />
+
+            <Route path="inventory/projects" element={<ProjectsPage />} />
+            <Route path="inventory/projects/:id" element={<ProjectDetailPage />} />
+
+            <Route path="presales/inquiries" element={<InquiriesPage />} />
+            <Route path="presales/inquiries/:id" element={<InquiryDetailPage />} />
           </Route>
         </Route>
       </Routes>
