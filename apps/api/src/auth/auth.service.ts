@@ -220,6 +220,7 @@ export class AuthService {
       email: user.email,
       roleSlug: user.role.slug,
       permissions,
+      forcePasswordChange: user.forcePasswordChange,
     });
 
     return {
@@ -328,6 +329,7 @@ export class AuthService {
       email: user.email,
       roleSlug: user.role.slug,
       permissions,
+      forcePasswordChange: user.forcePasswordChange,
     });
 
     const { raw: refreshRaw, expiresAt } =
