@@ -7,6 +7,20 @@ const NAV_ITEMS = [
   { label: 'Dashboard', to: '/', icon: 'H' },
   { label: 'Settings', to: '/settings', icon: 'S' },
   {
+    label: 'Pre-sales',
+    icon: 'I',
+    children: [
+      { label: 'Inquiries', to: '/presales/inquiries', perm: PERMISSIONS.PRESALES_INQUIRY_READ },
+    ],
+  },
+  {
+    label: 'Inventory',
+    icon: 'V',
+    children: [
+      { label: 'Projects', to: '/inventory/projects', perm: PERMISSIONS.INVENTORY_PROJECT_READ },
+    ],
+  },
+  {
     label: 'Post-sales',
     icon: 'P',
     children: [
