@@ -29,6 +29,22 @@ async function bootstrap() {
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(new ZodValidationPipe());
 
+  // Trust exactly one hop (nginx — see deploy/native/*, the only reverse
+  // proxy in front of this process) so req.secure reflects the CLIENT's
+  // actual scheme via X-Forwarded-Proto, not the always-plain-http
+  // nginx-to-node connection. Cookie Secure flags key off req.secure, not
+  // NODE_ENV — see auth.controller.ts/portal-auth.controller.ts's doc
+  // comment for the bug this fixes: NODE_ENV==='production' is true on
+  // every real native install regardless of whether TLS is actually
+  // configured (it deliberately isn't, out of the box — see the nginx
+  // config's own comment), so Secure cookies were being set on a plain
+  // HTTP connection. Browsers silently refuse to store a Secure cookie
+  // over non-HTTPS — no CSRF cookie, no refresh cookie, ever, in any real
+  // browser hitting a fresh install. Only caught because this session's
+  // VM walkthrough was the first time a real browser (not curl) drove a
+  // mutation against the actual deployed VM.
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
   const corsAllowlist = (process.env.CORS_ALLOWLIST ?? '')
     .split(',')
     .map((origin) => origin.trim())

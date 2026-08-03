@@ -43,7 +43,10 @@ const PORTAL_REFRESH_PATH = '/api/v1/portal/auth';
 function setPortalRefreshCookie(res: Response, token: string, expiresAt: Date) {
   res.cookie(PORTAL_REFRESH_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    // See auth.controller.ts's identical fix — req.secure (via main.ts's
+    // `trust proxy`), not NODE_ENV, which is 'production' on every real
+    // native install regardless of whether TLS is actually in front of it.
+    secure: res.req.secure,
     sameSite: 'strict',
     path: PORTAL_REFRESH_PATH,
     expires: expiresAt,
@@ -54,7 +57,10 @@ function setPortalCsrfCookie(res: Response) {
   const csrfToken = randomUUID();
   res.cookie(PORTAL_CSRF_COOKIE, csrfToken, {
     httpOnly: false,
-    secure: process.env.NODE_ENV === 'production',
+    // See auth.controller.ts's identical fix — req.secure (via main.ts's
+    // `trust proxy`), not NODE_ENV, which is 'production' on every real
+    // native install regardless of whether TLS is actually in front of it.
+    secure: res.req.secure,
     sameSite: 'strict',
     path: '/',
   });
