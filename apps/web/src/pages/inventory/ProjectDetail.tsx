@@ -76,11 +76,12 @@ export default function ProjectDetailPage() {
     enabled: !!id,
   });
 
-  const { data: towers } = useQuery<Tower[]>({
+  const { data: towersRes } = useQuery<{ data: Tower[] }>({
     queryKey: ['towers', id],
-    queryFn: () => api(`/projects/${id}/towers`),
+    queryFn: () => api(`/projects/${id}/towers?page=1&limit=100`),
     enabled: !!id,
   });
+  const towers = towersRes?.data;
 
   const { data: unitTypes } = useQuery<{ data: MasterOption[] }>({
     queryKey: ['masters', 'unit-types', 'all'],
