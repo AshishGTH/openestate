@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { usePaginatedQuery } from '../../lib/hooks';
 import { api } from '../../lib/api';
@@ -36,6 +36,7 @@ export default function InquiriesPage() {
   const [sourceId, setSourceId] = useState('');
   const [temperatureId, setTemperatureId] = useState('');
 
+  const qc = useQueryClient();
   const { data, isLoading } = usePaginatedQuery<Inquiry>(['inquiries'], '/inquiries', { page, limit: 20 });
 
   const { data: projects } = useQuery<{ data: Project[] }>({
@@ -67,6 +68,7 @@ export default function InquiriesPage() {
       if (res.possibleDuplicateApplicantIds && res.possibleDuplicateApplicantIds.length > 0) {
         setDuplicateWarning(res.possibleDuplicateApplicantIds);
       }
+      qc.invalidateQueries({ queryKey: ['inquiries'] });
       setShowForm(false);
       setApplicantName('');
       setApplicantPhone('');
