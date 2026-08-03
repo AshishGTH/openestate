@@ -179,7 +179,7 @@ export default function ReceiptEntry() {
 
       <form onSubmit={onSubmit} className="mt-6 space-y-4 rounded-lg border border-slate-200 bg-white p-5">
         <div>
-          <label className="block text-sm font-medium text-slate-700">Applicant phone / booking number</label>
+          <label className="block text-sm font-medium text-slate-700">Applicant phone / name</label>
           {applicant ? (
             <div className="mt-1 flex items-center justify-between rounded-md bg-blue-50 px-3 py-2 text-sm">
               <span className="font-medium text-blue-900">{applicant.name} — {applicant.primaryPhone}</span>
