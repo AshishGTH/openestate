@@ -3209,3 +3209,44 @@ every `mutationFn`/`queryFn`, every file-upload input):
   retry, not a lockout) but the same *shape* as the bugs already
   found — a code path that doesn't fully mirror the main client's
   behavior. Left unfixed per instruction to report, not fix blindly.
+
+### Systematic VM admin walkthrough — issue #1: forced first-login password change was never enforced
+
+First finding of a full start-to-finish admin walkthrough on the VM
+(fresh company, real browser, real admin flow — not targeted testing).
+Every staff user gets `forcePasswordChange: true` on creation
+(`UsersService.create`, and the initial seed admin) — but nothing ever
+checked it. `ForceChangePassword.tsx` existed, fully built, correctly
+calling `POST /auth/force-change-password` — and was never imported by
+`App.tsx` or rendered by anything. `forcePasswordChange` was never on
+the JWT payload, never in `/auth/me`'s response — no signal reached the
+frontend at all. A fresh admin (or any newly-created staff user) could
+log in with their temporary/generated password and use the entire
+application indefinitely, with zero nudge or enforcement to ever change
+it. Confirmed live: the walkthrough's own freshly-seeded admin logged
+straight through to the Dashboard.
+
+Root-caused, not just patched: added `forcePasswordChange?: boolean` to
+`JwtPayload` (staff-only — portal users are always created via
+invite-consume, which sets a real password immediately, confirmed by
+grep that no portal code path ever sets it true), set on both places
+staff tokens are signed (`issueTokens`, `refreshTokens`). Wired
+`ProtectedRoute` to render `ForceChangePassword` in place of `<Outlet
+/>` whenever the flag is set, blocking every other route. Its `onDone`
+calls `logout()`, not a silent continue — `forceChangePassword` on the
+backend revokes ALL of the user's sessions on success, including the
+one that just made the request (unlike `changePassword`'s "except
+current" behavior — deliberately different here, since a first-login
+password should force a clean re-authentication), so there's no valid
+token left to resume with anyway.
+
+Regression tests added (`e2e-password-change.test.ts`): a fresh user's
+JWT decodes to `forcePasswordChange: true`; after force-change-password,
+the calling session is revoked, the old password stops working, the new
+one does, and its JWT decodes to `false`. Neither existed before —
+`force-change-password` had no test coverage at all prior to this,
+consistent with nothing having ever exercised it end-to-end.
+
+Fixed, redeployed to the VM, re-verified, then continued the
+walkthrough — per the walkthrough's own ground rule not to batch fixes
+to the end.

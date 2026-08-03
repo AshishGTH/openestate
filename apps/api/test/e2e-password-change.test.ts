@@ -419,4 +419,65 @@ describeIf('e2e password-change + admin force-password-reset', () => {
         .expect(403);
     });
   });
+
+  describe('forced first-login password change', () => {
+    // A fresh staff user (forcePasswordChange: true) was previously
+    // usable through the real app forever with their temporary password
+    // — the flag was set on creation and checked by nothing on either
+    // side. Fixed by putting forcePasswordChange on the JWT payload
+    // (decoded here the same way the frontend does) so ProtectedRoute
+    // can gate on it; these tests are the regression coverage that never
+    // existed for force-change-password at all before this.
+    function decodeJwt(token: string): { forcePasswordChange?: boolean } {
+      const payload = token.split('.')[1];
+      return JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    }
+
+    it('a freshly created user gets forcePasswordChange: true on the JWT', async () => {
+      const { email } = await createStaffUser('FreshTempPass111');
+      // createStaffUser sets forcePasswordChange: false for the other
+      // tests' convenience — flip it to true here to simulate a real
+      // admin-created user (UsersService.create always sets it true).
+      const user = await systemPrisma.user.findFirstOrThrow({ where: { email } });
+      await systemPrisma.user.update({ where: { id: user.id }, data: { forcePasswordChange: true } });
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email, password: 'FreshTempPass111' })
+        .expect(200);
+      expect(decodeJwt(res.body.accessToken).forcePasswordChange).toBe(true);
+    });
+
+    it('force-change-password clears the flag, revokes sessions, and the new password works', async () => {
+      const { email } = await createStaffUser('FreshTempPass222');
+      const user = await systemPrisma.user.findFirstOrThrow({ where: { email } });
+      await systemPrisma.user.update({ where: { id: user.id }, data: { forcePasswordChange: true } });
+
+      const { agent, token, csrf } = await staffLogin(email, 'FreshTempPass222');
+      await agent
+        .post('/api/v1/auth/force-change-password')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-CSRF-Token', csrf)
+        .send({ newPassword: 'RealChosenPass333' })
+        .expect(204);
+
+      // The session that made the change is itself revoked (force-change
+      // revokes ALL sessions, unlike change-password) — matches the
+      // frontend's own onDone-logs-out behavior.
+      await agent.post('/api/v1/auth/refresh').expect(401);
+
+      // Old password no longer works; new one does, and its JWT now
+      // shows the flag cleared.
+      await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email, password: 'FreshTempPass222' })
+        .expect(401);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/v1/auth/login')
+        .send({ email, password: 'RealChosenPass333' })
+        .expect(200);
+      expect(decodeJwt(res.body.accessToken).forcePasswordChange).toBe(false);
+    });
+  });
 });

@@ -73,6 +73,12 @@ export interface JwtPayload {
   email: string | null;
   roleSlug: string;
   permissions: string[];
+  // Staff-only — portal users are always created via invite-consume,
+  // which sets a real password immediately, so this never applies to a
+  // portal session and is omitted there entirely (same "portal-only /
+  // staff-only field, omitted rather than false" convention as
+  // applicantId/brokerId below, just inverted).
+  forcePasswordChange?: boolean;
   // Phase 6: set only on a portal (customer/broker) token — a superset
   // field, never present on a staff token. Exactly one is set when
   // either is set.
