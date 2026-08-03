@@ -3348,3 +3348,85 @@ Fixed, test-covered, redeployed, and re-verified live on the VM: name
 plus GSTIN, GST state code, FY start month, logo URL, and accent color
 were all filled in through the real UI, saved, and confirmed present
 after a full page reload.
+
+### Systematic VM admin walkthrough — issue #4: Masters admin page — every edit ever submitted 400'd; 6 of 17 master types had no working create path
+
+Found during the MASTERS phase. Two separate bugs in `Masters.tsx`,
+both severe:
+
+1. **Editing any master, of any type, has never worked.** The update
+   mutation used `useApiMutation`'s `(body) => url` path-building form,
+   but that hook always `JSON.stringify(body)`s the whole body it's
+   given — including the `id` field used to build the URL. The
+   backend's `updateMasterSchema` is `.strict()`, so every PATCH
+   through this page's Edit button 400'd with "Unrecognized key(s) in
+   object: 'id'". Create and Delete worked; Edit never did, for any of
+   the 17 master types, ever. Confirmed live: renaming "Website"
+   (created moments earlier) 400'd on the very first Update click.
+
+2. **document-types/interest-rules/transfer-fee-rules** showed a
+   Create form but only ever collected `name`, while their Prisma
+   models require `entityType` / `rateType`+`ratePercent`+`frequency` /
+   `feeType`+`amountPaise` (see `master.factory.ts`'s `extraFields`) —
+   every create attempt 400'd. **gst-rates/tds-rules/letter-templates**
+   had no Add Item button at all (`isSpecialized` explicitly hid it) —
+   these three don't even have a `name` column, so the generic form
+   could never have worked regardless.
+
+Fixed by rewriting `Masters.tsx` with a per-table field config
+(`TYPE_FIELDS`) driving a dynamic form, calling `api()` directly for
+create/update instead of routing `id` through the mutation body, and
+adding a generic Active checkbox + Sort Order field for every table
+(previously set once at creation and then permanently unreachable —
+"deactivate a master" was not a real capability despite the schema
+supporting it everywhere).
+
+A second bug surfaced *while fixing the first*: the Bank fields I
+added (branch/ifsc/accountNumber) were copied from `createBankSchema`
+in `packages/shared/src/master.dto.ts`, which looked authoritative but
+was dead code — never imported by any controller. Bank actually goes
+through the generic factory (name/isActive/sortOrder only), and the
+Prisma `Bank` model doesn't have `branch` or `accountNumber` at all
+(it has `ifscPrefix`, not `ifsc`). Caught immediately by the same
+browser click-through discipline this standing rule requires — the
+form 400'd on the very next real submission. Fixed by removing the
+Banks entry from `TYPE_FIELDS` and deleting the dead
+`createBankSchema`/`updateBankSchema` so the next person grepping
+`master.dto.ts` for "how do I add Bank fields" doesn't get misled the
+same way. See `docs/todo.md`'s "AreaLocation/Bank/ChargeType have real
+optional columns the API never exposes" for the real (deferred) gap.
+
+No component-test harness exists in `apps/web` yet (zero test files) —
+building one from scratch was out of scope for this fix, so this is
+verified by browser click-through only, per the standing rule for
+frontend request-construction changes.
+
+Fixed, redeployed, and re-verified live on the VM: created one entry
+in all 17 master types (including the 6 that were previously broken or
+unreachable — Document Types, Interest Rules, Transfer Fee Rules, GST
+Rates, TDS Rules, Letter Templates), edited one (Inquiry Source
+"Website", toggled inactive), and confirmed the Active/Sort Order
+columns reflect it.
+
+### Systematic VM admin walkthrough — issue #5: Custom Fields admin page could never create a field (fieldName vs key)
+
+Found during the CUSTOM FIELDS phase, first attempt to define a field
+on Applicant: 400 "key: Required; Unrecognized key(s) in object:
+'fieldName'". `CustomFields.tsx` used `fieldName` throughout (state,
+request body, table column), but `createCustomFieldSchema`
+(`packages/shared/src/custom-field.dto.ts`) and the Prisma
+`CustomFieldDefinition` model both use `key`. This page has never
+successfully created a custom field through the real UI. Fixed with a
+straight rename, `fieldName` → `key`, matching the actual schema.
+
+Separately, not fixed (a missing feature, not a bug — see
+`docs/todo.md`): custom field **values** are never captured or
+displayed anywhere. There is no `CustomFieldValue` model, and no
+Applicant/Unit/Booking/Inquiry/Project form fetches or renders the
+definitions at all. Defining a field through this now-working admin
+page has zero effect anywhere else in the product.
+
+Fixed, redeployed, and re-verified live on the VM: created a field on
+Applicant (`aadhaar_number`, TEXT) and one on Unit (`facing_direction`,
+SELECT with options North/South/East/West), both confirmed present
+after a full page reload.
