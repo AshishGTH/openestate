@@ -56,25 +56,18 @@ export type CreateTdsRuleDto = z.infer<typeof createTdsRuleSchema>;
 export const updateTdsRuleSchema = createTdsRuleSchema.partial().strict();
 export type UpdateTdsRuleDto = z.infer<typeof updateTdsRuleSchema>;
 
-export const createBankSchema = z
-  .object({
-    name: z.string().min(1).max(255),
-    branch: z.string().max(255).optional(),
-    ifsc: z
-      .string()
-      .max(11)
-      .regex(/^[A-Z]{4}0[A-Z0-9]{6}$/, 'Invalid IFSC code')
-      .optional(),
-    accountNumber: z.string().max(30).optional(),
-    isActive: z.boolean().default(true),
-    sortOrder: z.number().int().min(0).default(0),
-  })
-  .strict();
-
-export type CreateBankDto = z.infer<typeof createBankSchema>;
-
-export const updateBankSchema = createBankSchema.partial().strict();
-export type UpdateBankDto = z.infer<typeof updateBankSchema>;
+// There was a createBankSchema/updateBankSchema here (branch/ifsc/
+// accountNumber, all optional) but it was never imported by any
+// controller — Bank is a SIMPLE_MASTERS entry using the generic
+// createMasterSchema (see masters.module.ts), and none of those three
+// fields exist on the Bank Prisma model at all (which has only
+// `ifscPrefix`, not `ifsc`, and no `branch`/`accountNumber` columns).
+// Removed rather than fixed in place: it described a schema that never
+// matched reality, and its presence is what led a later admin-UI fix to
+// wire up fields the live API rejects with "Unrecognized key(s)" — see
+// docs/todo.md's "AreaLocation/Bank/ChargeType have real optional
+// columns the API never exposes" for the actual (deferred) gap and the
+// real column name.
 
 // createLetterTemplateSchema/updateLetterTemplateSchema live in documents.ts
 // now, not here — this file's original version was itself incomplete
