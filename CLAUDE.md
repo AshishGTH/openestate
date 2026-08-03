@@ -3310,6 +3310,7 @@ flips it on. `NODE_ENV` is restored in `afterAll` so it doesn't leak
 into sibling test files sharing the same forked worker (mirrors this
 repo's own `THROTTLE_TEST_KEY_PREFIX` isolation precedent).
 
-Fixed and test-covered; redeploy to the VM and live re-verification
-(the `force-change-password` submission that 403'd should now succeed)
-follow immediately, before the walkthrough continues.
+Fixed, test-covered, redeployed, and re-verified live on the VM: the
+same `force-change-password` submission that 403'd now succeeds, the
+new password works for a fresh login, and the walkthrough continued
+from there.
