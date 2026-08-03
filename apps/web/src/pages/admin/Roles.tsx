@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { usePaginatedQuery, useApiMutation } from '../../lib/hooks';
+import { useApiMutation } from '../../lib/hooks';
+import { api } from '../../lib/api';
 import DataTable, { type Column } from '../../components/DataTable';
-import Pagination from '../../components/Pagination';
 
 interface Role {
   id: string;
@@ -14,13 +14,14 @@ interface Role {
 }
 
 export default function RolesPage() {
-  const [page, setPage] = useState(1);
-
-  const { data, isLoading } = usePaginatedQuery<Role>(
-    ['roles'],
-    '/roles',
-    { page, limit: 20 },
-  );
+  // GET /roles returns every role for the company as a plain array (not
+  // paginated — roles.controller.ts's findAll ignores query params
+  // entirely), so this can't use usePaginatedQuery/{data, meta} like the
+  // other admin list pages.
+  const { data, isLoading } = useQuery<Role[]>({
+    queryKey: ['roles'],
+    queryFn: () => api('/roles'),
+  });
 
   const deleteMutation = useApiMutation<unknown, { id: string }>(
     'DELETE',
@@ -88,14 +89,7 @@ export default function RolesPage() {
       </div>
 
       <div className="mt-4">
-        <DataTable columns={columns} data={data?.data ?? []} isLoading={isLoading} />
-        {data?.meta && (
-          <Pagination
-            page={data.meta.page}
-            totalPages={data.meta.totalPages}
-            onPageChange={setPage}
-          />
-        )}
+        <DataTable columns={columns} data={data ?? []} isLoading={isLoading} />
       </div>
     </div>
   );
