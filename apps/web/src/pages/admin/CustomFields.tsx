@@ -10,7 +10,7 @@ import DataTable, { type Column } from '../../components/DataTable';
 interface CustomField {
   id: string;
   entityType: string;
-  fieldName: string;
+  key: string;
   fieldType: string;
   label: string;
   isRequired: boolean;
@@ -22,7 +22,7 @@ export default function CustomFieldsPage() {
   const [selectedEntity, setSelectedEntity] = useState<(typeof CUSTOM_FIELD_ENTITIES)[number]>(CUSTOM_FIELD_ENTITIES[0]);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({
-    fieldName: '',
+    key: '',
     fieldType: CUSTOM_FIELD_TYPES[0] as (typeof CUSTOM_FIELD_TYPES)[number],
     label: '',
     isRequired: false,
@@ -41,7 +41,7 @@ export default function CustomFieldsPage() {
     try {
       const body: Record<string, unknown> = {
         entityType: selectedEntity,
-        fieldName: formData.fieldName,
+        key: formData.key,
         fieldType: formData.fieldType,
         label: formData.label,
         isRequired: formData.isRequired,
@@ -55,7 +55,7 @@ export default function CustomFieldsPage() {
       });
       qc.invalidateQueries({ queryKey: ['custom-fields', selectedEntity] });
       setShowForm(false);
-      setFormData({ fieldName: '', fieldType: CUSTOM_FIELD_TYPES[0], label: '', isRequired: false, options: '' });
+      setFormData({ key: '', fieldType: CUSTOM_FIELD_TYPES[0], label: '', isRequired: false, options: '' });
     } catch (err) {
       setFormError((err as Error).message);
     }
@@ -69,7 +69,7 @@ export default function CustomFieldsPage() {
 
   const columns: Column<CustomField>[] = [
     { key: 'label', header: 'Label', render: (f) => f.label },
-    { key: 'fieldName', header: 'Field Name', render: (f) => f.fieldName },
+    { key: 'key', header: 'Field Name', render: (f) => f.key },
     {
       key: 'type',
       header: 'Type',
@@ -153,8 +153,8 @@ export default function CustomFieldsPage() {
               <label className="block text-sm font-medium text-slate-700">Field Name</label>
               <input
                 type="text"
-                value={formData.fieldName}
-                onChange={(e) => setFormData((p) => ({ ...p, fieldName: e.target.value }))}
+                value={formData.key}
+                onChange={(e) => setFormData((p) => ({ ...p, key: e.target.value }))}
                 placeholder="snake_case"
                 className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               />
