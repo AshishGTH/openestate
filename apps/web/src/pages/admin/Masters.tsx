@@ -67,11 +67,13 @@ const TYPE_FIELDS: Record<string, FieldDef[]> = {
     { key: 'amountPaise', label: 'Amount (₹) — if Fixed', type: 'number', moneyField: true },
     { key: 'percentage', label: 'Percentage — if Percentage', type: 'number' },
   ],
-  banks: [
-    { key: 'branch', label: 'Branch', type: 'text' },
-    { key: 'ifsc', label: 'IFSC', type: 'text' },
-    { key: 'accountNumber', label: 'Account Number', type: 'text' },
-  ],
+  // Bank.ifscPrefix is a real optional Prisma column, but the API's
+  // generic master factory doesn't expose it (see docs/todo.md
+  // "AreaLocation/Bank/ChargeType have real optional columns the API
+  // never exposes" — a pre-existing, already-deferred backend gap, not
+  // something this page's form can fix on its own). No banks entry here
+  // deliberately: name/isActive/sortOrder are the only fields the live
+  // API actually accepts for Bank today.
   'payment-plan-templates': [{ key: 'description', label: 'Description', type: 'text' }],
   'gst-rates': [
     { key: 'rate', label: 'Rate %', type: 'number', required: true },
