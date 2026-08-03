@@ -3250,3 +3250,66 @@ consistent with nothing having ever exercised it end-to-end.
 Fixed, redeployed to the VM, re-verified, then continued the
 walkthrough — per the walkthrough's own ground rule not to batch fixes
 to the end.
+
+### Systematic VM admin walkthrough — issue #2: Secure cookies over plain HTTP, silently and completely broken for every real browser
+
+Found immediately after issue #1, submitting the very first
+CSRF-protected mutation of the walkthrough (`force-change-password`):
+`403 CSRF token mismatch`, on a freshly-logged-in session, on the very
+first attempt. `setRefreshCookie`/`setCsrfCookie` (staff and portal
+both — `auth.controller.ts`, `portal-auth.controller.ts`) set
+`secure: process.env.NODE_ENV === 'production'`. NODE_ENV is
+`'production'` on every real native install by design — but this
+project's own `deploy/native/` nginx config deliberately does not set
+up TLS out of the box (see its own doc comment: "put a real
+TLS-terminating proxy... in front for production use"). The VM this
+session tests against runs exactly that default: plain HTTP, no TLS. A
+cookie marked `Secure` is, per RFC 6265, silently never stored by any
+real browser over a non-HTTPS connection — confirmed directly via
+`wget -S`, which showed `Set-Cookie: ...; Secure` in the raw response.
+So on any install that hasn't put its own TLS in front (which is the
+*default*, out-of-the-box state, not a misconfiguration) — the CSRF
+cookie and the refresh cookie **never get stored, ever, in any real
+browser, for any user, staff or portal.** Not a degraded experience: no
+mutation can ever succeed, and no session can ever survive a page
+reload.
+
+This had been invisible for the project's entire history. Every prior
+"VM verification" (this session and, per the CLAUDE.md entries above,
+at least four before it) used curl or wget against the VM directly —
+neither enforces the Secure-cookie-requires-HTTPS rule, so neither
+could ever have caught this. The Browser pane's per-site approval gate
+on this VM's origin blocked every attempted real-browser check across
+multiple sessions (see the earlier-documented incidents), which is
+almost certainly *why* this survived so long: the one tool that would
+have caught it immediately was the one tool that couldn't reach the
+VM. This walkthrough is, as far as this project's history shows, the
+first time a real browser (via Claude in Chrome, after the Browser
+pane's gate blocked again and the user redirected to it) ever drove a
+mutation against the actual deployed VM.
+
+Root cause: `NODE_ENV === 'production'` is not a proxy for "this
+connection is HTTPS" — conflating the two is the entire bug. Fixed by
+keying `secure` off `req.secure` instead, which correctly reflects the
+actual client-facing scheme once the app trusts its (single, always
+present) reverse proxy: `app.getHttpAdapter().getInstance().set('trust
+proxy', 1)` in `main.ts`, so `req.secure` honors nginx's own
+`X-Forwarded-Proto` header. On this VM (plain HTTP) this makes `secure`
+correctly `false` — cookies now actually get stored, and CSRF and
+session persistence work for the first time. On a *future* install
+with a real TLS-terminating proxy in front, `X-Forwarded-Proto: https`
+would flip it back to `true` automatically — no config toggle needed
+either way, it just tells the truth about the actual connection.
+
+New regression tests (`e2e-cookie-secure.test.ts`) reproduce the exact
+bug condition — `NODE_ENV=production` set explicitly, since the shared
+test bootstrap never sets it — over what looks like a plain HTTP
+request, and assert neither staff nor portal login sets a `Secure`
+cookie; a third test confirms `X-Forwarded-Proto: https` correctly
+flips it on. `NODE_ENV` is restored in `afterAll` so it doesn't leak
+into sibling test files sharing the same forked worker (mirrors this
+repo's own `THROTTLE_TEST_KEY_PREFIX` isolation precedent).
+
+Fixed and test-covered; redeploy to the VM and live re-verification
+(the `force-change-password` submission that 403'd should now succeed)
+follow immediately, before the walkthrough continues.

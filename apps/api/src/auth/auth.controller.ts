@@ -38,7 +38,14 @@ const CSRF_COOKIE = STAFF_CSRF_COOKIE;
 function setRefreshCookie(res: Response, token: string, expiresAt: Date) {
   res.cookie(REFRESH_COOKIE, token, {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    // req.secure reflects the CLIENT's real scheme via X-Forwarded-Proto
+    // (see main.ts's `trust proxy` setting) — NOT NODE_ENV, which is
+    // 'production' on every real native install regardless of whether
+    // TLS is actually configured in front of it (it isn't, by default).
+    // A Secure cookie is silently never stored by any real browser over
+    // plain HTTP, which broke CSRF and session persistence outright on
+    // any install without its own TLS-terminating proxy.
+    secure: res.req.secure,
     sameSite: 'strict',
     path: '/api/v1/auth',
     expires: expiresAt,
@@ -49,7 +56,14 @@ function setCsrfCookie(res: Response) {
   const csrfToken = crypto.randomUUID();
   res.cookie(CSRF_COOKIE, csrfToken, {
     httpOnly: false,
-    secure: process.env.NODE_ENV === 'production',
+    // req.secure reflects the CLIENT's real scheme via X-Forwarded-Proto
+    // (see main.ts's `trust proxy` setting) — NOT NODE_ENV, which is
+    // 'production' on every real native install regardless of whether
+    // TLS is actually configured in front of it (it isn't, by default).
+    // A Secure cookie is silently never stored by any real browser over
+    // plain HTTP, which broke CSRF and session persistence outright on
+    // any install without its own TLS-terminating proxy.
+    secure: res.req.secure,
     sameSite: 'strict',
     path: '/',
   });
