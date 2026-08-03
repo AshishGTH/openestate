@@ -3430,3 +3430,64 @@ Fixed, redeployed, and re-verified live on the VM: created a field on
 Applicant (`aadhaar_number`, TEXT) and one on Unit (`facing_direction`,
 SELECT with options North/South/East/West), both confirmed present
 after a full page reload.
+
+### Systematic VM admin walkthrough — issue #6: role slug regex + Roles/Users list pages both silently empty
+
+Found during the ROLES & USERS phase, three bugs in sequence:
+
+1. Role creation 400'd on the first attempt — RoleForm.tsx's own hint
+   text promises "lowercase letters, numbers, hyphens, underscores"
+   but `createRoleSchema`'s regex rejected hyphens entirely. Fixed by
+   widening the regex to match what the UI has always promised (see
+   full writeup above this one — filed as its own commit before this
+   summary).
+2. The role was created (confirmed via direct API response) but the
+   Roles list showed "No data found". `GET /roles` has always returned
+   a plain array; `Roles.tsx` read it as `{data, meta}` via
+   `usePaginatedQuery`, so `data.data` was always `undefined`. **The
+   Roles list has never shown a single role, ever**, regardless of how
+   many existed. Checked the other three `usePaginatedQuery` consumers
+   (Users, Brokers, Masters, AuditLog) against their backends — all
+   four genuinely paginate; this was an isolated mismatch.
+3. Same bug, second independent occurrence: `UserForm.tsx`'s Add User
+   page has a Role dropdown that read `roles?.data?.map(...)` against
+   the same bare-array endpoint — the dropdown has always been empty,
+   so a user could never be assigned a role through the UI at all
+   (had to go back and re-fix this after the create-user flow
+   demonstrated it live).
+
+Both fixed with a plain `useQuery<Role[]>` instead of
+`usePaginatedQuery`. Fixed, redeployed, and re-verified live: created
+role "Site Visit Coordinator" (5 permissions: inquiry.read/update,
+site-visit.create/read/update), it now appears in the Roles list,
+selecting it now works when creating a user, and the created user
+("Priya Coordinator") logged in successfully.
+
+**Lower-severity finding, not fixed:** navigating a low-permission user
+directly to an admin URL (`/admin/users`) renders the page shell
+(including a clickable "Add User" button) instead of an access-denied
+state — the backend correctly 403s the underlying `GET /users` (no
+data leak, no security hole), but the frontend has no route-level
+permission guard, so the page silently shows "No data found" rather
+than explaining why. Confirmed via network log: the 403 happens, the
+UI just doesn't distinguish it from a genuinely empty list. Worth a
+future pass (a `<RequirePermission>` route wrapper), not fixed here.
+
+**Major finding, not fixed — requires a scope decision:** the staff
+web app (`apps/web`) has **zero frontend UI for Pre-sales
+(Inquiries/Follow-ups/Site-Visits/duplicate-detection/reassignment) or
+Inventory (Projects/Towers/Units)** — no routes in `App.tsx`, no nav
+entries in `AppShell.tsx`, no pages under `apps/web/src/pages/`, for
+either module, for any role including Super Admin. Both backends are
+complete (`apps/api/src/presales/` has 17 files; inventory has its own
+full module) with full `PRESALES_*`/inventory permission sets already
+wired into the Add Role permissions picker — the picker just controls
+access to screens that don't exist. A prior session's decisions log
+entry (Phase 7) already acknowledged the Pre-sales gap as "out of this
+phase's UI scope," but it was never tracked in `docs/todo.md` and this
+walkthrough's own Tasks #28 (INVENTORY) and #29 (PRE-SALES) cannot be
+executed as specified without it. This blocks real usage of the
+product's actual sales funnel — a company using this software today
+could never log an inquiry or set up a project's units through the
+real UI. Flagged to the user rather than silently built (a multi-file,
+multi-day frontend build, not a bug fix) or silently skipped.
