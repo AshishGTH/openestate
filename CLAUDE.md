@@ -3314,3 +3314,37 @@ Fixed, test-covered, redeployed, and re-verified live on the VM: the
 same `force-change-password` submission that 403'd now succeeds, the
 new password works for a fresh login, and the walkthrough continued
 from there.
+
+### Systematic VM admin walkthrough — issue #3: Company Config page had no way to edit the company's own name
+
+Found during the COMPANY phase, filling in every field on the config
+page: `CompanyConfig.tsx` only ever called `PATCH /company/config`
+(terminology, modules, GST, locale, branding). The company's own
+`name` field has a separate backend endpoint, `PATCH /company`
+(`ADMIN_COMPANY_UPDATE`), that the frontend simply never wired up —
+not a regression, a gap that existed since the page was first built.
+No automated test caught it because none existed: grepping
+`apps/api/test` turned up zero references to `PATCH /company` at all,
+staff or portal, direct-service or through-the-wire.
+
+Lower severity than issues #1/#2 (no security or data-loss impact,
+just a missing field), but same *shape* as this walkthrough's other
+findings: invisible to every existing test because no test exercised
+the endpoint, and invisible to code review because the missing UI
+looks like "config page for config, not company core fields" rather
+than an obvious hole — the kind of gap that only surfaces by actually
+trying to do the thing a real admin would do on day one (name your
+company).
+
+Fixed by adding a Company Name field, wiring `handleSave` to PATCH
+both endpoints, and adding `e2e-company-update.test.ts` (PATCH
+`/company` round-trips through GET `/company`, since there was no
+coverage of this endpoint at all before now). Address has no schema
+field anywhere in the project and is scoped out as a separate,
+never-built gap rather than a bug — fixing it would mean a new
+migration + DTO + UI, out of scope for "fix what's broken."
+
+Fixed, test-covered, redeployed, and re-verified live on the VM: name
+plus GSTIN, GST state code, FY start month, logo URL, and accent color
+were all filled in through the real UI, saved, and confirmed present
+after a full page reload.
