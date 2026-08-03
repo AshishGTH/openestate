@@ -154,3 +154,16 @@ feeds the same CGST/SGST-vs-IGST place-of-supply logic as
 `CompanyConfig.gstStateCode` (Phase 4), so it's a real gap for a company
 with projects in multiple states. Same `extraFields` mechanism
 (`master.factory.ts`) would fix all three in one pass.
+
+## Custom field definitions have no value-capture anywhere
+
+`CustomFieldDefinition` (admin CRUD at `/admin/custom-fields`) lets an
+admin define a field on Applicant/Unit/Booking/Inquiry/Project, but
+that's the entire feature — there is no `CustomFieldValue` model, no
+API for setting/reading a value against a real entity, and none of the
+Applicant/Unit/Booking/Inquiry/Project forms fetch or render the
+definitions at all. Defining a field today has zero effect anywhere
+else in the product. Unblocked by: a `CustomFieldValue` table
+(entityId + definitionId + value), an endpoint per entity to read/write
+values, and wiring each of the five forms to fetch definitions for
+their entity type and render+submit them dynamically.
