@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { formatInr } from '@openestate/shared';
 import { api, downloadFile } from '../../lib/api';
 
@@ -183,9 +184,14 @@ export default function ReceiptEntry() {
           {applicant ? (
             <div className="mt-1 flex items-center justify-between rounded-md bg-blue-50 px-3 py-2 text-sm">
               <span className="font-medium text-blue-900">{applicant.name} — {applicant.primaryPhone}</span>
-              <button type="button" tabIndex={-1} onClick={() => { setApplicant(null); setBookingId(''); }} className="text-xs text-blue-600 hover:text-blue-800">
-                Change
-              </button>
+              <div className="flex items-center gap-3">
+                <Link to={`/postsales/applicants/${applicant.id}`} className="text-xs text-blue-600 hover:text-blue-800">
+                  View ledger
+                </Link>
+                <button type="button" tabIndex={-1} onClick={() => { setApplicant(null); setBookingId(''); }} className="text-xs text-blue-600 hover:text-blue-800">
+                  Change
+                </button>
+              </div>
             </div>
           ) : (
             <>
