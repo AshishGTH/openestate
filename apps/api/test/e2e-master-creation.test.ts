@@ -301,6 +301,17 @@ describeIf('e2e master/admin-entity creation: real HTTP through the full guard p
     expect(res.body.name).toBe('E2E Created Role');
   });
 
+  it('POST /roles accepts a hyphenated slug (RoleForm.tsx\'s own hint text promises hyphens)', async () => {
+    const { agent, token, csrf } = await loginWithCsrf();
+    const res = await agent
+      .post('/api/v1/roles')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-CSRF-Token', csrf)
+      .send({ name: 'E2E Hyphen Role', slug: `e2e-hyphen-role-${TAG}`, permissionIds: [onePermissionId] })
+      .expect(201);
+    expect(res.body.id).toBeTruthy();
+  });
+
   it('POST /custom-fields creates a SELECT field with options and a default value', async () => {
     const { agent, token, csrf } = await loginWithCsrf();
     const res = await agent
