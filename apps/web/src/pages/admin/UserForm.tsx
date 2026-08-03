@@ -19,9 +19,11 @@ export default function UserForm() {
   const navigate = useNavigate();
   const [error, setError] = useState('');
 
-  const { data: roles } = useQuery<{ data: Role[] }>({
+  // GET /roles returns a plain array, not {data, meta} — see Roles.tsx's
+  // own fix for this same shape mismatch.
+  const { data: roles } = useQuery<Role[]>({
     queryKey: ['roles-all'],
-    queryFn: () => api('/roles?limit=100'),
+    queryFn: () => api('/roles'),
   });
 
   const { data: existingUser } = useQuery({
@@ -147,7 +149,7 @@ export default function UserForm() {
             className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
             <option value="">Select a role</option>
-            {roles?.data?.map((r: Role) => (
+            {roles?.map((r: Role) => (
               <option key={r.id} value={r.id}>
                 {r.name}
               </option>
