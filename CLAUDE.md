@@ -3491,3 +3491,56 @@ product's actual sales funnel — a company using this software today
 could never log an inquiry or set up a project's units through the
 real UI. Flagged to the user rather than silently built (a multi-file,
 multi-day frontend build, not a bug fix) or silently skipped.
+
+**Resolution**: user chose to have both built now rather than deferred
+or skipped. Minimal Inventory UI (Projects list+create with RERA
+number, project detail with tower create, bulk-generate units, a
+filterable unit list, multi-select rate revision, per-unit rate
+history) and minimal Pre-sales UI (Inquiries list+create with inline
+applicant creation surfacing the backend's duplicate-detection field,
+inquiry detail with status transitions/reassignment/a follow-up log
+that doubles as site-visit logging) were built and wired into
+`App.tsx`/`AppShell.tsx`. Explicitly NOT built: PLC/unit-charge
+management and layout-plan upload — confirmed via a full backend
+survey that neither has a real endpoint (`UnitPlc`/`UnitCharge` are
+Prisma models with no controller; `UploadService` exists but no
+inventory route calls it) — wiring a form to a non-existent endpoint
+isn't a minimal UI, it's a broken one.
+
+Three more bugs surfaced building and click-through-verifying this new
+code, all fixed same-session before moving on:
+
+1. **ProjectDetail.tsx crashed on load.** `GET /projects/:id/towers`
+   returns `{data, meta}` like every other list endpoint in this
+   codebase — but the page fetched it as `useQuery<Tower[]>` and called
+   `.map()` directly on the wrapper object. `TypeError: St.map is not a
+   function`, whole page blank. Caught immediately by loading the page
+   live per the standing rule. Fixed by reading `.data` like the page's
+   own Units/rate-history queries already correctly did.
+2. **Masters.tsx's Bank fields were invented, not real.** While wiring
+   Unit Types into the new bulk-generate form, added `branch`/`ifsc`/
+   `accountNumber` fields to Banks by copying `createBankSchema` from
+   `master.dto.ts` — which turned out to be dead code (never imported
+   by any controller) describing a schema that doesn't match the real
+   `Bank` Prisma model (no `branch`/`accountNumber` columns; the real
+   column is `ifscPrefix`, not `ifsc`). 400'd on the very next
+   submission. Fixed by removing the invented fields and deleting the
+   dead schema so it can't mislead anyone else the same way (see the
+   fuller writeup a few sections up).
+3. **Inquiries.tsx list never refreshed after creating an inquiry.**
+   `POST /inquiries` succeeded (201) but `handleCreate` called `api()`
+   directly and never invalidated the `['inquiries']` query cache —
+   unlike Projects.tsx (uses `useApiMutation`'s `invalidateKeys`) and
+   ProjectDetail.tsx (explicit `qc.invalidateQueries` after bulk-
+   generate/rate-revision). Added the missing invalidation call.
+
+Fixed, redeployed, and re-verified live end-to-end on the VM: created
+project "Green Woods Residency" with a RERA number, two towers,
+bulk-generated 12 units in Tower A, applied a rate revision to 2 units
+and confirmed it in Rate History; created an inquiry, created a second
+inquiry with the same phone number and confirmed the duplicate-warning
+banner appeared, logged a follow-up, logged a site visit (via the
+"Site Visit" follow-up type + scheduled date + venue — confirmed
+correct in the database directly, not just the UI), reassigned the
+inquiry to the "Site Visit Coordinator" test user from the ROLES &
+USERS phase, and marked it SUCCESSFUL.
