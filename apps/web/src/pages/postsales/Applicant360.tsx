@@ -126,6 +126,28 @@ export default function Applicant360() {
   });
   const templatesFor = (entityType: string) => templatesRes?.data?.filter((t) => t.entityType === entityType) ?? [];
 
+  const [inviteChannel, setInviteChannel] = useState<'EMAIL' | 'SMS'>('EMAIL');
+  const [inviteLink, setInviteLink] = useState('');
+  const [inviteError, setInviteError] = useState('');
+  const [sendingInvite, setSendingInvite] = useState(false);
+
+  async function sendPortalInvite() {
+    setInviteError('');
+    setInviteLink('');
+    setSendingInvite(true);
+    try {
+      const res = await api<{ inviteId: string; token: string }>('/admin/portal-invites', {
+        method: 'POST',
+        body: JSON.stringify({ applicantId, channel: inviteChannel }),
+      });
+      setInviteLink(`${window.location.origin}/portal/invite/${res.inviteId}?token=${res.token}`);
+    } catch (err) {
+      setInviteError((err as Error).message);
+    } finally {
+      setSendingInvite(false);
+    }
+  }
+
   const qc = useQueryClient();
   const [allotmentTemplateId, setAllotmentTemplateId] = useState('');
   const [demandTemplateId, setDemandTemplateId] = useState('');
@@ -167,6 +189,26 @@ export default function Applicant360() {
         {applicant.email && <span>{applicant.email}</span>}
         {applicant.city && <span>{applicant.city}</span>}
       </div>
+
+      <div className="mt-3 flex items-center gap-2">
+        <select value={inviteChannel} onChange={(e) => setInviteChannel(e.target.value as 'EMAIL' | 'SMS')} className="rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+          <option value="EMAIL">Email</option>
+          <option value="SMS">SMS</option>
+        </select>
+        <button
+          onClick={sendPortalInvite}
+          disabled={sendingInvite}
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          {sendingInvite ? 'Sending…' : 'Send Portal Invite'}
+        </button>
+      </div>
+      {inviteLink && (
+        <p className="mt-1 text-xs text-slate-500 break-all">
+          Invite link (delivery via {inviteChannel} is not configured on this install — share manually): {inviteLink}
+        </p>
+      )}
+      {inviteError && <p className="mt-1 text-xs text-red-600">{inviteError}</p>}
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section className="rounded-lg border border-slate-200 bg-white p-4">
