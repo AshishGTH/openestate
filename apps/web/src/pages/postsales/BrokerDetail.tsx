@@ -226,6 +226,29 @@ export default function BrokerDetail() {
     }
   }
 
+  // ── Portal invite ──
+  const [inviteChannel, setInviteChannel] = useState<'EMAIL' | 'SMS'>('EMAIL');
+  const [inviteLink, setInviteLink] = useState('');
+  const [inviteError, setInviteError] = useState('');
+  const [sendingInvite, setSendingInvite] = useState(false);
+
+  async function sendPortalInvite() {
+    setInviteError('');
+    setInviteLink('');
+    setSendingInvite(true);
+    try {
+      const res = await api<{ inviteId: string; token: string }>('/admin/portal-invites', {
+        method: 'POST',
+        body: JSON.stringify({ brokerId, channel: inviteChannel }),
+      });
+      setInviteLink(`${window.location.origin}/portal/invite/${res.inviteId}?token=${res.token}`);
+    } catch (err) {
+      setInviteError((err as Error).message);
+    } finally {
+      setSendingInvite(false);
+    }
+  }
+
   // ── Statement ──
   async function handleGenerateStatement() {
     setError('');
@@ -254,6 +277,26 @@ export default function BrokerDetail() {
           {broker.isActive ? 'Active' : 'Inactive'}
         </span>
       </div>
+
+      <div className="flex items-center gap-2">
+        <select value={inviteChannel} onChange={(e) => setInviteChannel(e.target.value as 'EMAIL' | 'SMS')} className="rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+          <option value="EMAIL">Email</option>
+          <option value="SMS">SMS</option>
+        </select>
+        <button
+          onClick={sendPortalInvite}
+          disabled={sendingInvite}
+          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+        >
+          {sendingInvite ? 'Sending…' : 'Send Portal Invite'}
+        </button>
+      </div>
+      {inviteLink && (
+        <p className="text-xs text-slate-500 break-all">
+          Invite link (delivery via {inviteChannel} is not configured on this install — share manually): {inviteLink}
+        </p>
+      )}
+      {inviteError && <p className="text-xs text-red-600">{inviteError}</p>}
 
       {error && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
