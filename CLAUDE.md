@@ -3820,3 +3820,69 @@ confirmed correct via successful downloads of the same content
 earlier in the session, so this reads as a client-side download-
 finalization quirk specific to the automation environment, not
 something a real user's browser would hit.
+
+## REPORTS phase — 1 serious financial-correctness bug found and fixed
+
+**Bounced cheque receipts were still counted as collected money in
+every collection/rollup report and the customer portal's own payment
+history.** Spot-checked Collection Summary against the BROKERS-phase
+booking (₹55,00,000 across 3 receipts, one ₹20,00,000 cheque already
+confirmed bounced and correctly reversed in the ledger, installment
+schedule, and Applicant 360) — Total Collected showed the full
+₹55,00,000, not the correct ₹35,00,000 net of the bounce.
+
+Root-caused to `recordChequeEvent`'s BOUNCED branch
+(`receipt.service.ts`): it correctly reverses the receipt's ledger
+effects via `reverseReceiptLedger` (which is why every ledger-based
+view was already right), but never sets `Receipt.isReversed` — only
+the separate `reverseReceipt()` manual-cancel path does that. Every
+query filtering `isReversed: false` — `collectionSummary`,
+`collectionByPeriod`, both project-wise and company-wide rollups
+(`postsales-reports.service.ts`), and the customer portal's own
+receipt history (`portal-account.service.ts`) — kept counting bounced
+cheque amounts as real collected money. `commission.service.ts` and
+`cancellation.service.ts`'s own `isReversed` usages were independently
+guarded by `clearanceStatus: {in: [NOT_APPLICABLE, CLEARED]}`, so
+unaffected.
+
+Fixed by setting `isReversed: true` (and `reversalReason`) in the same
+`receipt.update()` call, mirroring `reverseReceipt()`'s own semantics —
+a bounce IS a reversal of that receipt's contribution, the flag should
+say so. This surfaced a second, necessary fix: `receipt.controller.ts`'s
+cheque-queue endpoint unconditionally filtered `isReversed: false`,
+which would have made the Cheque Queue's own BOUNCED tab always empty
+the moment bounced receipts started carrying that flag — now only
+applied when not explicitly querying `status=BOUNCED`.
+
+Added a regression test (`postsales-reports.test.ts`) asserting
+`collectionSummary`'s total drops by exactly the bounced amount and
+`Receipt.isReversed` flips to `true`; ran the full commission/NOC/
+ledger/receipt test suite (27 tests) before deploying — all passing,
+confirming no other consumer broke.
+
+Live re-verification: the already-bounced receipt from the BROKERS
+phase predates the fix and still carries the stale flag in the
+database — correcting it would have needed a raw SQL UPDATE, which
+the session's own safety guardrails correctly declined to run (a
+direct production data mutation outside the product's own code paths
+is exactly the kind of action those guardrails exist to catch; no
+attempt was made to route around the block). Instead, verified the
+fix through the product itself: created a new ₹1,00,000 cheque
+receipt against a second booking, confirmed Collection Summary/
+company rollup/project rollup all read ₹55,00,000 before, bounced the
+new cheque through the real UI, and confirmed every one of those
+numbers still read exactly ₹55,00,000 afterward — the new receipt's
+addition and its own bounce's exclusion cancelled to zero net change,
+proving the fix works for real money going forward. Also confirmed
+the Cheque Queue's BOUNCED tab still correctly lists both the old and
+new bounced receipts despite the flag change.
+
+All 9 report types opened and checked for plausible numbers: Units
+sold vs available (10/2, matches inventory), Bookings by status
+(2 BOOKED), Collection summary/daily/monthly/detail, Project-wise and
+company-wide rollups (all internally consistent), Birthday list
+(correctly empty — no applicant DOB was ever collected in this
+walkthrough, not a bug). CSV export confirmed returning 200 for every
+report type tried (network-level verification, since browser-harness
+download finalization is the same known non-product quirk noted
+above).
