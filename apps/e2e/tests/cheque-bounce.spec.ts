@@ -113,5 +113,8 @@ test('book a unit → record a cheque receipt → bounce it → Collection Summa
   // ── The regression check: back to exactly the pre-receipt baseline ──
   await gotoReportsAndWait(page);
   expect(await readStat(page, 'Total receipts')).toBe(baselineReceipts);
-  expect(await readStat(page, 'Total collected')).toBe(baselineCollected);
+  // TEMPORARY, deliberately wrong — proving the e2e-playwright CI job
+  // actually goes red on a real failure, not just green on a pass. Revert
+  // in the immediate next commit.
+  expect(await readStat(page, 'Total collected')).toBe('₹99,99,999.00');
 });
