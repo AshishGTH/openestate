@@ -111,6 +111,38 @@ describeIf('Postsales reports: reconciliation and role-scoping', () => {
     expect(lastRow.runningBalancePaise).toBe(report.balancePaise);
   });
 
+  it('collectionSummary excludes a bounced cheque — recordChequeEvent must flip isReversed, not just reverse the ledger', async () => {
+    const { booking, installment } = await bookedByExec(L(10_00_000), execAId);
+
+    await svc.receipts.createReceipt(
+      fx.companyId,
+      { bookingId: booking.id, receiptDate: new Date('2026-06-16'), mode: 'NEFT', grossAmountPaise: L(4_00_000), allocations: [{ installmentId: installment.id, amountPaise: L(4_00_000) }], tdsDeductedPaise: 0n },
+      execAId,
+    );
+    const chequeReceipt = await svc.receipts.createReceipt(
+      fx.companyId,
+      { bookingId: booking.id, receiptDate: new Date('2026-06-20'), mode: 'CHEQUE', grossAmountPaise: L(6_00_000), allocations: [{ installmentId: installment.id, amountPaise: L(6_00_000) }], tdsDeductedPaise: 0n },
+      execAId,
+    );
+
+    // collectionSummary sums company-wide (no per-booking scope), and other
+    // tests in this file share the same company fixture — assert the delta
+    // caused by this bounce, not an absolute total.
+    const parsePaise = (formatted: string) => BigInt(formatted.replace(/[₹,]/g, '').replace(/\.\d\d$/, '')) * 100n;
+
+    const before = await reports.collectionSummary(fx.companyId, {});
+    const beforePaise = parsePaise(before.totalCollectedFormatted);
+
+    await svc.receipts.recordChequeEvent(fx.companyId, chequeReceipt.id, { status: 'BOUNCED', eventDate: new Date('2026-06-22') }, execAId);
+
+    const after = await reports.collectionSummary(fx.companyId, {});
+    const afterPaise = parsePaise(after.totalCollectedFormatted);
+    expect(beforePaise - afterPaise).toBe(L(6_00_000)); // bounced cheque excluded
+
+    const raw = await systemPrisma.receipt.findFirst({ where: { id: chequeReceipt.id } });
+    expect(raw.isReversed).toBe(true);
+  });
+
   it('a sales_exec cannot see another exec\'s booking in installment-dues or applicant-ledger reports', async () => {
     const { booking } = await bookedByExec(L(10_00_000), execAId);
 

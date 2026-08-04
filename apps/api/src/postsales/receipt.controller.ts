@@ -9,6 +9,7 @@ import {
   reverseReceiptSchema,
   tdsCertificateSchema,
   PERMISSIONS,
+  CHEQUE_CLEARANCE_STATUS,
 } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
@@ -39,8 +40,13 @@ export class ReceiptController {
       companyId: u.companyId,
       mode: { in: ['CHEQUE', 'DD'] },
       clearanceStatus: status ? status : { in: ['RECEIVED', 'DEPOSITED'] },
-      isReversed: false,
     };
+    // Bounced receipts are now correctly isReversed:true (recordChequeEvent
+    // sets it alongside the ledger reversal) — excluding isReversed here
+    // unconditionally would make the BOUNCED tab always empty.
+    if (status !== CHEQUE_CLEARANCE_STATUS.BOUNCED) {
+      where.isReversed = false;
+    }
     return this.systemPrisma.receipt.findMany({
       where,
       include: {
