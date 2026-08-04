@@ -6,6 +6,23 @@ management, post-sales unit/installment/receipt management, customer
 portal, broker portal). The architecture must allow other verticals
 via configuration and plugins, never via forking core code.
 
+## PRIMARY LESSON — verify in a real browser, not with curl/tests
+
+API-layer tests and curl verification systematically overstate
+completeness. This walkthrough found ~20 bugs in "completed" features,
+including several that had NEVER worked through the UI: Roles list
+rendered zero rows always; every master edit 400'd; Document Types/GST
+Rates/Letter Templates were unreachable; Custom Fields sent the wrong
+field name; forced password change was dead code; Pre-Sales and
+Inventory had no UI at all; and Secure-flagged cookies over plain HTTP
+meant NO browser mutation had ever succeeded on the VM — every prior
+"VM verified" claim used curl, which bypasses browser cookie
+enforcement.
+
+Rule: a feature is not done until a human has performed it in a real
+browser. Endpoint tests prove the server works, not that the product
+works. No feature ships on API-test evidence alone.
+
 ## Non-negotiable principles
 
 1. SELF-HOSTABLE FIRST. Everything must run with a single
