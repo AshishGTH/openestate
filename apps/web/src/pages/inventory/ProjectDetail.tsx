@@ -38,6 +38,19 @@ interface MasterOption {
   name: string;
 }
 
+interface UnitPlc {
+  id: string;
+  amountPaise: string;
+  percentage: string | null;
+  plcType: MasterOption;
+}
+
+interface UnitCharge {
+  id: string;
+  amountPaise: string;
+  chargeType: MasterOption;
+}
+
 const rupees = (paise: string | number) => `₹${(Number(paise) / 100).toLocaleString('en-IN')}`;
 
 export default function ProjectDetailPage() {
@@ -70,6 +83,13 @@ export default function ProjectDetailPage() {
 
   const [historyUnitId, setHistoryUnitId] = useState<string | null>(null);
 
+  const [pricingUnitId, setPricingUnitId] = useState<string | null>(null);
+  const [newPlcTypeId, setNewPlcTypeId] = useState('');
+  const [newPlcPercentage, setNewPlcPercentage] = useState('');
+  const [newChargeTypeId, setNewChargeTypeId] = useState('');
+  const [newChargeAmountRupees, setNewChargeAmountRupees] = useState('');
+  const [pricingError, setPricingError] = useState('');
+
   const { data: project } = useQuery<Project>({
     queryKey: ['project', id],
     queryFn: () => api(`/projects/${id}`),
@@ -100,6 +120,71 @@ export default function ProjectDetailPage() {
     queryFn: () => api(`/projects/${id}/units/${historyUnitId}/rate-history?page=1&limit=50`),
     enabled: !!id && !!historyUnitId,
   });
+
+  const { data: plcTypes } = useQuery<{ data: MasterOption[] }>({
+    queryKey: ['masters', 'plc-types', 'all'],
+    queryFn: () => api('/masters/plc-types?limit=100'),
+  });
+  const { data: chargeTypes } = useQuery<{ data: MasterOption[] }>({
+    queryKey: ['masters', 'charge-types', 'all'],
+    queryFn: () => api('/masters/charge-types?limit=100'),
+  });
+  const { data: unitPlcs } = useQuery<UnitPlc[]>({
+    queryKey: ['unit-plcs', id, pricingUnitId],
+    queryFn: () => api(`/projects/${id}/units/${pricingUnitId}/plcs`),
+    enabled: !!id && !!pricingUnitId,
+  });
+  const { data: unitCharges } = useQuery<UnitCharge[]>({
+    queryKey: ['unit-charges', id, pricingUnitId],
+    queryFn: () => api(`/projects/${id}/units/${pricingUnitId}/charges`),
+    enabled: !!id && !!pricingUnitId,
+  });
+
+  const addPlcMutation = useApiMutation<UnitPlc, Record<string, unknown>>(
+    'POST',
+    `/projects/${id}/units/${pricingUnitId}/plcs`,
+    [['unit-plcs', id ?? '', pricingUnitId ?? '']],
+  );
+  const removePlcMutation = useApiMutation<unknown, { plcId: string }>(
+    'DELETE',
+    (body) => `/projects/${id}/units/${pricingUnitId}/plcs/${body.plcId}`,
+    [['unit-plcs', id ?? '', pricingUnitId ?? '']],
+  );
+  const addChargeMutation = useApiMutation<UnitCharge, Record<string, unknown>>(
+    'POST',
+    `/projects/${id}/units/${pricingUnitId}/charges`,
+    [['unit-charges', id ?? '', pricingUnitId ?? '']],
+  );
+  const removeChargeMutation = useApiMutation<unknown, { chargeId: string }>(
+    'DELETE',
+    (body) => `/projects/${id}/units/${pricingUnitId}/charges/${body.chargeId}`,
+    [['unit-charges', id ?? '', pricingUnitId ?? '']],
+  );
+
+  const handleAddPlc = async () => {
+    setPricingError('');
+    try {
+      await addPlcMutation.mutateAsync({ plcTypeId: newPlcTypeId, percentage: Number(newPlcPercentage) });
+      setNewPlcTypeId('');
+      setNewPlcPercentage('');
+    } catch (err) {
+      setPricingError((err as Error).message);
+    }
+  };
+
+  const handleAddCharge = async () => {
+    setPricingError('');
+    try {
+      await addChargeMutation.mutateAsync({
+        chargeTypeId: newChargeTypeId,
+        amountPaise: String(Math.round(Number(newChargeAmountRupees) * 100)),
+      });
+      setNewChargeTypeId('');
+      setNewChargeAmountRupees('');
+    } catch (err) {
+      setPricingError((err as Error).message);
+    }
+  };
 
   const createTowerMutation = useApiMutation<Tower, Record<string, unknown>>(
     'POST',
@@ -313,9 +398,12 @@ export default function ProjectDetailPage() {
                     <td className="px-4 py-3 text-sm text-slate-700">{u.status}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{rupees(u.baseRatePaise)}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{u.carpetAreaSqft ?? '—'}</td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right space-x-3">
                       <button onClick={() => setHistoryUnitId(u.id)} className="text-blue-600 hover:text-blue-800 text-xs">
                         Rate History
+                      </button>
+                      <button onClick={() => setPricingUnitId(u.id)} className="text-blue-600 hover:text-blue-800 text-xs">
+                        Pricing
                       </button>
                     </td>
                   </tr>
@@ -371,6 +459,93 @@ export default function ProjectDetailPage() {
                 ))
               )}
             </ul>
+          </div>
+        )}
+
+        {pricingUnitId && (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-white p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-medium text-slate-800">Pricing — PLCs and extra charges</h3>
+              <button onClick={() => setPricingUnitId(null)} className="text-xs text-slate-500 hover:text-slate-700">Close</button>
+            </div>
+            {pricingError && <p className="mt-2 text-sm text-red-600">{pricingError}</p>}
+
+            <div className="mt-3">
+              <h4 className="text-xs font-medium uppercase tracking-wide text-slate-500">PLCs</h4>
+              <ul className="mt-1 space-y-1 text-sm text-slate-700">
+                {(unitPlcs ?? []).length === 0 ? (
+                  <li className="text-slate-500">None assigned</li>
+                ) : (
+                  unitPlcs!.map((p) => (
+                    <li key={p.id} className="flex items-center justify-between">
+                      <span>
+                        {p.plcType.name} — {rupees(p.amountPaise)}
+                        {p.percentage && ` (${p.percentage}%)`}
+                      </span>
+                      <button
+                        onClick={() => removePlcMutation.mutate({ plcId: p.id })}
+                        className="text-xs text-red-600 hover:text-red-800"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))
+                )}
+              </ul>
+              <div className="mt-2 flex items-end gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700">PLC Type</label>
+                  <select value={newPlcTypeId} onChange={(e) => setNewPlcTypeId(e.target.value)} className="mt-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                    <option value="">Select…</option>
+                    {plcTypes?.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700">Percentage of base rate</label>
+                  <input type="number" value={newPlcPercentage} onChange={(e) => setNewPlcPercentage(e.target.value)} className="mt-1 w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+                </div>
+                <button onClick={handleAddPlc} disabled={!newPlcTypeId || !newPlcPercentage} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                  Add PLC
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4">
+              <h4 className="text-xs font-medium uppercase tracking-wide text-slate-500">Extra charges</h4>
+              <ul className="mt-1 space-y-1 text-sm text-slate-700">
+                {(unitCharges ?? []).length === 0 ? (
+                  <li className="text-slate-500">None assigned</li>
+                ) : (
+                  unitCharges!.map((c) => (
+                    <li key={c.id} className="flex items-center justify-between">
+                      <span>{c.chargeType.name} — {rupees(c.amountPaise)}</span>
+                      <button
+                        onClick={() => removeChargeMutation.mutate({ chargeId: c.id })}
+                        className="text-xs text-red-600 hover:text-red-800"
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))
+                )}
+              </ul>
+              <div className="mt-2 flex items-end gap-2">
+                <div>
+                  <label className="block text-xs font-medium text-slate-700">Charge Type</label>
+                  <select value={newChargeTypeId} onChange={(e) => setNewChargeTypeId(e.target.value)} className="mt-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                    <option value="">Select…</option>
+                    {chargeTypes?.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-700">Amount (₹)</label>
+                  <input type="number" value={newChargeAmountRupees} onChange={(e) => setNewChargeAmountRupees(e.target.value)} className="mt-1 w-28 rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+                </div>
+                <button onClick={handleAddCharge} disabled={!newChargeTypeId || !newChargeAmountRupees} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                  Add Charge
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </section>

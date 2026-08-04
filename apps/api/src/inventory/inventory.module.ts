@@ -7,6 +7,7 @@ import { UnitController } from './unit.controller';
 import { UnitService } from './unit.service';
 import { UnitStateMachineService } from './unit-state-machine.service';
 import { RateRevisionService } from './rate-revision.service';
+import { UnitPricingService } from './unit-pricing.service';
 import { ImportExportController } from './import-export.controller';
 import { ImportExportService } from './import-export.service';
 import { UploadService } from './upload.service';
@@ -24,6 +25,7 @@ import { UploadService } from './upload.service';
     UnitService,
     UnitStateMachineService,
     RateRevisionService,
+    UnitPricingService,
     ImportExportService,
     UploadService,
   ],

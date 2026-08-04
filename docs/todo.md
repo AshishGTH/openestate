@@ -140,20 +140,24 @@ worse than no check at all for an admin trying to onboard their real
 company. Add real checksum verification once validated against a set of
 known-correct GSTIN/check-digit pairs (not from memory).
 
-## AreaLocation/Bank/ChargeType have real optional columns the API never exposes
+## AreaLocation/Bank have real optional columns the API never exposes
 
-`AreaLocation.city/state/stateCode/pincode`, `Bank.ifscPrefix`, and
-`ChargeType.hsnSac/gstRateId` all exist as real, optional Prisma columns,
-but `createMasterSchema` (the generic factory schema all three use) only
-has `name`/`description`/`isActive`/`sortOrder` — there is no way to set
-any of these via the API today, so every row created through the admin
-UI/API has them permanently null. Lower priority than the required-field
-gaps already fixed this pass (nothing 500s — creation just silently
-can't populate these fields), but `AreaLocation.stateCode` specifically
-feeds the same CGST/SGST-vs-IGST place-of-supply logic as
-`CompanyConfig.gstStateCode` (Phase 4), so it's a real gap for a company
-with projects in multiple states. Same `extraFields` mechanism
-(`master.factory.ts`) would fix all three in one pass.
+`AreaLocation.city/state/stateCode/pincode` and `Bank.ifscPrefix` exist as
+real, optional Prisma columns, but `createMasterSchema` (the generic
+factory schema both use) only has `name`/`description`/`isActive`/
+`sortOrder` — there is no way to set either via the API today, so every
+row created through the admin UI/API has them permanently null. Lower
+priority than the required-field gaps already fixed this pass (nothing
+500s — creation just silently can't populate these fields), but
+`AreaLocation.stateCode` specifically feeds the same CGST/SGST-vs-IGST
+place-of-supply logic as `CompanyConfig.gstStateCode` (Phase 4), so it's
+a real gap for a company with projects in multiple states. Same
+`extraFields` mechanism (`master.factory.ts`) would fix both in one pass
+— exactly what v0.2.0 (PLC/unit-charge management) already did for the
+third model in this originally-three-way gap,
+`ChargeType.hsnSac/gstRateId`, once a wrong or missing GST rate on a
+charge type became a real money-correctness risk, not just a cosmetic
+one.
 
 ## Custom field definitions have no value-capture anywhere
 

@@ -12,13 +12,20 @@ export interface E2eFixture {
   companyId: string;
   adminEmail: string;
   adminPassword: string;
+  projectName: string;
+  unitNumber: string;
+  // Only set when opts.withPricingMasters is passed (scenario 4) — the
+  // other scenarios have no use for a PLC type/GST-rated charge type.
+  plcTypeName?: string;
+  chargeTypeName?: string;
+  chargeTypeGstRatePercent?: number;
 }
 
 const rnd = () => Math.random().toString(36).slice(2, 8);
 
 export async function seedE2eFixture(
   databaseUrlSystem: string,
-  opts: { forcePasswordChange?: boolean } = {},
+  opts: { forcePasswordChange?: boolean; withPricingMasters?: boolean } = {},
 ): Promise<E2eFixture> {
   const prisma = createSystemPrismaClient(databaseUrlSystem);
   const tag = `${Date.now()}-${rnd()}`;
@@ -110,7 +117,38 @@ export async function seedE2eFixture(
       },
     });
 
-    return { companyId: company.id, adminEmail, adminPassword };
+    let plcTypeName: string | undefined;
+    let chargeTypeName: string | undefined;
+    let chargeTypeGstRatePercent: number | undefined;
+    if (opts.withPricingMasters) {
+      const plcType = await prisma.plcType.create({ data: { companyId: company.id, name: `Park Facing ${tag}` } });
+      plcTypeName = plcType.name;
+
+      // A GST rate distinct from the base line's (which nothing sets —
+      // there's no rate picker in the wizard today) so the assigned
+      // charge is taxed on ITS OWN rate, not left untaxed alongside an
+      // untaxed base line — exactly the scenario that motivated exposing
+      // ChargeType.gstRateId at all.
+      chargeTypeGstRatePercent = 5;
+      const gstRate = await prisma.gstRate.create({
+        data: { companyId: company.id, rate: chargeTypeGstRatePercent, description: `GST ${chargeTypeGstRatePercent}%`, effectiveFrom: new Date('2019-04-01') },
+      });
+      const chargeType = await prisma.chargeType.create({
+        data: { companyId: company.id, name: `IFMS ${tag}`, gstRateId: gstRate.id },
+      });
+      chargeTypeName = chargeType.name;
+    }
+
+    return {
+      companyId: company.id,
+      adminEmail,
+      adminPassword,
+      projectName: project.name,
+      unitNumber,
+      plcTypeName,
+      chargeTypeName,
+      chargeTypeGstRatePercent,
+    };
   } finally {
     await prisma.$disconnect();
   }

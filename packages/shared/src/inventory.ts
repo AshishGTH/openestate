@@ -186,6 +186,32 @@ export const changeRateSchema = z
 
 export type ChangeRateDto = z.infer<typeof changeRateSchema>;
 
+// ── Zod Schemas: Unit PLC / Charges ─────────────────────────
+
+// amountPaise is always the source of truth (Prisma column is
+// non-nullable) — percentage is an optional audit/display hint,
+// resolved to a paise amount once at assignment time and never
+// live-recomputed if the unit's base rate changes later.
+export const createUnitPlcSchema = z
+  .object({
+    plcTypeId: z.string().uuid(),
+    amountPaise: z.coerce.bigint().min(0n).optional(),
+    percentage: z.coerce.number().min(0).max(100).optional(),
+  })
+  .strict()
+  .refine((d) => d.amountPaise !== undefined || d.percentage !== undefined, {
+    message: 'Provide amountPaise or percentage',
+  });
+export type CreateUnitPlcDto = z.infer<typeof createUnitPlcSchema>;
+
+export const createUnitChargeSchema = z
+  .object({
+    chargeTypeId: z.string().uuid(),
+    amountPaise: z.coerce.bigint().min(0n),
+  })
+  .strict();
+export type CreateUnitChargeDto = z.infer<typeof createUnitChargeSchema>;
+
 // ── Zod Schemas: Import Row ─────────────────────────────────
 
 export const importUnitRowSchema = z.object({

@@ -4130,3 +4130,87 @@ dashboard-to-ledger click-through — all real, all still worth adding,
 just not required to unblock feature work resuming. One scenario per
 future release, starting with extending scenario 3 for PLC-priced
 units once v0.2.0 lands.
+
+## Phase v0.2.0 — PLC & unit-charge management
+
+Schema already existed in full from Phase 2 (`UnitPlc`, `UnitCharge`,
+`PlcType`, `ChargeType`, `BookingCostLine`'s `CostLineKind` including
+`PLC` — confirmed by reading the schema before writing a line of code,
+not from memory) — the actual gap was that neither `UnitPlc` nor
+`UnitCharge` had a controller at all, and `ChargeType.gstRateId`/
+`hsnSac` were real columns the generic master API never exposed.
+
+**New backend:** `UnitPricingService` (one service, not two — the two
+models are near-identical shape) + routes on the existing
+`UnitController` (`:id/plcs`, `:id/charges`, matching the established
+`:id/rate-history` sub-resource pattern, not a new controller file).
+Two new permissions (`inventory.unit.plc-manage`/`charge-manage`) —
+`super_admin`/`company_admin` already get both automatically via the
+existing `inventory.*` prefix filter in `roles.ts`; deliberately not
+given to `sales_manager`, matching the existing precedent that
+`INVENTORY_RATE_CHANGE` (a comparable pricing mutation) isn't either.
+A percentage-derived PLC amount is snapshotted to paise once, at
+assignment time, off the unit's rate at that moment — never
+live-recomputed if the rate changes later, matching every other
+snapshot in this codebase (rate revisions, cost-line GST).
+
+**GST-rate resolution, the one real design decision in this phase:**
+initially planned to leave a PLC/charge line untaxed unless it named
+its own `gstRateId`. Rejected on explicit instruction — GST genuinely
+differs by charge type in Indian real estate (statutory pass-throughs,
+IFMS, legal charges don't all follow the base sale rate), and a line
+silently taxed at 0% understates an invoice without ever raising an
+error. `booking.service.ts`'s cost-line loop now resolves each line's
+rate in order: the line's own `gstRateId`, else its charge type's
+(`ChargeType.gstRateId`, now exposed via Masters — `masters.module.ts`'s
+`extraFields`, the same mechanism `document-types`/`interest-rules`
+already use), else the booking's own `BASE` line's rate. A `PLC` line
+can never carry a `chargeTypeId` at all (`PlcType` has no relation to
+`GstRate`), so it always falls through to the base rate — stated
+explicitly in the code comment and here, not left implicit. The one
+genuinely untaxed case is a booking whose `BASE` line itself has no
+rate — an explicit whole-booking choice (there's still no rate picker
+for the base line anywhere in the wizard — a separate, pre-existing gap,
+not touched here), not a per-line oversight.
+
+**Tests:** three cost lines at three different rates compute
+independently and sum correctly; a charge type with no `gstRateId`
+inherits the base line's rate (never zero-rated); a PLC line does too,
+explicitly, since it has no charge type to inherit from otherwise;
+through-the-wire supertests for both new controllers including the
+snapshot invariant (`change-rate` after a percentage PLC assignment
+doesn't retroactively change the stored amount). All in
+`postsales-statemachine-gst.test.ts` (extended, not a new file — it
+already had exactly the GST fixture shape needed) and a new
+`e2e-unit-pricing.test.ts`.
+
+**Fourth Playwright scenario** (`plc-booking.spec.ts`): assigns a PLC
+and a charge through the real Pricing UI just built (not seeded
+directly), books the unit, and checks both the confirm step's
+excl.-GST breakup and — via a direct DB read, since no screen shows
+the GST-inclusive total post-booking — that `agreedPricePaise` matches
+a hand-computed total. Deliberately built so the base line and the PLC
+line end up untaxed (0%) while only the charge line is taxed, at its
+own 5%: the clearest possible proof that resolution is genuinely
+per-line, not inherited from some booking-level setting. The
+installment amount had to be the exact GST-inclusive total, computed
+by the test itself the same way a real admin would have to today (by
+hand) — `PaymentPlanService.resolveAmounts` rejects custom installments
+that don't sum exactly to `agreedPricePaise`, and the wizard has no way
+to preview that total before the confirm step. Logged, not fixed here
+— out of this phase's scope, but a real rough edge for whoever picks
+up the base-line-rate-picker gap.
+
+**Frontend:** `Masters.tsx` gained one small, real, reusable
+capability, not a one-off: `AsyncSelectField`, a field type whose
+options come from a live endpoint (GST rates are per-company data, a
+static `options: string[]` enum can't represent them) rather than the
+existing static `'select'` type. `ProjectDetail.tsx` gained a
+"Pricing" panel per unit (mirroring the existing "Rate History"
+panel's exact interaction shape — one expandable panel, not per-row
+inline) to assign/list/remove PLCs and charges.
+`BookingWizard.tsx` fetches the selected unit's PLCs/charges once
+chosen and forwards them as additional `costLines` on submit — the
+wizard itself resolves nothing about GST, that's entirely the
+server's job now. The confirm step shows the full excl.-GST breakup
+line by line plus a total, not just the base price as before.

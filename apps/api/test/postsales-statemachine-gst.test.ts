@@ -81,6 +81,105 @@ describeIf('State machine (system-only) + GST split', () => {
     });
   });
 
+  describe('PLC/charge GST-rate resolution', () => {
+    it('three cost lines at three different rates compute independently and sum correctly', async () => {
+      const gr12 = await systemPrisma.gstRate.create({
+        data: { companyId: fx.companyId, rate: 12, description: 'GST 12%', effectiveFrom: new Date('2019-04-01') },
+      });
+      const gr18 = await systemPrisma.gstRate.create({
+        data: { companyId: fx.companyId, rate: 18, description: 'GST 18%', effectiveFrom: new Date('2019-04-01') },
+      });
+      const unitId = await makeUnit(systemPrisma, fx);
+      const applicantId = await makeApplicant(systemPrisma, fx.companyId);
+      const booking = await svc.bookings.createBooking(
+        fx.companyId,
+        {
+          unitId,
+          primaryApplicantId: applicantId,
+          coApplicantIds: [],
+          bookingDate: new Date('2026-06-01'),
+          placeOfSupplyStateCode: '09', // intra-state, so tax = cgst+sgst per line
+          costLines: [
+            { kind: 'BASE', label: 'Base', baseAmountPaise: 50_00_000n * 100n, gstRateId: gst5Id },
+            { kind: 'PLC', label: 'Park Facing', baseAmountPaise: 1_00_000n * 100n, gstRateId: gr12.id },
+            { kind: 'CLUB', label: 'Club Membership', baseAmountPaise: 50_000n * 100n, gstRateId: gr18.id },
+          ],
+        },
+        fx.userId,
+      );
+      const lines = await systemPrisma.bookingCostLine.findMany({
+        where: { bookingId: booking.id },
+        orderBy: { sortOrder: 'asc' },
+      });
+      expect(lines).toHaveLength(3);
+      expect(lines[0].gstRatePercentSnapshot.toString()).toBe('5');
+      expect(lines[1].gstRatePercentSnapshot.toString()).toBe('12');
+      expect(lines[2].gstRatePercentSnapshot.toString()).toBe('18');
+      // Each line's own rate independently, not the base rate applied to everything.
+      expect(lines[0].cgstPaise).not.toBe(lines[1].cgstPaise * 5n); // sanity: not accidentally uniform
+      const totalPaise = lines.reduce((s: bigint, l: { lineTotalPaise: bigint }) => s + l.lineTotalPaise, 0n);
+      const booked = await systemPrisma.booking.findFirst({ where: { id: booking.id } });
+      expect(booked.agreedPricePaise).toBe(totalPaise);
+    });
+
+    it('a charge type with no gstRateId inherits the base line rate — never zero-rated', async () => {
+      const untaxedChargeType = await systemPrisma.chargeType.create({
+        data: { companyId: fx.companyId, name: `No-GST-set ${Date.now()}` }, // gstRateId left unset
+      });
+      const unitId = await makeUnit(systemPrisma, fx);
+      const applicantId = await makeApplicant(systemPrisma, fx.companyId);
+      const booking = await svc.bookings.createBooking(
+        fx.companyId,
+        {
+          unitId,
+          primaryApplicantId: applicantId,
+          coApplicantIds: [],
+          bookingDate: new Date('2026-06-01'),
+          placeOfSupplyStateCode: '09',
+          costLines: [
+            { kind: 'BASE', label: 'Base', baseAmountPaise: 50_00_000n * 100n, gstRateId: gst5Id },
+            { kind: 'OTHER', label: 'Legal Charges', chargeTypeId: untaxedChargeType.id, baseAmountPaise: 10_000n * 100n },
+          ],
+        },
+        fx.userId,
+      );
+      const lines = await systemPrisma.bookingCostLine.findMany({
+        where: { bookingId: booking.id },
+        orderBy: { sortOrder: 'asc' },
+      });
+      // Inherited the base line's 5% GST rate, not left at the implicit 0% default.
+      expect(lines[1].gstRateId).toBe(gst5Id);
+      expect(lines[1].gstRatePercentSnapshot.toString()).toBe('5');
+      expect(lines[1].cgstPaise).toBeGreaterThan(0n);
+    });
+
+    it('a PLC line (no chargeType at all) also inherits the base line rate', async () => {
+      const unitId = await makeUnit(systemPrisma, fx);
+      const applicantId = await makeApplicant(systemPrisma, fx.companyId);
+      const booking = await svc.bookings.createBooking(
+        fx.companyId,
+        {
+          unitId,
+          primaryApplicantId: applicantId,
+          coApplicantIds: [],
+          bookingDate: new Date('2026-06-01'),
+          placeOfSupplyStateCode: '09',
+          costLines: [
+            { kind: 'BASE', label: 'Base', baseAmountPaise: 50_00_000n * 100n, gstRateId: gst5Id },
+            { kind: 'PLC', label: 'Corner Plot', baseAmountPaise: 75_000n * 100n }, // no chargeTypeId, no gstRateId
+          ],
+        },
+        fx.userId,
+      );
+      const lines = await systemPrisma.bookingCostLine.findMany({
+        where: { bookingId: booking.id },
+        orderBy: { sortOrder: 'asc' },
+      });
+      expect(lines[1].gstRateId).toBe(gst5Id);
+      expect(lines[1].gstRatePercentSnapshot.toString()).toBe('5');
+    });
+  });
+
   describe('GST split', () => {
     async function bookAndReadLine(placeStateCode: string) {
       const unitId = await makeUnit(systemPrisma, fx);

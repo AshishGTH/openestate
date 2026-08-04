@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePaginatedQuery, useApiMutation } from '../../lib/hooks';
 import { api } from '../../lib/api';
 import DataTable, { type Column } from '../../components/DataTable';
@@ -38,16 +38,43 @@ interface MasterItem {
   [key: string]: unknown;
 }
 
-type FieldType = 'text' | 'number' | 'date' | 'select' | 'textarea' | 'checkbox';
+type FieldType = 'text' | 'number' | 'date' | 'select' | 'asyncSelect' | 'textarea' | 'checkbox';
 
 interface FieldDef {
   key: string;
   label: string;
   type: FieldType;
   options?: readonly string[];
+  // 'asyncSelect' only: options come from a real endpoint (e.g. GST rates
+  // are per-company data, not a static enum like the 'select' fields
+  // above), fetched by AsyncSelectField below.
+  optionsUrl?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  optionLabel?: (item: any) => string;
   required?: boolean;
   // Stored server-side as paise; this field is displayed/edited in rupees.
   moneyField?: boolean;
+}
+
+function AsyncSelectField({ f, value, onChange }: { f: FieldDef; value: string; onChange: (v: string) => void }) {
+  const { data } = useQuery<{ data: Array<Record<string, unknown>> }>({
+    queryKey: ['field-options', f.optionsUrl],
+    queryFn: () => api(f.optionsUrl!),
+  });
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+    >
+      <option value="">Select…</option>
+      {data?.data?.map((item) => (
+        <option key={item.id as string} value={item.id as string}>
+          {f.optionLabel!(item)}
+        </option>
+      ))}
+    </select>
+  );
 }
 
 // GstRate/TdsRule have no `name` column at all — every other master type does.
@@ -71,14 +98,33 @@ const TYPE_FIELDS: Record<string, FieldDef[]> = {
     { key: 'amountPaise', label: 'Amount (₹) — if Fixed', type: 'number', moneyField: true },
     { key: 'percentage', label: 'Percentage — if Percentage', type: 'number' },
   ],
-  // Bank.ifscPrefix is a real optional Prisma column, but the API's
-  // generic master factory doesn't expose it (see docs/todo.md
-  // "AreaLocation/Bank/ChargeType have real optional columns the API
-  // never exposes" — a pre-existing, already-deferred backend gap, not
-  // something this page's form can fix on its own). No banks entry here
-  // deliberately: name/isActive/sortOrder are the only fields the live
-  // API actually accepts for Bank today.
+  // Bank.ifscPrefix and AreaLocation's columns remain the deferred half of
+  // docs/todo.md's "AreaLocation/Bank/ChargeType have real optional
+  // columns the API never exposes" — ChargeType's own gstRateId/hsnSac are
+  // now exposed (below) because a wrong or missing GST rate on a charge
+  // silently understates an invoice; Bank/AreaLocation's gaps have no
+  // equivalent money-correctness stakes, so they stay deferred. No banks
+  // entry here deliberately: name/isActive/sortOrder are the only fields
+  // the live API accepts for Bank today.
   'payment-plan-templates': [{ key: 'description', label: 'Description', type: 'text' }],
+  // gstRateId/hsnSac are real Prisma columns the generic schema never
+  // exposed. See booking.service.ts's cost-line loop: a cost line with no
+  // gstRateId of its own falls back to its charge type's rate here, then
+  // to the booking's base line — never silently zero-rated — so leaving
+  // this unset for a charge type doesn't lose the tax, it just defers to
+  // the base rate. Still worth setting explicitly wherever it genuinely
+  // differs (IFMS, legal charges, statutory pass-throughs).
+  'charge-types': [
+    {
+      key: 'gstRateId',
+      label: 'GST Rate',
+      type: 'asyncSelect',
+      optionsUrl: '/masters/gst-rates?limit=100',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      optionLabel: (g: any) => `${g.rate}% — ${g.description}`,
+    },
+    { key: 'hsnSac', label: 'HSN/SAC', type: 'text' },
+  ],
   'gst-rates': [
     { key: 'rate', label: 'Rate %', type: 'number', required: true },
     { key: 'description', label: 'Description', type: 'text', required: true },
@@ -326,6 +372,12 @@ export default function MastersPage() {
                           </option>
                         ))}
                       </select>
+                    ) : f.type === 'asyncSelect' ? (
+                      <AsyncSelectField
+                        f={f}
+                        value={(formValues[f.key] as string) ?? ''}
+                        onChange={(v) => setFormValues((p) => ({ ...p, [f.key]: v }))}
+                      />
                     ) : f.type === 'textarea' ? (
                       <textarea
                         value={(formValues[f.key] as string) ?? ''}

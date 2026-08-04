@@ -13,17 +13,18 @@ import { DATABASE_URL_SYSTEM } from './playwright.config';
 // Playwright's worker processes.
 //
 // One independent company+admin PER SCENARIO, not one shared across all
-// three — auth-2fa.spec.ts changes its admin's password and enables 2FA
-// as part of what it's testing, which would break masters-crud/
-// cheque-bounce if they ever ran after it against the same account.
-// Isolated fixtures make the specs order-independent and safely
-// parallelizable later, matching how every backend test file in this
-// project seeds its own company rather than sharing one.
+// four — auth-2fa.spec.ts changes its admin's password and enables 2FA
+// as part of what it's testing, which would break the others if they
+// ever ran after it against the same account. Isolated fixtures make the
+// specs order-independent and safely parallelizable later, matching how
+// every backend test file in this project seeds its own company rather
+// than sharing one.
 export default async function globalSetup() {
   const fixtures = {
     authTwoFactor: await seedE2eFixture(DATABASE_URL_SYSTEM, { forcePasswordChange: true }),
     mastersCrud: await seedE2eFixture(DATABASE_URL_SYSTEM),
     chequeBounce: await seedE2eFixture(DATABASE_URL_SYSTEM),
+    plcBooking: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPricingMasters: true }),
   };
   writeFileSync(path.join(__dirname, '.fixture-state.json'), JSON.stringify(fixtures, null, 2));
 }

@@ -6,6 +6,7 @@ interface AllFixtures {
   authTwoFactor: E2eFixture;
   mastersCrud: E2eFixture;
   chequeBounce: E2eFixture;
+  plcBooking: E2eFixture;
 }
 
 /** Reads the named fixture global-setup.ts wrote before any spec ran. */
