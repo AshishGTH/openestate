@@ -4064,6 +4064,65 @@ service pattern, same migration/role-grant steps), using the same
 so the harness's own hardcoded connection strings need no CI-specific
 override.
 
+### `apps/e2e` — verified for real on GitHub, not assumed from local green
+
+Per explicit instruction, after the `native-install` job's own
+documented history of once reporting false success in 0 seconds:
+local green was not treated as sufficient. First push (48 commits —
+this entire session's work; nothing had reached `origin/master` before
+this) broke CI immediately, and not in `e2e-playwright` itself:
+`apps/e2e/package.json` had named its script `"test"`, which collides
+with turbo's root `pnpm test` (`turbo run test`) — the exact command
+`lint-typecheck-build` and `integration-tests` already run for their
+own lightweight unit tests. Both fanned `playwright test` out into
+their own runs with none of the harness's infrastructure available,
+and both correctly failed; `e2e-playwright` itself correctly never ran
+at all, skipped by its own `needs: lint-typecheck-build` once that job
+went red. Root cause found via the public repo's unauthenticated
+Checks-annotations API (`gh` CLI auth was invalid; reading a public
+repo's run data doesn't need it). Fixed by renaming the script to
+`test:e2e` — the identical pattern `apps/api/package.json` already
+uses for its own heavier suite, so turbo's generic sweep now skips
+`apps/e2e` entirely. The dedicated job's own step was never affected
+(it always called `npx playwright test` directly, not through the
+script), but the miswired name meant CI couldn't get far enough for
+that job to prove anything.
+
+Pushed the fix (run `30894052955`) and confirmed, from the real
+signed-in GitHub UI (an unauthenticated view only shows step
+structure, not log content — `gh` being broken meant using the
+browser instead of the API for this part): `e2e-playwright` completed
+in 2m17s, a duration consistent with real work (Chromium install,
+Postgres/Redis boot, a full `nest start` + `vite build`, three actual
+browser sessions), and its "Run Playwright suite" step's own output
+names all three scenarios explicitly —
+`✓ auth-2fa.spec.ts`, `✓ masters-crud.spec.ts`, `✓ cheque-bounce.spec.ts`,
+`3 passed (26.2s)`.
+
+Confirmed the negative case too, not just the positive one: pushed a
+commit flipping one passing assertion in `cheque-bounce.spec.ts`'s
+final Collection-Summary check to an impossible value
+(`toBe('₹99,99,999.00')` against an actual `'₹0.00'`), watched
+`e2e-playwright` go genuinely **red** on GitHub (run `30894788924`,
+"failed in 2m 54s"), and confirmed the log names the exact break:
+`Expected: "₹99,99,999.00" / Received: "₹0.00"` at the precise
+assertion line. Every other job in the same run stayed green — the
+break was real and scoped, not a config-level false failure. Reverted
+in the next commit, re-verified locally.
+
+**A genuine second finding surfaced by this exercise, not manufactured
+by it:** CI's automatic retry-on-failure (`retries: 1` when
+`process.env.CI`) re-ran `cheque-bounce.spec.ts` after the deliberate
+break, and that retry hit a *different*, real flake — a timeout
+selecting the seeded unit in the booking wizard's dropdown, because
+`page.waitForResponse` resolving only proves the network call
+returned, not that React has committed the new `<option>` to the DOM
+yet. Never reproduced in five-plus local runs (a faster machine
+narrows the window), but CI's slower/shared runners made it real.
+Hardened by waiting for the actual DOM state
+(`expect(unitSelect.locator('option')).toHaveCount(2)`) before
+selecting, instead of trusting the network event as a proxy for it.
+
 **Deliberately not built in this pass** (see `docs/release-plan.md`):
 the portal deep-link/router-`basename` check, the Roles-list/dropdown
 check, a standalone custom-field-definition check, and a

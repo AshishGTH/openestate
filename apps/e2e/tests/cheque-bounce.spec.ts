@@ -54,6 +54,13 @@ test('book a unit → record a cheque receipt → bounce it → Collection Summa
     page.waitForResponse((r) => r.url().includes('/units?status=AVAILABLE')),
     projectSelect.selectOption({ index: 1 }),
   ]);
+  // The network response resolving doesn't guarantee React has committed
+  // the new <option> to the DOM yet — under CI's slower/shared runners
+  // this genuinely raced and failed on a retry attempt (proven live: see
+  // CLAUDE.md's apps/e2e entry). Wait for the real DOM state selectOption
+  // needs (placeholder + the fixture's one seeded unit), not just the
+  // network event.
+  await expect(unitSelect.locator('option')).toHaveCount(2);
   await unitSelect.selectOption({ index: 1 });
   await controlAfterLabel(page, 'Agreed base price (₹)').fill(priceRupees);
   await page.getByRole('button', { name: 'Next' }).click(); // step 1 → 2
@@ -113,8 +120,5 @@ test('book a unit → record a cheque receipt → bounce it → Collection Summa
   // ── The regression check: back to exactly the pre-receipt baseline ──
   await gotoReportsAndWait(page);
   expect(await readStat(page, 'Total receipts')).toBe(baselineReceipts);
-  // TEMPORARY, deliberately wrong — proving the e2e-playwright CI job
-  // actually goes red on a real failure, not just green on a pass. Revert
-  // in the immediate next commit.
-  expect(await readStat(page, 'Total collected')).toBe('₹99,99,999.00');
+  expect(await readStat(page, 'Total collected')).toBe(baselineCollected);
 });
