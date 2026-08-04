@@ -40,6 +40,7 @@ const NAV_ITEMS = [
       { label: 'Roles', to: '/admin/roles', perm: PERMISSIONS.ADMIN_ROLE_READ },
       { label: 'Masters', to: '/admin/masters', perm: PERMISSIONS.ADMIN_MASTER_READ },
       { label: 'Custom Fields', to: '/admin/custom-fields', perm: PERMISSIONS.ADMIN_CUSTOM_FIELD_READ },
+      { label: 'Letter Templates', to: '/admin/letter-templates', perm: PERMISSIONS.ADMIN_MASTER_READ },
       { label: 'Company Config', to: '/admin/config', perm: PERMISSIONS.ADMIN_CONFIG_READ },
       { label: 'Audit Log', to: '/admin/audit', perm: PERMISSIONS.ADMIN_AUDIT_READ },
       { label: 'Plugins', to: '/admin/plugins', perm: PERMISSIONS.ADMIN_PLUGIN_READ },
