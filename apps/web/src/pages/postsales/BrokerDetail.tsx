@@ -230,8 +230,8 @@ export default function BrokerDetail() {
   async function handleGenerateStatement() {
     setError('');
     try {
-      const doc = await api<{ id: string }>(`/brokers/${brokerId}/documents/statement`, { method: 'POST' });
-      await downloadFile(`/documents/${doc.id}/download`, `broker-statement-${broker?.name ?? brokerId}.pdf`);
+      const doc = await api<{ id: string; originalName: string }>(`/brokers/${brokerId}/documents/statement`, { method: 'POST' });
+      await downloadFile(`/documents/${doc.id}/download`, doc.originalName);
     } catch (err) {
       setError((err as Error).message);
     }
