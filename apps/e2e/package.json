@@ -4,7 +4,7 @@
   "private": true,
   "license": "AGPL-3.0-only",
   "scripts": {
-    "test": "playwright test",
+    "test:e2e": "playwright test",
     "test:ui": "playwright test --ui",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
