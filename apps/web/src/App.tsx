@@ -11,6 +11,7 @@ import RolesPage from './pages/admin/Roles';
 import RoleForm from './pages/admin/RoleForm';
 import MastersPage from './pages/admin/Masters';
 import CustomFieldsPage from './pages/admin/CustomFields';
+import LetterTemplatesPage from './pages/admin/LetterTemplates';
 import CompanyConfigPage from './pages/admin/CompanyConfig';
 import AuditLogPage from './pages/admin/AuditLog';
 import BookingWizard from './pages/postsales/BookingWizard';
@@ -48,6 +49,7 @@ export default function App() {
             <Route path="admin/roles/:id" element={<RoleForm />} />
             <Route path="admin/masters" element={<MastersPage />} />
             <Route path="admin/custom-fields" element={<CustomFieldsPage />} />
+            <Route path="admin/letter-templates" element={<LetterTemplatesPage />} />
             <Route path="admin/config" element={<CompanyConfigPage />} />
             <Route path="admin/audit" element={<AuditLogPage />} />
             <Route path="admin/plugins" element={<PluginsPage />} />
