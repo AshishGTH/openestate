@@ -24,7 +24,19 @@ const SIMPLE_MASTERS = [
   // validate against beyond "non-empty").
   { modelName: 'DocumentType', routePath: 'document-types', apiTag: 'Document Types', extraFields: { entityType: z.string().min(1).max(50) } },
   { modelName: 'Bank', routePath: 'banks', apiTag: 'Banks' },
-  { modelName: 'ChargeType', routePath: 'charge-types', apiTag: 'Charge Types' },
+  // gstRateId/hsnSac are real Prisma columns the generic schema never
+  // exposed (docs/todo.md). GST genuinely varies by charge type (IFMS,
+  // legal charges, and statutory pass-throughs don't all follow the base
+  // sale rate) — see booking.service.ts's cost-line loop for how an unset
+  // gstRateId here falls back to the booking's base line, never silently
+  // zero-rates.
+  {
+    modelName: 'ChargeType', routePath: 'charge-types', apiTag: 'Charge Types',
+    extraFields: {
+      gstRateId: z.string().uuid().optional(),
+      hsnSac: z.string().max(20).optional(),
+    },
+  },
   // InterestRule.rateType/ratePercent/frequency are all required, non-
   // nullable Prisma columns createMasterSchema never had. rateType
   // reuses InterestService's own INTEREST_RATE_TYPE enum (SIMPLE/

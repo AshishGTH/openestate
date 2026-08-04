@@ -47,6 +47,18 @@ interface BrokerRow {
   name: string;
 }
 
+interface UnitPlcRow {
+  id: string;
+  amountPaise: string;
+  plcType: { id: string; name: string };
+}
+
+interface UnitChargeRow {
+  id: string;
+  amountPaise: string;
+  chargeType: { id: string; name: string };
+}
+
 interface DraftData {
   step: number;
   primaryApplicantId?: string;
@@ -245,6 +257,21 @@ export default function BookingWizard() {
     enabled: !!draft.projectId,
   });
 
+  // Ride along into costLines on submit — the API resolves each PLC/
+  // charge line's GST rate itself (its own chargeType's rate, falling
+  // back to the base line's), so the wizard doesn't need to know about
+  // that at all, just forward the amounts.
+  const { data: unitPlcs } = useQuery<UnitPlcRow[]>({
+    queryKey: ['booking-wizard-unit-plcs', draft.projectId, draft.unitId],
+    queryFn: () => api(`/projects/${draft.projectId}/units/${draft.unitId}/plcs`),
+    enabled: !!draft.projectId && !!draft.unitId,
+  });
+  const { data: unitCharges } = useQuery<UnitChargeRow[]>({
+    queryKey: ['booking-wizard-unit-charges', draft.projectId, draft.unitId],
+    queryFn: () => api(`/projects/${draft.projectId}/units/${draft.unitId}/charges`),
+    enabled: !!draft.projectId && !!draft.unitId,
+  });
+
   const { data: templates } = useQuery<{ data: PlanTemplateRow[] }>({
     queryKey: ['plan-templates'],
     queryFn: () => api('/masters/payment-plan-templates?limit=100'),
@@ -314,7 +341,16 @@ export default function BookingWizard() {
           coApplicantIds: draft.coApplicantIds,
           bookingDate: draft.bookingDate,
           paymentPlanTemplateId: draft.planMode === 'template' ? draft.paymentPlanTemplateId : undefined,
-          costLines: [{ kind: 'BASE', label: 'Base Sale Price', baseAmountPaise: draft.basePricePaise }],
+          costLines: [
+            { kind: 'BASE', label: 'Base Sale Price', baseAmountPaise: draft.basePricePaise },
+            ...(unitPlcs ?? []).map((p) => ({ kind: 'PLC', label: p.plcType.name, baseAmountPaise: p.amountPaise })),
+            ...(unitCharges ?? []).map((c) => ({
+              kind: 'OTHER',
+              chargeTypeId: c.chargeType.id,
+              label: c.chargeType.name,
+              baseAmountPaise: c.amountPaise,
+            })),
+          ],
         }),
       });
 
@@ -358,6 +394,13 @@ export default function BookingWizard() {
   }
 
   const selectedUnit = units?.data?.find((u) => u.id === draft.unitId);
+  // Excl. GST — each line's actual tax rate (and any fallback to the base
+  // line's rate) is resolved server-side at booking creation, same as it
+  // already was for a plain base-only booking.
+  const totalBeforeGstPaise =
+    (draft.basePricePaise ? BigInt(draft.basePricePaise) : 0n) +
+    (unitPlcs ?? []).reduce((s, p) => s + BigInt(p.amountPaise), 0n) +
+    (unitCharges ?? []).reduce((s, c) => s + BigInt(c.amountPaise), 0n);
 
   return (
     <div className="max-w-2xl">
@@ -654,6 +697,18 @@ export default function BookingWizard() {
               )}
               <div className="flex justify-between"><dt className="text-slate-500">Unit</dt><dd className="font-medium">{draft.unitLabel}</dd></div>
               <div className="flex justify-between"><dt className="text-slate-500">Base price</dt><dd className="font-medium">{draft.basePricePaise ? formatInr(BigInt(draft.basePricePaise)) : '—'}</dd></div>
+              {unitPlcs?.map((p) => (
+                <div key={p.id} className="flex justify-between"><dt className="text-slate-500">{p.plcType.name}</dt><dd className="font-medium">{formatInr(BigInt(p.amountPaise))}</dd></div>
+              ))}
+              {unitCharges?.map((c) => (
+                <div key={c.id} className="flex justify-between"><dt className="text-slate-500">{c.chargeType.name}</dt><dd className="font-medium">{formatInr(BigInt(c.amountPaise))}</dd></div>
+              ))}
+              {((unitPlcs?.length ?? 0) > 0 || (unitCharges?.length ?? 0) > 0) && (
+                <div className="flex justify-between border-t border-slate-100 pt-1.5">
+                  <dt className="font-medium text-slate-700">Total (excl. GST)</dt>
+                  <dd className="font-semibold">{formatInr(totalBeforeGstPaise)}</dd>
+                </div>
+              )}
               <div className="flex justify-between"><dt className="text-slate-500">Booking date</dt><dd className="font-medium">{draft.bookingDate}</dd></div>
               <div className="flex justify-between">
                 <dt className="text-slate-500">Payment plan</dt>

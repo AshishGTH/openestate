@@ -70,6 +70,8 @@ export const PERMISSIONS = {
   INVENTORY_UPLOAD_READ: 'inventory.upload.read',
   INVENTORY_UPLOAD_CREATE: 'inventory.upload.create',
   INVENTORY_UPLOAD_DELETE: 'inventory.upload.delete',
+  INVENTORY_UNIT_PLC_MANAGE: 'inventory.unit.plc-manage',
+  INVENTORY_UNIT_CHARGE_MANAGE: 'inventory.unit.charge-manage',
 
   // ── Presales ───────────────────────────────────────
   PRESALES_APPLICANT_READ: 'presales.applicant.read',

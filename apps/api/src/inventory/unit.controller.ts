@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -17,6 +18,8 @@ import {
   bulkGenerateUnitsSchema,
   unitStatusTransitionSchema,
   changeRateSchema,
+  createUnitPlcSchema,
+  createUnitChargeSchema,
   paginationQuerySchema,
   PERMISSIONS,
 } from '@openestate/shared';
@@ -25,12 +28,15 @@ import { RequirePermissions } from '../auth/guards/permissions.guard';
 import { UnitService } from './unit.service';
 import { UnitStateMachineService } from './unit-state-machine.service';
 import { RateRevisionService } from './rate-revision.service';
+import { UnitPricingService } from './unit-pricing.service';
 
 class CreateUnitDto extends createZodDto(createUnitSchema) {}
 class UpdateUnitDto extends createZodDto(updateUnitSchema) {}
 class BulkGenerateUnitsDto extends createZodDto(bulkGenerateUnitsSchema) {}
 class UnitStatusTransitionDto extends createZodDto(unitStatusTransitionSchema) {}
 class ChangeRateDto extends createZodDto(changeRateSchema) {}
+class CreateUnitPlcDto extends createZodDto(createUnitPlcSchema) {}
+class CreateUnitChargeDto extends createZodDto(createUnitChargeSchema) {}
 class PaginationQueryDto extends createZodDto(paginationQuerySchema) {}
 
 @ApiTags('Units')
@@ -40,6 +46,7 @@ export class UnitController {
     private readonly unitService: UnitService,
     private readonly stateMachine: UnitStateMachineService,
     private readonly rateService: RateRevisionService,
+    private readonly pricingService: UnitPricingService,
   ) {}
 
   @Get()
@@ -145,5 +152,53 @@ export class UnitController {
   ) {
     const user = req.user as JwtPayload;
     return this.rateService.getRateHistory(user.companyId, id, query);
+  }
+
+  @Get(':id/plcs')
+  @RequirePermissions(PERMISSIONS.INVENTORY_UNIT_READ)
+  @ApiOperation({ summary: 'List PLCs assigned to a unit' })
+  listPlcs(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.pricingService.listPlcs(user.companyId, id);
+  }
+
+  @Post(':id/plcs')
+  @RequirePermissions(PERMISSIONS.INVENTORY_UNIT_PLC_MANAGE)
+  @ApiOperation({ summary: 'Assign a PLC to a unit (snapshots amount from a % if given)' })
+  addPlc(@Param('id') id: string, @Body() dto: CreateUnitPlcDto, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.pricingService.addPlc(user.companyId, id, dto);
+  }
+
+  @Delete(':id/plcs/:plcId')
+  @RequirePermissions(PERMISSIONS.INVENTORY_UNIT_PLC_MANAGE)
+  @ApiOperation({ summary: 'Remove a PLC from a unit' })
+  removePlc(@Param('id') id: string, @Param('plcId') plcId: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.pricingService.removePlc(user.companyId, id, plcId);
+  }
+
+  @Get(':id/charges')
+  @RequirePermissions(PERMISSIONS.INVENTORY_UNIT_READ)
+  @ApiOperation({ summary: 'List extra charges assigned to a unit' })
+  listCharges(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.pricingService.listCharges(user.companyId, id);
+  }
+
+  @Post(':id/charges')
+  @RequirePermissions(PERMISSIONS.INVENTORY_UNIT_CHARGE_MANAGE)
+  @ApiOperation({ summary: 'Assign an extra charge to a unit' })
+  addCharge(@Param('id') id: string, @Body() dto: CreateUnitChargeDto, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.pricingService.addCharge(user.companyId, id, dto);
+  }
+
+  @Delete(':id/charges/:chargeId')
+  @RequirePermissions(PERMISSIONS.INVENTORY_UNIT_CHARGE_MANAGE)
+  @ApiOperation({ summary: 'Remove an extra charge from a unit' })
+  removeCharge(@Param('id') id: string, @Param('chargeId') chargeId: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.pricingService.removeCharge(user.companyId, id, chargeId);
   }
 }

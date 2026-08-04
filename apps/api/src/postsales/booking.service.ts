@@ -82,12 +82,33 @@ export class BookingService {
           sortOrder: number;
         }> = [];
 
+        // GST-rate resolution order per line: its own gstRateId, else its
+        // charge type's gstRateId (ChargeType.gstRateId, set via Masters),
+        // else the booking's own BASE line rate. PLC lines never carry a
+        // chargeType (PlcType is unrelated to GstRate) so they always fall
+        // through to the base rate. Deliberately never left to resolve to
+        // an implicit 0%: an unset rate silently understates an invoice,
+        // which costs real money without ever raising an error — the one
+        // case genuinely exempt from GST is a booking whose BASE line
+        // itself has no gstRateId, which is an explicit whole-booking
+        // choice, not a per-line oversight.
+        const baseLineGstRateId = dto.costLines.find((l) => l.kind === 'BASE')?.gstRateId ?? null;
+
         for (let i = 0; i < dto.costLines.length; i++) {
           const line = dto.costLines[i];
+
+          let effectiveGstRateId = line.gstRateId ?? null;
+          if (!effectiveGstRateId && line.chargeTypeId) {
+            const ct = await tx.chargeType.findFirst({ where: { id: line.chargeTypeId, companyId } });
+            if (!ct) throw new NotFoundException(`Charge type ${line.chargeTypeId} not found`);
+            effectiveGstRateId = ct.gstRateId ?? null;
+          }
+          effectiveGstRateId ??= baseLineGstRateId;
+
           let ratePercent = 0;
-          if (line.gstRateId) {
-            const gr = await tx.gstRate.findFirst({ where: { id: line.gstRateId, companyId } });
-            if (!gr) throw new NotFoundException(`GST rate ${line.gstRateId} not found`);
+          if (effectiveGstRateId) {
+            const gr = await tx.gstRate.findFirst({ where: { id: effectiveGstRateId, companyId } });
+            if (!gr) throw new NotFoundException(`GST rate ${effectiveGstRateId} not found`);
             ratePercent = Number(gr.rate);
           }
           const gst = computeCostLineGst(line.baseAmountPaise, ratePercent, intraState);
@@ -96,7 +117,7 @@ export class BookingService {
             chargeTypeId: line.chargeTypeId ?? null,
             label: line.label,
             baseAmountPaise: line.baseAmountPaise,
-            gstRateId: line.gstRateId ?? null,
+            gstRateId: effectiveGstRateId,
             gstRatePercentSnapshot: ratePercent,
             cgstPaise: gst.cgstPaise,
             sgstPaise: gst.sgstPaise,
