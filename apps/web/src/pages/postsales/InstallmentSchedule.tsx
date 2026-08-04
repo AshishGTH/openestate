@@ -25,6 +25,10 @@ interface PlanVersion {
   installments: Installment[];
 }
 
+interface BookingRow {
+  brokerId: string | null;
+}
+
 const STATUS_STYLE: Record<string, string> = {
   PAID: 'bg-emerald-50 text-emerald-700',
   PARTIAL: 'bg-amber-50 text-amber-700',
@@ -40,6 +44,28 @@ export default function InstallmentSchedule() {
     queryFn: () => api(`/bookings/${bookingId}/plan-history`),
     enabled: !!bookingId,
   });
+
+  const { data: booking } = useQuery<BookingRow>({
+    queryKey: ['booking', bookingId],
+    queryFn: () => api(`/bookings/${bookingId}`),
+    enabled: !!bookingId,
+  });
+
+  const [accruing, setAccruing] = useState(false);
+  const [accrueMessage, setAccrueMessage] = useState('');
+
+  async function accrueCommission() {
+    setAccruing(true);
+    setAccrueMessage('');
+    try {
+      await api(`/bookings/${bookingId}/commission/accrue`, { method: 'POST' });
+      setAccrueMessage('Commission accrued.');
+    } catch (err) {
+      setAccrueMessage((err as Error).message);
+    } finally {
+      setAccruing(false);
+    }
+  }
 
   const active = versions?.find((v) => v.isActive) ?? versions?.[0];
   const dues = (active?.installments ?? []).reduce(
@@ -88,6 +114,19 @@ export default function InstallmentSchedule() {
         <div className="mt-2 flex gap-6 text-sm text-slate-600">
           <span>Plan: <strong>{active.name}</strong> (v{active.version})</span>
           <span>Total due: <strong className={dues > 0n ? 'text-red-600' : 'text-emerald-600'}>{formatInr(dues)}</strong></span>
+        </div>
+      )}
+
+      {booking?.brokerId && (
+        <div className="mt-4 flex items-center gap-3">
+          <button
+            onClick={accrueCommission}
+            disabled={accruing}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {accruing ? 'Accruing…' : 'Accrue Broker Commission'}
+          </button>
+          {accrueMessage && <span className="text-sm text-slate-600">{accrueMessage}</span>}
         </div>
       )}
 
