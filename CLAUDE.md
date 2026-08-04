@@ -3949,3 +3949,103 @@ database. This is the one link in this session's evidence chain that
 is inference-from-source-plus-DB-state rather than an actual
 screenshot — flagged here rather than silently presented as equivalent
 to the rest of this document's live-browser verifications.
+
+### `apps/e2e` — Playwright harness, built before any further feature work (per explicit direction)
+
+Per the walkthrough's own primary lesson (curl/API tests overstate
+completeness; a feature isn't done until a human runs it in a real
+browser), the single largest structural risk left after the 11-phase
+walkthrough was that `apps/web`/`apps/portal` have zero automated
+coverage — every frontend bug this session found was invisible to
+anything except a manual click-through. Built the smallest useful
+harness rather than deferring it further, per explicit instruction to
+build it FIRST, standalone, before resuming feature work.
+
+**Design:** Playwright driving the real `apps/web` production build
+(`vite build && vite preview`, not `vite dev`) against the real NestJS
+API and the same disposable test Postgres/Redis this project's own
+backend integration tests already use
+(`scripts/test-setup.sh` / `deploy/docker-compose.test.yml`). One new
+dependency (`@playwright/test`), plus `otpauth` at the exact same
+version `apps/api/src/auth/totp.service.ts` uses (so TOTP codes
+generated in a test can't drift from what the server accepts). A
+small fixture-seed script (`apps/e2e/fixtures/seed.ts`) mirrors
+`packages/db/prisma/seed.ts` and
+`apps/api/test/helpers/postsales-harness.ts`'s shape rather than
+importing either directly (neither is a published package export) —
+one isolated company+admin per scenario, not one shared fixture, so
+`auth-2fa.spec.ts` changing its own admin's password and enabling 2FA
+can't break the other two specs regardless of run order.
+
+**Real bug found building it, fixed by design not by patching:**
+running the harness against `vite dev` (the obvious first choice)
+produced a genuine, consistent failure — every full-page navigation
+after login silently landed back on `/login`. Root cause:
+`apps/web/src/main.tsx` wraps the app in `React.StrictMode`, which
+double-invokes effects in development; `AuthProvider`'s mount-time
+`/auth/refresh` effect has no de-dup guard, so both invocations fire,
+the refresh token rotates after the first (successful) one, the
+second necessarily 401s, and because promises can resolve out of
+order, the failing call's `.catch()` sometimes overwrites the
+just-set `user` state back to null — logging the session out
+immediately after logging in. This is a real, if latent, race in
+`AuthProvider`'s effect (StrictMode is a detector, not the cause), but
+it is a **development-only** trigger — production builds strip
+StrictMode's double-invocation, and every real install serves exactly
+that production bundle via nginx, never `vite dev`. Fixing the harness
+by pointing it at `vite build && vite preview` (what the product
+actually ships) was the correct call, not a workaround: it keeps the
+harness's failures meaningful — a real product bug, not an artifact of
+how the dev server happens to run — while leaving the underlying
+`AuthProvider` race itself logged here rather than silently patched
+as a drive-by fix outside this task's stated scope. Worth a real fix
+(an `ignore-stale-response`/abort-controller guard on that effect)
+before this becomes a genuine bug in a future React 18 concurrent
+rendering path — deferred, not forgotten.
+
+**Three scenarios, chosen for reach over breadth, each a direct
+regression test for a bug this walkthrough found and fixed:**
+
+1. `auth-2fa.spec.ts` — login → forced password change → 2FA
+   enrollment → logout → login with a TOTP code. Covers the
+   Secure-cookie bug (the API server this harness starts runs with
+   `NODE_ENV=production` over plain HTTP, deliberately reproducing the
+   exact condition that broke it — see `playwright.config.ts`'s
+   comment), the dead `ForceChangePassword` component, and the
+   2FA-pending login response's missing CSRF cookie.
+2. `masters-crud.spec.ts` — create an Interest Rule (one of the 6
+   master types that could never be created before the fix) → edit it
+   (the `.strict()` PATCH `id`-leak 400 that broke every edit, of
+   every type, ever) → deactivate it.
+3. `cheque-bounce.spec.ts` — book a unit → record a cheque receipt →
+   bounce it → assert Collection Summary is back to exactly its
+   pre-receipt baseline. Three checkpoints (baseline, mid-receipt,
+   post-bounce), not just before/after the bounce, so the assertion
+   can't pass vacuously if the total happened to be zero the whole
+   time for an unrelated reason. This is the one financial-consequence
+   bug in the whole walkthrough, and the only scenario of the three
+   that needed the isolated-fixture-per-scenario design to hold up.
+
+Both `masters-crud.spec.ts` and `cheque-bounce.spec.ts` needed one
+selector fix apiece after the first real run (a `getByPlaceholder`
+match ambiguous against a substring, and a missing `Next` click that
+left the booking wizard on step 0 while the test tried to interact
+with step 1's fields) — caught immediately by actually running the
+suite, not by review, which is the entire point of building it.
+
+All three pass locally against a freshly reset test database (not
+just once — re-verified from a clean `scripts/test-setup.sh` run).
+Wired into CI as a new `e2e-playwright` job in `.github/workflows/ci.yml`,
+modeled on the existing `integration-tests` job (same Postgres/Redis
+service pattern, same migration/role-grant steps), using the same
+5433/6380 ports `deploy/docker-compose.test.yml` already uses locally
+so the harness's own hardcoded connection strings need no CI-specific
+override.
+
+**Deliberately not built in this pass** (see `docs/release-plan.md`):
+the portal deep-link/router-`basename` check, the Roles-list/dropdown
+check, a standalone custom-field-definition check, and a
+dashboard-to-ledger click-through — all real, all still worth adding,
+just not required to unblock feature work resuming. One scenario per
+future release, starting with extending scenario 3 for PLC-priced
+units once v0.2.0 lands.

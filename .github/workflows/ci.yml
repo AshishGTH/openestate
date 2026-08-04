@@ -217,6 +217,126 @@ jobs:
           fi
           echo "All integration tests ran — zero skipped."
 
+  e2e-playwright:
+    name: E2E (Playwright against a real browser + built frontend)
+    runs-on: ubuntu-latest
+    needs: lint-typecheck-build
+    # Ports match deploy/docker-compose.test.yml exactly (5433/6380, not
+    # Postgres/Redis's own defaults) so apps/e2e/playwright.config.ts's
+    # hardcoded connection strings work identically here and on a
+    # developer's own machine after `scripts/test-setup.sh` — no
+    # CI-only override needed.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: openestate_super
+          POSTGRES_PASSWORD: test_super_pass
+          POSTGRES_DB: openestate_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U openestate_super -d openestate_test"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 15
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6380:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm --filter @openestate/db generate
+
+      - name: Install Playwright's Chromium
+        working-directory: apps/e2e
+        run: npx playwright install --with-deps chromium
+
+      # Same reason as the "Build workspace" step in integration-tests
+      # above: apps/api needs to run compiled (correct DI metadata), and
+      # apps/e2e's own CJS imports of @openestate/db/@openestate/shared
+      # resolve to their built dist output, not raw TS source (see
+      # apps/e2e/package.json's deliberate lack of "type": "module" and
+      # fixtures/seed.ts's comment on why).
+      - name: Build workspace
+        run: pnpm build
+
+      - name: Create application roles
+        env:
+          PGHOST: localhost
+          PGPORT: "5433"
+          PGUSER: openestate_super
+          PGPASSWORD: test_super_pass
+          PGDATABASE: openestate_test
+        run: |
+          psql <<'EOSQL'
+            CREATE ROLE openestate_app WITH LOGIN PASSWORD 'test_app_pass' NOINHERIT;
+            CREATE ROLE openestate_system WITH LOGIN PASSWORD 'test_system_pass' NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
+            GRANT USAGE ON SCHEMA public TO openestate_app;
+            GRANT USAGE ON SCHEMA public TO openestate_system;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openestate_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openestate_system;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO openestate_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO openestate_system;
+          EOSQL
+
+      - name: Apply migration
+        env:
+          DATABASE_URL: postgresql://openestate_super:test_super_pass@localhost:5433/openestate_test
+        run: |
+          cd packages/db
+          npx prisma migrate deploy
+          npx prisma migrate status
+
+      - name: Grant table-level permissions
+        env:
+          PGHOST: localhost
+          PGPORT: "5433"
+          PGUSER: openestate_super
+          PGPASSWORD: test_super_pass
+          PGDATABASE: openestate_test
+        run: |
+          psql <<'EOSQL'
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openestate_app;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openestate_system;
+          EOSQL
+
+      # No seed step here, unlike integration-tests — apps/e2e's own
+      # global-setup.ts seeds one isolated fixture company per scenario
+      # directly (see apps/e2e/fixtures/seed.ts), not the generic demo
+      # company packages/db/prisma/seed.ts creates.
+      - name: Run Playwright suite
+        working-directory: apps/e2e
+        run: npx playwright test
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/e2e/playwright-report/
+          retention-days: 7
+
   compose-healthcheck:
     name: docker compose up + healthcheck
     runs-on: ubuntu-latest
