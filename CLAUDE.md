@@ -3544,3 +3544,93 @@ banner appeared, logged a follow-up, logged a site visit (via the
 correct in the database directly, not just the UI), reassigned the
 inquiry to the "Site Visit Coordinator" test user from the ROLES &
 USERS phase, and marked it SUCCESSFUL.
+
+## POST-SALES phase — 4 issues found, fixed, and a real UI gap built
+
+Booking wizard (applicant + co-applicant + unit + custom payment plan +
+confirm) worked end-to-end on the first try, no bugs. Receipt Entry and
+Applicant 360 were a different story:
+
+1. **`ReceiptEntry.tsx`'s "Applicant phone / booking number" label
+   promised a lookup path that never existed.** `phoneSearch` only ever
+   hits `GET /applicants?search=...`, whose `where.OR` matches
+   `name`/`primaryPhone`/`email` (`applicant.service.ts`) — never
+   `bookingNumber`, and no booking-number search endpoint exists
+   anywhere in the API. Typing a booking ID/number into that field
+   silently returns zero results, `bookingId` stays unset, and the
+   submit button (`disabled={... || !bookingId ...}`) sits there
+   looking clickable but does nothing — no error, no request fired.
+   This is exactly the same class of bug as the roles-slug regex
+   earlier: UI text promising a capability the backend doesn't have.
+   Fixed by correcting the label to "Applicant phone / name" (what the
+   endpoint actually supports) rather than building a booking-number
+   search feature nobody asked for.
+2. **`Applicant360` (the ledger view, route
+   `/postsales/applicants/:applicantId`) was reachable by typing the
+   URL and nowhere else.** Grepped every `Link`/`navigate` call in
+   `apps/web/src` — zero hits outside the route definition itself.
+   Dues Dashboard and the installment-dues report return plain string
+   tuples (`[bookingNumber, applicantName, ...]`, no ids at all — see
+   `DueRow` in `DuesDashboard.tsx`), so that page structurally *can't*
+   link there without a backend report-shape change. Cheque Queue has
+   the same gap. Fixed the cheapest way: added a "View ledger" link in
+   `ReceiptEntry.tsx` next to "Change", the one place the applicant id
+   is already sitting in component state after a search-select. Dues
+   Dashboard/Cheque Queue linking would need the report endpoints to
+   start returning ids — left as a known gap, not fixed, since it's a
+   backend contract change, not a frontend wiring fix.
+3. **Every merge-field-driven PDF type (Statement, Allotment Letter,
+   Demand Letter, Reminder Letter) had zero frontend UI.** The backend
+   (`document.controller.ts`, `letter-template.controller.ts`,
+   `MERGE_FIELD_REGISTRY` in `packages/shared/src/documents.ts`) is
+   fully built and was already covered by unit tests, but nothing in
+   `apps/web` ever called `POST /bookings/:id/documents/*` except the
+   receipt-PDF path — `Applicant360.tsx` only *listed* already-generated
+   documents. This is the same shape as the earlier Inventory/Pre-sales
+   gap (real backend capability, zero UI), and since it directly
+   blocked this phase's "generate every PDF type" requirement, the user
+   was asked and chose to build it now rather than skip or log-only.
+   Added: a Letter Templates admin page
+   (`apps/web/src/pages/admin/LetterTemplates.tsx` — CRUD list/create,
+   merge-field hints per `entityType` pulled live from
+   `MERGE_FIELD_REGISTRY` so the hint can never drift from what the
+   backend actually validates) and a "Generate documents" section on
+   `Applicant360.tsx` wired to all four endpoints (statement needs no
+   template; allotment needs a template; demand/reminder need a
+   template *and* a due installment, sourced from the same
+   `/bookings/:id/plan-history` query `ReceiptEntry.tsx` already uses).
+4. **Cheque bounce correctly reverses ledger allocation — verified, not
+   assumed.** Bounced the ₹20,00,000 cheque receipt via Cheque Queue;
+   confirmed the "On Possession" installment's `allocatedPaise` dropped
+   back from ₹44,00,000 to ₹24,00,000 (status PART_PAID, due
+   ₹20,00,000) on the Installment Schedule page, matching Dues
+   Dashboard's outstanding figure and the ledger's `BOUNCE_REVERSAL`
+   entry — three independent views agreeing, not just one.
+
+Full live verification narrative: created booking
+BKG/2026-27/000001 (Rahul Sharma + co-applicant Rahul Sharma Jr, unit
+Tower A/A-0103, ₹55,00,000, custom 2-installment plan) → paid the
+Booking Amount installment in CASH (₹11,00,000) → paid part of On
+Possession in CHEQUE (₹20,00,000) → paid the rest of On Possession in
+NEFT with a UTR reference (₹24,00,000) → confirmed all three receipts
+(RCP/2026-27/000001–3) via `Save & Print Receipt`'s auto-downloaded
+PDFs → bounced the cheque receipt with a reason, confirmed it moved to
+the BOUNCED tab and the installment reverted to PART_PAID → opened
+Applicant 360 via the new "View ledger" link and confirmed the ledger
+(CHARGE ₹55,00,000, three RECEIPT_ALLOC entries, one BOUNCE_REVERSAL,
+balance ₹20,00,000) matches Dues Dashboard exactly → created one
+template per letter type through the new Letter Templates page →
+generated Statement, Allotment Letter, Demand Letter, and Reminder
+Letter from Applicant 360, each opened as a real downloaded PDF →
+read the Demand Letter PDF directly off disk and confirmed every
+`{{token}}` resolved correctly (applicant name, ₹20,00,000 due amount
+matching the post-bounce outstanding, "On Possession" label, unit
+number, date) with no literal unresolved tokens.
+
+No coordinate-drift automation mishaps rose to the level of a product
+bug this phase — several form fields got mis-typed into the wrong
+input when the receipt-entry layout shifted after selecting CHEQUE/NEFT
+mode (new fields appearing pushes content down between a click and the
+next type action), but re-reading the screenshot before each entry and
+correcting with `triple_click` + retype caught all of them before
+submission; none were the product's fault.
