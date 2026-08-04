@@ -36,7 +36,7 @@ export default function InviteConsume() {
       setDone(true);
       // Full reload so AuthProvider re-runs its refresh check and picks up
       // the new session cookie cleanly; "/" branches to the right home tab.
-      window.location.href = '/';
+      window.location.href = '/portal/';
     } catch (err) {
       setError((err as Error).message);
     } finally {

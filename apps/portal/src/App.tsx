@@ -26,7 +26,7 @@ function PortalHome() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/portal">
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
