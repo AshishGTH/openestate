@@ -238,7 +238,20 @@ export class ReceiptService {
         await tx.chequeStatusEvent.create({
           data: { companyId, receiptId, status: dto.status, eventDate: dto.eventDate, reason: dto.reason ?? null, createdById: actorId },
         });
-        await tx.receipt.update({ where: { id: receiptId }, data: { clearanceStatus: dto.status } });
+        await tx.receipt.update({
+          where: { id: receiptId },
+          data: {
+            clearanceStatus: dto.status,
+            // A bounce reverses this receipt's ledger effects (below) exactly
+            // like reverseReceipt()'s manual-cancel path does — it must flip
+            // the same isReversed flag, or every isReversed:false query
+            // (collection reports, portal receipt history, commission basis)
+            // keeps counting money that was never actually collected.
+            ...(dto.status === CHEQUE_CLEARANCE_STATUS.BOUNCED
+              ? { isReversed: true, reversalReason: dto.reason ?? `Cheque bounced (${receipt.receiptNumber})` }
+              : {}),
+          },
+        });
 
         if (dto.status === CHEQUE_CLEARANCE_STATUS.BOUNCED) {
           const config = await tx.companyConfig.findFirst({ where: { companyId } });
