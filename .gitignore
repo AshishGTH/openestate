@@ -14,3 +14,8 @@ deploy/backups/
 *.tsbuildinfo
 .vscode/*
 !.vscode/extensions.json
+
+# apps/e2e (Playwright)
+apps/e2e/playwright-report/
+apps/e2e/test-results/
+apps/e2e/.fixture-state.json
