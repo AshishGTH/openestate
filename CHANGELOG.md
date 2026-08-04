@@ -5,6 +5,23 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Correctness fix affecting reported collection figures — upgrade and
+  let the migration run before trusting any collection report.** A prior
+  bug (see the REPORTS-phase entry in `CLAUDE.md`) left bounced-cheque
+  receipts still marked as collected (`is_reversed = false`) in every
+  collection report, rollup, and the customer portal's own payment
+  history — the code fix stops this going forward, but does nothing for
+  receipts that already bounced before you upgrade. Migration
+  `20260804120000_backfill_bounced_receipt_is_reversed` corrects those
+  existing rows on your next `prisma migrate deploy` (part of the normal
+  upgrade path — no manual step needed). It only touches the
+  `is_reversed`/`reversal_reason` flag on affected receipts; it does not
+  alter any ledger entry, allocation, or installment. If your reported
+  collection totals looked too high before upgrading, they'll drop by
+  the sum of any previously-bounced cheques once this runs.
+
 ### Changed
 
 - Replaced the `argon2` password-hashing dependency with

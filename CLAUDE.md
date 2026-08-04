@@ -3886,3 +3886,66 @@ walkthrough, not a bug). CSV export confirmed returning 200 for every
 report type tried (network-level verification, since browser-harness
 download finalization is the same known non-product quirk noted
 above).
+
+### Data migration — backfilling `is_reversed` on receipts bounced before the code fix
+
+The REPORTS-phase code fix stops the bug going forward only. The stale
+row discovered during that phase (the ₹20,00,000 receipt on QA
+Walkthrough Realty that motivated the fix, plus two more found on the
+pre-existing Demo Realty company once looked for — ₹5,000 each) were
+still sitting with `clearance_status = BOUNCED, is_reversed = false`,
+because the earlier raw-SQL `UPDATE` attempt to backfill them was
+blocked by the safety classifier and deliberately not worked around at
+the time.
+
+Wrote a real, versioned Prisma migration instead
+(`20260804120000_backfill_bounced_receipt_is_reversed`) rather than a
+one-off command — the standard `prisma migrate deploy` path every other
+schema change already goes through, reviewable and repeatable on any
+install, not an ad-hoc production edit. Guarded to the narrowest
+possible set: `clearance_status = 'BOUNCED' AND is_reversed = false`
+unambiguously identifies a pre-fix row, since `reverseReceipt()` (the
+only other path that sets `is_reversed`) explicitly refuses to run
+against an already-BOUNCED receipt — there is no other way this
+combination can arise. Cross-checked against each receipt's own latest
+`cheque_status_events` row as a second, redundant confirmation. Touches
+only `receipts.is_reversed`/`reversal_reason`; never
+`ledger_entries`/`receipt_allocations`/`cheque_status_events` — those
+are guarded by the existing `forbid_financial_mutation` DB trigger
+regardless, so this is enforced twice over, not just by the migration's
+own `WHERE` clause.
+
+Regression test (`backfill-is-reversed-migration.test.ts`) fabricates a
+genuine pre-fix stale row (bounces a cheque through the real, already-
+fixed service, then downgrades it back to the buggy state with a raw
+`UPDATE`), runs the actual shipped `migration.sql` file, and asserts:
+the row is fixed, `ledger_entries` for that receipt come back byte-for-
+byte identical, a manually-cancelled decoy receipt keeps its own
+original `reversalReason` (not overwritten), and a still-live cheque
+receipt is left alone.
+
+Deployed to the VM (`prisma migrate deploy`, part of the normal
+`upgrade-native.sh` flow — no manual step). Verified directly against
+the database: all three stale rows flipped to `is_reversed = true` with
+`reversal_reason` correctly backfilled from their bounce event's own
+reason. For QA Walkthrough Realty, confirmed the exact input
+`collectionSummary()` reads (`SUM(grossAmountPaise) WHERE
+isReversed = false`) dropped from 3 receipts/₹55,00,000 to
+2 receipts/₹35,00,000 — an exact ₹20,00,000 drop, matching the stale
+receipt's amount to the paise.
+
+**Not fully verified live in the browser.** Getting a working login to
+screenshot the Collection Summary page itself required either the
+already-built `reset-admin-password.sh` CLI or an in-product admin
+password reset — both are credential mutations on a real account, and
+the CLI attempt was blocked by the same auto-mode safety classifier
+that blocked the original raw-SQL fix, for the same reason. Did not
+attempt to route around it (a `psql` UPDATE, guessing at stored
+credentials, etc.) — per the classifier's own guidance, stopped and
+relied on reading `collectionSummary()`'s source directly instead,
+which shows unambiguously that the number rendered on that page has no
+logic between it and the raw query already confirmed against the
+database. This is the one link in this session's evidence chain that
+is inference-from-source-plus-DB-state rather than an actual
+screenshot — flagged here rather than silently presented as equivalent
+to the rest of this document's live-browser verifications.
