@@ -42,6 +42,11 @@ interface CustomInstallmentRow {
   amountPaise: string;
 }
 
+interface BrokerRow {
+  id: string;
+  name: string;
+}
+
 interface DraftData {
   step: number;
   primaryApplicantId?: string;
@@ -56,6 +61,7 @@ interface DraftData {
   planMode: 'template' | 'custom';
   paymentPlanTemplateId?: string;
   customInstallments: CustomInstallmentRow[];
+  brokerId?: string;
 }
 
 interface BookingDraftRecord {
@@ -244,6 +250,11 @@ export default function BookingWizard() {
     queryFn: () => api('/masters/payment-plan-templates?limit=100'),
   });
 
+  const { data: brokers } = useQuery<{ data: BrokerRow[] }>({
+    queryKey: ['brokers-all'],
+    queryFn: () => api('/brokers?limit=100'),
+  });
+
   async function persistDraft(next: DraftData) {
     try {
       if (draftId) {
@@ -324,6 +335,13 @@ export default function BookingWizard() {
               amountPaise: i.amountPaise,
             })),
           }),
+        });
+      }
+
+      if (draft.brokerId) {
+        await api(`/bookings/${booking.id}/broker`, {
+          method: 'POST',
+          body: JSON.stringify({ brokerId: draft.brokerId }),
         });
       }
 
@@ -616,6 +634,19 @@ export default function BookingWizard() {
         {draft.step === 4 && (
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Confirm & book</h2>
+            <div className="mt-3">
+              <label className="block text-sm font-medium text-slate-700">Sourcing broker (optional)</label>
+              <select
+                value={draft.brokerId ?? ''}
+                onChange={(e) => setDraft({ ...draft, brokerId: e.target.value || undefined })}
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="">No broker</option>
+                {brokers?.data?.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
             <dl className="mt-3 space-y-1.5 text-sm">
               <div className="flex justify-between"><dt className="text-slate-500">Applicant</dt><dd className="font-medium">{draft.primaryApplicantName}</dd></div>
               {draft.coApplicantNames.length > 0 && (
