@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { JwtPayload } from '@openestate/shared';
-import { api, setAccessToken } from './api';
+import { api, setAccessToken, refreshSession } from './api';
 
 interface AuthState {
   user: JwtPayload | null;
@@ -44,14 +44,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ user: null, isLoading: true });
 
   useEffect(() => {
-    api<{ accessToken: string }>('/auth/refresh', { method: 'POST' })
-      .then(({ accessToken }) => {
-        setAccessToken(accessToken);
-        setState({ user: decodeJwt(accessToken), isLoading: false });
-      })
-      .catch(() => {
-        setState({ user: null, isLoading: false });
-      });
+    // refreshSession() (not a direct api('/auth/refresh') call) — shares
+    // its in-flight request with api()'s own 401-retry refresh and with
+    // any other concurrent caller, including a second invocation of this
+    // same effect under React.StrictMode. Without that sharing, two
+    // concurrent /auth/refresh calls race the single-use refresh-token
+    // rotation: the loser 401s, and if it resolves second, its failure
+    // overwrites the session the winner just established. setAccessToken
+    // is already handled inside refreshSession()/refreshAccessToken().
+    refreshSession().then((accessToken) => {
+      setState(accessToken ? { user: decodeJwt(accessToken), isLoading: false } : { user: null, isLoading: false });
+    });
   }, []);
 
   const login = useCallback(

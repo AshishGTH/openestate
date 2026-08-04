@@ -3977,31 +3977,53 @@ one isolated company+admin per scenario, not one shared fixture, so
 `auth-2fa.spec.ts` changing its own admin's password and enabling 2FA
 can't break the other two specs regardless of run order.
 
-**Real bug found building it, fixed by design not by patching:**
-running the harness against `vite dev` (the obvious first choice)
-produced a genuine, consistent failure — every full-page navigation
-after login silently landed back on `/login`. Root cause:
+**Real bug found building it, initially worked around, then fixed
+properly.** Running the harness against `vite dev` (the obvious first
+choice) produced a genuine, consistent failure — every full-page
+navigation after login silently landed back on `/login`. Root cause:
 `apps/web/src/main.tsx` wraps the app in `React.StrictMode`, which
 double-invokes effects in development; `AuthProvider`'s mount-time
-`/auth/refresh` effect has no de-dup guard, so both invocations fire,
-the refresh token rotates after the first (successful) one, the
-second necessarily 401s, and because promises can resolve out of
-order, the failing call's `.catch()` sometimes overwrites the
-just-set `user` state back to null — logging the session out
-immediately after logging in. This is a real, if latent, race in
-`AuthProvider`'s effect (StrictMode is a detector, not the cause), but
-it is a **development-only** trigger — production builds strip
-StrictMode's double-invocation, and every real install serves exactly
-that production bundle via nginx, never `vite dev`. Fixing the harness
-by pointing it at `vite build && vite preview` (what the product
-actually ships) was the correct call, not a workaround: it keeps the
-harness's failures meaningful — a real product bug, not an artifact of
-how the dev server happens to run — while leaving the underlying
-`AuthProvider` race itself logged here rather than silently patched
-as a drive-by fix outside this task's stated scope. Worth a real fix
-(an `ignore-stale-response`/abort-controller guard on that effect)
-before this becomes a genuine bug in a future React 18 concurrent
-rendering path — deferred, not forgotten.
+`/auth/refresh` effect had no de-dup guard, so both invocations fired,
+the refresh token rotated after the first (successful) one, the
+second necessarily 401'd, and because promises can resolve out of
+order, the failing call's `.catch()` sometimes overwrote the just-set
+`user` state back to null — logging the session out immediately after
+logging in.
+
+First pass pointed the harness at `vite build && vite preview` instead
+(what every real install actually serves via nginx, never `vite dev`)
+and logged the `AuthProvider` race as real-but-deferred. On explicit
+instruction not to leave it as a documented dev-only quirk — two tabs,
+or a slow-network refresh overlapping any other caller wanting a
+session, can hit the identical unguarded-concurrency path in
+production; StrictMode just makes it reproduce on every single page
+load instead of occasionally — fixed it properly: `api.ts` now exports
+`refreshSession()`, a de-duped wrapper that gives every caller
+(`AuthProvider`'s mount effect *and* `api()`'s own 401-retry, which
+already had its own private, narrower version of this exact guard) one
+shared in-flight `/auth/refresh` promise instead of racing independent
+ones. Mirrored identically in `apps/portal` per this project's own
+mirrored-auth standing rule. Three tests per app
+(`apps/web/src/lib/api.test.ts`, `apps/portal/src/lib/api.test.ts` —
+the first test files either frontend has ever had): two concurrent
+calls make exactly one network request and agree on the final state;
+a call after the first resolves fires a genuinely new request (the
+de-dup is scoped to concurrency, not a permanent cache that would
+prevent ever picking up a rotated token); and a failed refresh among
+concurrent callers resolves every caller to null, never a half-set
+session.
+
+**Proof, not assertion, that this actually fixes the race rather than
+narrowing its window:** re-ran the full harness against `vite dev`
+(`E2E_WEB_MODE=dev`, kept as a permanent toggle in
+`playwright.config.ts` for exactly this kind of check) with
+`React.StrictMode` fully active — twice, from a freshly reset test
+database each time — and all three scenarios passed both times. Also
+re-confirmed the harness's default production-build path still passes.
+The dev-server path is the *harder* version of this race (StrictMode
+guarantees the double-invocation on every load; production only risks
+it under real concurrent access), so green there is stronger evidence
+than green against the build alone.
 
 **Three scenarios, chosen for reach over breadth, each a direct
 regression test for a bug this walkthrough found and fixed:**
