@@ -3651,3 +3651,80 @@ mode (new fields appearing pushes content down between a click and the
 next type action), but re-reading the screenshot before each entry and
 correcting with `triple_click` + retype caught all of them before
 submission; none were the product's fault.
+
+## BROKERS phase — 2 major UI gaps + 1 download bug, all fixed
+
+Broker creation, bank details, and the commission-rules editor
+(flat percent / flat amount / slab, all three types) worked
+first-try, no bugs. Everything downstream of "attach a broker to a
+booking" had never been reachable through the UI at all:
+
+1. **No way to attach a sourcing broker to a booking anywhere in the
+   staff app.** `POST /bookings/:id/broker` (`Booking.brokerId`) has
+   existed since the commission/NOC backend was built —
+   `booking.controller.ts`'s own comment calls it "a separate call,
+   same pattern as plan instantiation" — but `BookingWizard.tsx` never
+   called it; grepped the whole file for "broker", zero hits. Since
+   `CommissionService.accrueForBooking` no-ops without a `brokerId`,
+   this meant commission accrual could never fire from a real booking,
+   which meant the entire request→approve→pay chain was unreachable
+   too — one missing wire took down everything downstream of it. Fixed
+   by adding an optional broker `<select>` to the wizard's Confirm
+   step, calling `POST /bookings/:id/broker` right after plan creation
+   (mirroring the existing template/custom plan-instantiation call).
+2. **`POST /bookings/:id/commission/accrue` also had zero UI caller.**
+   Documented in `commission.service.ts` as "idempotent,
+   explicitly-triggered, safe to call repeatedly" — a deliberate
+   admin-action design, not a bug — but nothing triggered it.
+   `BrokerDetail.tsx`'s own Sold Units table couldn't host the button:
+   its report endpoint (`/reports/brokers/sold-units`) returns plain
+   `[broker, bookingNumber, applicant, unit, price, status]` tuples
+   with no `bookingId` at all — the same report-shape gap documented in
+   the POST-SALES phase notes above (Dues Dashboard has the identical
+   problem). Fixed the cheapest way: added a conditional "Accrue Broker
+   Commission" button to Installment Schedule (`bookingId` is already
+   in that page's URL param), shown only when `GET /bookings/:id`
+   returns a non-null `brokerId`.
+3. **Broker statement PDF download reproducibly got stuck as an
+   unfinalized `Unconfirmed *.crdownload` file, every single time —
+   never opened, never renamed to its real filename.** Root-caused by
+   comparing against every OTHER document download this session (all
+   of which completed cleanly): `BrokerDetail.tsx`'s
+   `handleGenerateStatement` built its own client-side filename from
+   the raw broker name (`broker-statement-Suresh Realty Partners.pdf`,
+   unsanitized space) instead of using the `GeneratedDocument`'s
+   `originalName`, which `document.service.ts` already computes with
+   `broker.name.replace(/\s+/g, '-')` — the same sanitized-hyphen
+   convention every other document type in the app follows. Two
+   attempts with the old code both got stuck (confirmed via matching
+   byte-identical `.crdownload` sizes across separate page loads —
+   ruled out a one-off race); the very next attempt, immediately after
+   switching to `doc.originalName`, downloaded and finalized cleanly
+   with the correct sanitized name. Broker names are ordinary business
+   names — nearly all of them contain spaces — so this was a
+   real-world-reachable path, not a synthetic edge case.
+
+Full live verification narrative: created broker "Suresh Realty
+Partners" with bank-detail-free profile → added a 2-tier SLAB
+commission rule (₹0–50,00,000: 1%, ₹50,00,000–∞: 1.5%, confirmed this
+is a deliberate *cliff* design — the whole basis amount prices at
+whichever single bracket it falls into, not a graduated/marginal
+scheme like income tax — by reading `matchCommissionSlab`'s doc
+comment and `computeCommissionPaise` directly before treating the
+₹82,500 result as correct rather than assuming graduated math and
+filing a false bug) → created applicant Anita Verma, booked unit
+Tower A/A-0104 (₹55,00,000, full-payment custom plan) with the broker
+attached via the new wizard field → confirmed the booking landed in
+the broker's Sold Units table → clicked the new Accrue Broker
+Commission button, confirmed Outstanding became exactly ₹82,500.00
+(₹55,00,000 × 1.5%, correctly using the top bracket the full amount
+falls into) → requested payment for the full amount → approved →
+paid via NEFT → confirmed Outstanding dropped to ₹0.00 → generated the
+broker statement PDF and read it directly off disk, confirming an
+ACCRUAL debit row and a PAYMENT credit row netting to a ₹0.00
+closing balance, matching the on-screen state exactly.
+
+Minor, not worth a separate fix: the statement PDF's payment
+description line renders the raw commission-payment UUID
+(`489ebea6-cdce-...`) instead of something human-readable like the
+payment mode/date — cosmetic, logged for the final report, not fixed.
