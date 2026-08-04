@@ -36,6 +36,22 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+/**
+ * De-duped refresh — see apps/web/src/lib/api.ts's identical function for
+ * the full explanation (same bug, same root cause, same fix, in both
+ * clients, per this project's mirrored-auth standing rule). Every caller
+ * wanting a fresh session shares ONE in-flight /portal/auth/refresh
+ * request instead of racing its own.
+ */
+export function refreshSession(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = refreshAccessToken().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
 export async function api<T = unknown>(
   path: string,
   options: RequestInit = {},
@@ -61,12 +77,7 @@ export async function api<T = unknown>(
   });
 
   if (res.status === 401 && accessToken) {
-    if (!refreshPromise) {
-      refreshPromise = refreshAccessToken().finally(() => {
-        refreshPromise = null;
-      });
-    }
-    const newToken = await refreshPromise;
+    const newToken = await refreshSession();
     if (newToken) {
       headers.set('Authorization', `Bearer ${newToken}`);
       // /portal/auth/refresh rotates the CSRF cookie (a new random value on

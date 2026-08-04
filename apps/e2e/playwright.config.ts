@@ -71,17 +71,22 @@ export default defineConfig({
       },
     },
     {
-      // A production build, not `vite dev` — deliberately. The dev server
-      // runs React.StrictMode's double-effect-invocation, which races two
-      // concurrent /auth/refresh calls on every page load; if the losing
-      // (failed) one resolves after the winning one, its catch() handler
-      // stomps the just-set user state back to logged-out. That's a
-      // dev-mode-only React artifact — real installs serve exactly this
-      // built bundle via nginx, never the dev server — so testing against
-      // it here would make the harness chase a false positive instead of
-      // reproducing what a real user hits. VITE_API_URL is inlined at
-      // build time, so it must be set here, not just at preview time.
-      command: `pnpm --filter @openestate/web exec vite build && pnpm --filter @openestate/web exec vite preview --port ${WEB_PORT} --strictPort`,
+      // Production build by default, not `vite dev` — the dev server runs
+      // React.StrictMode's double-effect-invocation, which used to race two
+      // concurrent /auth/refresh calls on every page load (fixed in
+      // AuthProvider/api.ts's refreshSession(), see CLAUDE.md). Real
+      // installs serve exactly this built bundle via nginx, never the dev
+      // server, so this is what the harness targets day to day.
+      //
+      // E2E_WEB_MODE=dev switches to `vite dev` instead — kept as a real,
+      // reusable toggle (not a one-off hack) specifically so this harness
+      // can prove a session-race fix on its own terms: green against BOTH
+      // modes is what shows the race is actually fixed, not just avoided
+      // by only ever testing the build that happens not to trigger it.
+      command:
+        process.env.E2E_WEB_MODE === 'dev'
+          ? `pnpm --filter @openestate/web exec vite --port ${WEB_PORT} --strictPort`
+          : `pnpm --filter @openestate/web exec vite build && pnpm --filter @openestate/web exec vite preview --port ${WEB_PORT} --strictPort`,
       cwd: '../..',
       url: WEB_URL,
       timeout: 120_000,

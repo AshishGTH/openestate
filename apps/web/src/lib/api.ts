@@ -36,6 +36,26 @@ async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
+/**
+ * De-duped refresh: every caller wanting a fresh session — AuthProvider's
+ * mount-time check, and api()'s own 401-retry below — shares ONE in-flight
+ * /auth/refresh request instead of firing its own. Without this,
+ * React.StrictMode's dev-mode double-effect-invocation (or, in production,
+ * two components independently needing a fresh session at the same
+ * moment) fires two concurrent refreshes; the second one 401s once the
+ * first has already rotated the refresh cookie, and if it resolves after
+ * the first, its failure silently overwrites the just-established session.
+ * See CLAUDE.md's apps/e2e entry for the bug this was caught by.
+ */
+export function refreshSession(): Promise<string | null> {
+  if (!refreshPromise) {
+    refreshPromise = refreshAccessToken().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
 export async function api<T = unknown>(
   path: string,
   options: RequestInit = {},
@@ -61,12 +81,7 @@ export async function api<T = unknown>(
   });
 
   if (res.status === 401 && accessToken) {
-    if (!refreshPromise) {
-      refreshPromise = refreshAccessToken().finally(() => {
-        refreshPromise = null;
-      });
-    }
-    const newToken = await refreshPromise;
+    const newToken = await refreshSession();
     if (newToken) {
       headers.set('Authorization', `Bearer ${newToken}`);
       // /auth/refresh rotates the CSRF cookie (a new random value on every

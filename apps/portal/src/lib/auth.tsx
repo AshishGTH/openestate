@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { JwtPayload } from '@openestate/shared';
-import { api, setAccessToken } from './api';
+import { api, setAccessToken, refreshSession } from './api';
 
 interface AuthState {
   user: JwtPayload | null;
@@ -44,14 +44,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ user: null, isLoading: true });
 
   useEffect(() => {
-    api<{ accessToken: string }>('/portal/auth/refresh', { method: 'POST' })
-      .then(({ accessToken }) => {
-        setAccessToken(accessToken);
-        setState({ user: decodeJwt(accessToken), isLoading: false });
-      })
-      .catch(() => {
-        setState({ user: null, isLoading: false });
-      });
+    // refreshSession() — see apps/web/src/lib/auth.tsx's identical fix for
+    // the full explanation. Shares its in-flight request with api()'s own
+    // 401-retry refresh and any concurrent caller, including a second
+    // invocation of this same effect under React.StrictMode.
+    refreshSession().then((accessToken) => {
+      setState(accessToken ? { user: decodeJwt(accessToken), isLoading: false } : { user: null, isLoading: false });
+    });
   }, []);
 
   const login = useCallback(async (identifier: string, password: string) => {
