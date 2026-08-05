@@ -117,8 +117,14 @@ export default function RoleForm() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            disabled={!!role?.isSystem}
+            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-slate-100 disabled:text-slate-500"
           />
+          {role?.isSystem && (
+            <p className="mt-1 text-xs text-slate-500">
+              System role name cannot be changed, but its permissions can.
+            </p>
+          )}
         </div>
 
         {!isEdit && (
