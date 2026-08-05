@@ -21,7 +21,7 @@ jobs:
     name: Lint, typecheck, unit tests, build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
         with:
@@ -82,7 +82,7 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
         with:
@@ -251,7 +251,7 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
         with:
@@ -342,7 +342,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-typecheck-build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Generate deploy/.env
         working-directory: deploy
@@ -389,7 +389,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-typecheck-build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Mirrors deploy/native's own documented prerequisite list
       # (docs/docs/installation.md §2) — install-native.sh checks for
@@ -571,7 +571,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: lint-typecheck-build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # need real history to check out an older ref, then return to HEAD
 
