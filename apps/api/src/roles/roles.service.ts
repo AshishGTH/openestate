@@ -93,8 +93,8 @@ export class RolesService {
     data: { name?: string; permissionIds?: string[] },
   ) {
     const role = await this.findOne(companyId, roleId);
-    if (role.isSystem) {
-      throw new BadRequestException('Cannot modify system roles');
+    if (role.isSystem && data.name !== undefined && data.name !== role.name) {
+      throw new BadRequestException('Cannot rename system roles');
     }
 
     return runWithTenant({ companyId }, () =>

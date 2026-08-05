@@ -4214,3 +4214,121 @@ chosen and forwards them as additional `costLines` on submit — the
 wizard itself resolves nothing about GST, that's entirely the
 server's job now. The confirm step shows the full excl.-GST breakup
 line by line plus a total, not just the base price as before.
+
+### v0.2.0 — upgrade-path permission delivery, and a real bug the resulting click-through found
+
+- **New standing rule: any release adding `PERMISSIONS` constants,
+  seeded masters, or seeded roles must verify the UPGRADE path
+  delivers them to an existing installation, not just that a fresh
+  install seeds them correctly.** `packages/db/prisma/seed.ts`'s
+  permission-upsert loop runs unconditionally, but everything else in
+  that file — company/roles/masters/admin-user seeding — sits behind
+  `if (existingCompany) return;`, which is true for every real
+  production install after its first boot. A release that adds a
+  `PERMISSIONS` key and ships a UI gated on it would upgrade clean and
+  heal nothing: no role could ever be granted a permission row that
+  was never inserted. This was invisible for the project's entire
+  history because every prior phase's verification — VM walkthroughs,
+  CI's `native-install` job, `compose-healthcheck` — always exercised
+  a FRESH install, never an upgrade of an existing one. Fixed for
+  permissions specifically by extracting `packages/db/prisma/sync-permissions.ts`
+  (idempotent, permissions-table-only — deliberately NOT extended to
+  roles or masters, both of which are per-company data an admin may
+  have already customised; see that file's own doc comment for the
+  full reasoning) and running it as a new step in
+  `deploy/native/upgrade-native.sh`, after migrations and before
+  cutover, gated by the same healthcheck. Verified on the VM: a role
+  the sync added two permission rows for stayed a two-row diff (not a
+  reset), a pre-existing customised master (`Website` Inquiry Source,
+  deliberately deactivated) was untouched, and running the upgrade a
+  second time changed nothing. Confirmed `deploy/install.sh` (the
+  Docker path) has no equivalent gap — it's fresh-install-only by
+  design (see "Native install becomes primary; Docker demoted to
+  contributor/CI tool" above), so this class of bug can't occur there
+  at all. **Any future release adding a `PERMISSIONS` key, a seeded
+  master row, or a seeded role must ask the same question this one
+  didn't ask until now: does an EXISTING install actually receive
+  this, or only a fresh one?**
+
+- **Real bug, found only by actually trying to do what the sync fix
+  above was supposed to unblock — granting a newly-synced permission
+  to an existing role through the UI — not by review.**
+  `RolesService.update()` (`apps/api/src/roles/roles.service.ts`)
+  rejected **any** change to a role with `isSystem: true`, via a
+  blanket `if (role.isSystem) throw new BadRequestException('Cannot
+  modify system roles')` — not just a rename or delete. Every seeded
+  role (`super_admin`, `company_admin`, `sales_manager`, etc.) is
+  `isSystem: true`, and a staff user's effective permissions come
+  ONLY from `role_permissions` DB rows baked into their JWT at
+  login/refresh (never live-recomputed from `ROLE_PERMISSIONS`, the
+  TS constant, which is consulted only once, at a brand-new role's
+  initial seed). Combined, this meant a permission added in any
+  release — including the two this phase just added — could **never**
+  be granted to any existing seeded role, through any path: not
+  `seed.ts` (blocked by `existingCompany`), not `sync-permissions.ts`
+  (deliberately permissions-table-only, never touches
+  `role_permissions`), and not the UI (blocked by this guard). The
+  only escape hatch was creating a brand-new custom role from scratch
+  — never actually extending `company_admin` or any other built-in
+  role with a newly-shipped capability. `RoleForm.tsx` always sends
+  the role's current (unchanged) name alongside `permissionIds` on
+  every save, so this fired on 100% of system-role permission edits,
+  not just renames — which is also why "142 of 142 permissions
+  selected, no visible error" was observed in the browser: the save
+  request 400'd, but was moving through this project's ordinary error
+  path (`onSubmit`'s `catch` block plus `MutationCache`'s global
+  toast) exactly as designed — the confusing part was diagnostic, not
+  a second bug in the error handling itself.
+  **Fixed at the root**: the guard now only fires on an actual name
+  CHANGE (`data.name !== undefined && data.name !== role.name`) —
+  identity (name) and existence (deletion, still blocked separately in
+  `remove()`) stay protected for system roles, but permission
+  composition is freely editable, which is the entire point of a
+  configurable RBAC system per this file's own MASTER-DRIVEN
+  principle. `RoleForm.tsx` also now disables the name input when
+  editing a system role, so a rename can't even be attempted from the
+  UI. Regression-tested end-to-end
+  (`apps/api/test/e2e-roles.test.ts`, new — no dedicated Roles test
+  file existed before this): granting permissions to a system role
+  with the exact request shape the real frontend sends (unchanged name
+  + new `permissionIds`) succeeds; an actual rename attempt still
+  400s; deletion of a system role still 400s.
+
+### Standing rule clarification: automated real-browser verification satisfies the "verify in a real browser" rule
+
+This file's primary lesson (top of this document) and its several
+"manual click-through" standing rules exist because request-
+constructing tests (supertest, curl) cannot prove the FRONTEND builds
+a request correctly — they construct the HTTP request by hand, so a
+passing test proves the server handles a well-formed request, never
+that a real browser running the real frontend code can produce one.
+Every auth bug documented above (the 2FA CSRF-cookie bug, the missing
+`tempToken` header, the stale CSRF-after-refresh header) was invisible
+to server-side e2e tests for exactly this reason.
+
+**Playwright driving real Chromium against the real UI, real API, and
+real database satisfies this rule's purpose.** It does not share
+supertest's blind spot: the browser executes the actual frontend
+bundle, so a Playwright scenario clicking through a real form is
+genuinely indistinguishable, for this rule's purpose, from a human
+doing the same clicks. `apps/e2e`'s four scenarios already exist for
+exactly this reason and already caught real bugs no server-side test
+could have (the `AuthProvider` concurrent-refresh race, the masters
+`.strict()` PATCH `id`-leak, the dead `ForceChangePassword` component).
+
+**This means a future session should not treat "I don't have VM
+access right now" as a blocker for satisfying a manual-click-through
+requirement**, if the change is one `apps/e2e` can exercise (or can be
+extended to exercise) locally against a real dev-server or
+production-build frontend, a real API, and a real Postgres/Redis —
+which is every one of this project's own disposable test-infrastructure
+setups (`scripts/test-setup.sh`, `deploy/docker-compose.test.yml`).
+VM click-throughs remain valuable for what's specific to a real native
+install (systemd, nginx, TLS/cookie behavior, upgrade sequencing) —
+several bugs in this log (the Secure-cookie-over-HTTP bug, most of the
+native-install script bugs) are exactly that category, and no amount
+of local Playwright coverage substitutes for them. But for a change
+whose risk is "does the frontend build this request correctly," a
+local Playwright run against the real stack is not a lesser proof than
+a VM click-through — it's the same proof, run somewhere that doesn't
+require SSH access to a specific machine.
