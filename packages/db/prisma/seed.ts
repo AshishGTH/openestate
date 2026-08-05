@@ -1,7 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
-import { ALL_PERMISSIONS, SYSTEM_ROLES, ROLE_PERMISSIONS, ROLE_DISPLAY_NAMES } from '@openestate/shared';
+import { SYSTEM_ROLES, ROLE_PERMISSIONS, ROLE_DISPLAY_NAMES } from '@openestate/shared';
 import * as argon2 from '@node-rs/argon2';
+import { syncPermissions } from './sync-permissions';
 
 const prisma = new PrismaClient();
 
@@ -17,14 +18,8 @@ function generateAdminPassword(): string {
 
 async function main() {
   console.log('Seeding permissions...');
-  for (const key of ALL_PERMISSIONS) {
-    await prisma.permission.upsert({
-      where: { key },
-      update: {},
-      create: { key },
-    });
-  }
-  console.log(`  ${ALL_PERMISSIONS.length} permissions seeded.`);
+  const added = await syncPermissions(prisma);
+  console.log(`  ${added} new permissions added.`);
 
   const allPerms = await prisma.permission.findMany();
   const permByKey = new Map(allPerms.map((p) => [p.key, p.id]));

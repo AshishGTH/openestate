@@ -95,6 +95,20 @@ run_as_superuser "${RELEASE_DIR}/api/node_modules/.bin/prisma" migrate deploy \
   --schema "${RELEASE_DIR}/api/packages/db/prisma/schema.prisma" \
   || die "Migration failed. Previous release (${PREVIOUS_RELEASE}) is untouched and still running. Inspect the backup taken above before retrying."
 
+# Schema migrations don't cover PERMISSIONS constants — those are
+# application-level rows, not a Prisma model change. seed.ts's own
+# permission-upsert loop never reaches an existing install (it returns
+# early the moment any company exists, which is every install after its
+# first boot) — so without this, a release that adds a permission and a
+# UI gated on it would upgrade clean and heal nothing: no role could
+# ever be granted a permission row that was never inserted. This step is
+# scoped to permissions only (see sync-permissions.ts's own comment for
+# why roles/masters are deliberately excluded — both are per-company
+# data an admin may have already customised).
+log "Syncing permission rows added since the previous release..."
+run_as_superuser "${RELEASE_DIR}/api/node_modules/.bin/tsx" "${RELEASE_DIR}/api/packages/db/prisma/sync-permissions.ts" \
+  || die "Permission sync failed. Previous release (${PREVIOUS_RELEASE}) is untouched and still running. Inspect the backup taken above before retrying."
+
 log "Cutting over to the new release..."
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 chown -h "${APP_USER}:${APP_GROUP}" "$CURRENT_LINK"
