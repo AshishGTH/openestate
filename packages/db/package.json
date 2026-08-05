@@ -17,7 +17,8 @@
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
-    "seed:demo": "tsx prisma/seed-demo.ts"
+    "seed:demo": "tsx prisma/seed-demo.ts",
+    "sync-permissions": "tsx prisma/sync-permissions.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",
