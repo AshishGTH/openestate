@@ -3,6 +3,48 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1]
+
+### Added
+
+- **Staff can now reply to and resolve customer support tickets.**
+  Closes the loop that's been open since the portal shipped: customers
+  could raise a ticket and read replies, but no staff screen existed to
+  see or answer one — the backend (`AdminTicketController`) had been
+  fully built and idle the whole time. New **Support** section
+  (top-level nav, not nested under Post-sales — inquiries and brokers
+  raise tickets too, not just post-sales) with a queue and a thread
+  view: reply, change status, filter by status.
+- **Ticket queue enrichment.** The queue now shows who raised each
+  ticket (resolved from the linked Applicant/Broker, not a bare ID),
+  its category, how many messages it has, and when it was last active
+  — the minimum a triaging staff member needs to work a queue, none of
+  which the API returned before.
+- **Overdue flagging from the existing `slaByAt` field.** The column
+  has existed in the schema since Phase 6 with nothing reading it; the
+  queue now shows an "Overdue" flag when a ticket's `slaByAt` has
+  passed and it isn't resolved/closed. No SLA policy or configuration
+  was added — this only renders a field that was already there.
+- The e2e harness gained its first scenario that drives **both**
+  `apps/web` and `apps/portal` against the same API in one test:
+  customer raises a ticket → staff sees it, replies, resolves it →
+  customer sees the reply. Every prior scenario exercised one app at a
+  time.
+
+### Still missing
+
+Two gaps remain, tracked for future releases, not fixed here:
+
+- **Layout plan / brochure / photo uploads.** The validation and
+  storage service (`UploadService`) has existed since Phase 2 and
+  already supports these categories, but no route in the Inventory
+  module has ever called it — there is no way, staff or customer
+  portal, to attach or view a project's layout plan today.
+- **Custom field values.** Admins can define custom fields (Applicant,
+  Unit, etc.) via Admin → Custom Fields, but no form anywhere in either
+  app captures or displays a *value* for one — defining a field has no
+  effect elsewhere in the product yet.
+
 ## [0.2.0]
 
 **Upgrade note:** `upgrade-native.sh` now syncs new `PERMISSIONS` rows to
