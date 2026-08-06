@@ -31,6 +31,8 @@ import ProjectsPage from './pages/inventory/Projects';
 import ProjectDetailPage from './pages/inventory/ProjectDetail';
 import InquiriesPage from './pages/presales/Inquiries';
 import InquiryDetailPage from './pages/presales/InquiryDetail';
+import TicketsPage from './pages/support/Tickets';
+import TicketDetailPage from './pages/support/TicketDetail';
 
 export default function App() {
   return (
@@ -72,6 +74,9 @@ export default function App() {
 
             <Route path="presales/inquiries" element={<InquiriesPage />} />
             <Route path="presales/inquiries/:id" element={<InquiryDetailPage />} />
+
+            <Route path="support/tickets" element={<TicketsPage />} />
+            <Route path="support/tickets/:id" element={<TicketDetailPage />} />
           </Route>
         </Route>
       </Routes>

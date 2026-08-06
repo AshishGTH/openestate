@@ -25,6 +25,7 @@ export default async function globalSetup() {
     mastersCrud: await seedE2eFixture(DATABASE_URL_SYSTEM),
     chequeBounce: await seedE2eFixture(DATABASE_URL_SYSTEM),
     plcBooking: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPricingMasters: true }),
+    ticketReply: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
   };
   writeFileSync(path.join(__dirname, '.fixture-state.json'), JSON.stringify(fixtures, null, 2));
 }

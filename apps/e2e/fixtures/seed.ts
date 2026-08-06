@@ -19,13 +19,19 @@ export interface E2eFixture {
   plcTypeName?: string;
   chargeTypeName?: string;
   chargeTypeGstRatePercent?: number;
+  // Only set when opts.withPortalTicketSetup is passed — a portal-login-
+  // capable Applicant plus a ticket category, for the customer-raises /
+  // staff-replies round-trip scenario.
+  portalIdentifier?: string;
+  portalPassword?: string;
+  ticketCategoryName?: string;
 }
 
 const rnd = () => Math.random().toString(36).slice(2, 8);
 
 export async function seedE2eFixture(
   databaseUrlSystem: string,
-  opts: { forcePasswordChange?: boolean; withPricingMasters?: boolean } = {},
+  opts: { forcePasswordChange?: boolean; withPricingMasters?: boolean; withPortalTicketSetup?: boolean } = {},
 ): Promise<E2eFixture> {
   const prisma = createSystemPrismaClient(databaseUrlSystem);
   const tag = `${Date.now()}-${rnd()}`;
@@ -151,6 +157,60 @@ export async function seedE2eFixture(
       chargeTypeName = chargeType.name;
     }
 
+    let portalIdentifier: string | undefined;
+    let portalPassword: string | undefined;
+    let ticketCategoryName: string | undefined;
+    if (opts.withPortalTicketSetup) {
+      const customerRole = await prisma.role.create({
+        data: {
+          companyId: company.id,
+          name: ROLE_DISPLAY_NAMES[SYSTEM_ROLES.CUSTOMER],
+          slug: SYSTEM_ROLES.CUSTOMER,
+          isSystem: true,
+          isPortal: true,
+        },
+      });
+      const customerRolePermData = ROLE_PERMISSIONS[SYSTEM_ROLES.CUSTOMER]
+        .map((key) => permByKey.get(key))
+        .filter((id): id is string => !!id)
+        .map((permissionId) => ({ roleId: customerRole.id, permissionId }));
+      if (customerRolePermData.length > 0) {
+        await prisma.rolePermission.createMany({ data: customerRolePermData });
+      }
+
+      // Phone, not email — PortalAuthService.login's identifier lookup is
+      // company-unscoped and globally unique (Phase 6 decisions), so a
+      // high-entropy phone avoids the exact cross-file collision class
+      // CLAUDE.md's e2e-portal-throttle.test.ts entry already documents
+      // for makeApplicant()-style sequential phone numbers.
+      const phone = `9${String(Date.now()).slice(-9)}`;
+      const applicant = await prisma.applicant.create({
+        data: { companyId: company.id, name: `E2E Customer ${tag}`, primaryPhone: phone, primaryPhoneNormalized: phone },
+      });
+      portalIdentifier = phone;
+      portalPassword = 'E2ePortal#Pass1';
+      await prisma.user.create({
+        data: {
+          companyId: company.id,
+          email: `portal-${tag}@e2e-harness.test`,
+          // PortalAuthService.login's identifier lookup queries User.phone/
+          // User.email directly — NOT Applicant.primaryPhone — so this has
+          // to be set here too, not just on the Applicant row above.
+          phone,
+          name: applicant.name,
+          passwordHash: await argon2.hash(portalPassword, { algorithm: argon2.Algorithm.Argon2id }),
+          roleId: customerRole.id,
+          applicantId: applicant.id,
+          forcePasswordChange: false,
+        },
+      });
+
+      const category = await prisma.ticketCategory.create({
+        data: { companyId: company.id, name: `E2E Ticket Category ${tag}` },
+      });
+      ticketCategoryName = category.name;
+    }
+
     return {
       companyId: company.id,
       adminEmail,
@@ -160,6 +220,9 @@ export async function seedE2eFixture(
       plcTypeName,
       chargeTypeName,
       chargeTypeGstRatePercent,
+      portalIdentifier,
+      portalPassword,
+      ticketCategoryName,
     };
   } finally {
     await prisma.$disconnect();
