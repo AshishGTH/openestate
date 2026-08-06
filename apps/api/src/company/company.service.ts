@@ -30,20 +30,32 @@ export class CompanyService implements OnApplicationBootstrap {
    * caught before: gstStateCode/companyGstin were added nullable, no
    * default, so every company that existed before that migration has
    * been silently getting intra-state GST ever since.
+   *
+   * Wrapped in try/catch deliberately: NestJS does not call app.listen()
+   * until every OnApplicationBootstrap hook resolves, so an unhandled
+   * rejection here — e.g. the DB not yet accepting connections the
+   * instant this fires, a real failure mode under docker-compose's
+   * healthcheck-based startup ordering — would take the ENTIRE app down
+   * before it ever starts listening. A boot-time diagnostic must never
+   * be able to do that; log and move on.
    */
   async onApplicationBootstrap(): Promise<void> {
-    const companies = await this.systemPrisma.company.findMany({
-      select: { id: true, name: true, config: { select: { companyGstin: true, gstStateCode: true } } },
-    });
-    const incomplete = companies.filter((c) => !c.config?.gstStateCode || !c.config?.companyGstin);
-    if (incomplete.length > 0) {
-      this.logger.warn(
-        `${incomplete.length} of ${companies.length} companies have incomplete GST config ` +
-          '(missing companyGstin and/or gstStateCode) — bookings and extra charges will be ' +
-          `rejected until Company Config is completed for: ${incomplete
-            .map((c) => `${c.name} (${c.id})`)
-            .join(', ')}`,
-      );
+    try {
+      const companies = await this.systemPrisma.company.findMany({
+        select: { id: true, name: true, config: { select: { companyGstin: true, gstStateCode: true } } },
+      });
+      const incomplete = companies.filter((c) => !c.config?.gstStateCode || !c.config?.companyGstin);
+      if (incomplete.length > 0) {
+        this.logger.warn(
+          `${incomplete.length} of ${companies.length} companies have incomplete GST config ` +
+            '(missing companyGstin and/or gstStateCode) — bookings and extra charges will be ' +
+            `rejected until Company Config is completed for: ${incomplete
+              .map((c) => `${c.name} (${c.id})`)
+              .join(', ')}`,
+        );
+      }
+    } catch (e) {
+      this.logger.warn(`GST config completeness check failed at boot (non-fatal): ${(e as Error).message}`);
     }
   }
 
