@@ -624,8 +624,12 @@ jobs:
             -d "{\"email\":\"admin@demo-realty.com\",\"password\":\"${ADMIN_PASSWORD}\"}")"
           TOKEN="$(echo "$LOGIN" | jq -r .accessToken)"
           CSRF="$(grep openestate_csrf "$COOKIES" | awk '{print $NF}')"
-          auth()   { curl -fsS -b "$COOKIES" -H "Authorization: Bearer ${TOKEN}" "$@"; }
-          mutate() { curl -fsS -b "$COOKIES" -H "Authorization: Bearer ${TOKEN}" -H "X-CSRF-Token: ${CSRF}" -H 'Content-Type: application/json' "$@"; }
+          # No -f: on an HTTP error, -f suppresses the response body entirely
+          # (just a bare "curl: (22)" and nothing else to debug from) — every
+          # call site below checks the actual JSON shape it got back instead,
+          # so a real failure prints the server's own error message.
+          auth()   { curl -sS -b "$COOKIES" -H "Authorization: Bearer ${TOKEN}" "$@"; }
+          mutate() { curl -sS -b "$COOKIES" -H "Authorization: Bearer ${TOKEN}" -H "X-CSRF-Token: ${CSRF}" -H 'Content-Type: application/json' "$@"; }
 
           # Sanity check the baseline is genuinely "before" — if v0.2.0's
           # permission already exists here, this job's premise is broken
@@ -647,10 +651,12 @@ jobs:
           # deliberately narrow permission set — exactly the kind of
           # admin-owned data sync-permissions.ts's own doc comment says
           # must never be touched by an automatic sync. Must survive
-          # byte-for-byte.
+          # byte-for-byte. Slug uses underscores, not hyphens: the baseline
+          # release's createRoleSchema (fixed later, in c86689b) only
+          # accepted [a-z][a-z0-9_]* — a hyphen here 400s on baseline.
           READ_PERM_ID="$(echo "$ALL_PERMS" | jq -r '.[] | select(.key=="admin.role.read") | .id')"
           CREATE_RES="$(mutate -X POST http://localhost/api/v1/roles \
-            -d "{\"name\":\"E2E Upgrade Custom Role\",\"slug\":\"e2e-upgrade-custom-role\",\"permissionIds\":[\"${READ_PERM_ID}\"]}")"
+            -d "{\"name\":\"E2E Upgrade Custom Role\",\"slug\":\"e2e_upgrade_custom_role\",\"permissionIds\":[\"${READ_PERM_ID}\"]}")"
           CUSTOM_ROLE_ID="$(echo "$CREATE_RES" | jq -r .id)"
           [ -n "$CUSTOM_ROLE_ID" ] && [ "$CUSTOM_ROLE_ID" != "null" ] || { echo "::error::failed to create the custom role on baseline: ${CREATE_RES}"; exit 1; }
 
@@ -691,14 +697,16 @@ jobs:
         run: |
           set -euo pipefail
           COOKIES=/tmp/cookies-upgraded.txt
-          LOGIN="$(curl -fsS -c "$COOKIES" -X POST http://localhost/api/v1/auth/login \
+          LOGIN="$(curl -sS -c "$COOKIES" -X POST http://localhost/api/v1/auth/login \
             -H 'Content-Type: application/json' \
             -d "{\"email\":\"admin@demo-realty.com\",\"password\":\"${ADMIN_PASSWORD}\"}")"
+          echo "$LOGIN" | jq -e '.accessToken' > /dev/null || { echo "::error::login with the ORIGINAL admin password failed after upgrade — a real customer's session/credentials must survive an upgrade: ${LOGIN}"; exit 1; }
           TOKEN="$(echo "$LOGIN" | jq -r .accessToken)"
-          echo "$LOGIN" | jq -e '.accessToken' > /dev/null || { echo "::error::login with the ORIGINAL admin password failed after upgrade — a real customer's session/credentials must survive an upgrade"; exit 1; }
           CSRF="$(grep openestate_csrf "$COOKIES" | awk '{print $NF}')"
-          auth()   { curl -fsS -b "$COOKIES" -H "Authorization: Bearer ${TOKEN}" "$@"; }
-          mutate() { curl -fsS -b "$COOKIES" -H "Authorization: Bearer ${TOKEN}" -H "X-CSRF-Token: ${CSRF}" -H 'Content-Type: application/json' "$@"; }
+          # No -f, same reasoning as the baseline-customisation step: every
+          # call site below checks the JSON shape it got back explicitly.
+          auth()   { curl -sS -b "$COOKIES" -H "Authorization: Bearer ${TOKEN}" "$@"; }
+          mutate() { curl -sS -b "$COOKIES" -H "Authorization: Bearer ${TOKEN}" -H "X-CSRF-Token: ${CSRF}" -H 'Content-Type: application/json' "$@"; }
 
           # 1. The deactivated master stayed deactivated — not resurrected.
           WEBSITE_ACTIVE="$(auth "http://localhost/api/v1/masters/inquiry-sources/${WEBSITE_ID}" | jq -r .isActive)"
