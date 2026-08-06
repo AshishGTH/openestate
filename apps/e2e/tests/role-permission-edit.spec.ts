@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
+import { createSystemPrismaClient } from '@openestate/db';
 import { readFixture } from '../fixtures/state';
-import { login } from '../fixtures/actions';
+import { login, controlAfterLabel } from '../fixtures/actions';
+import { DATABASE_URL_SYSTEM } from '../playwright.config';
 
 // Regression coverage for a real bug found while trying to grant v0.2.0's
 // two new permissions to an existing seeded role on the VM: RolesService
@@ -64,4 +66,39 @@ test('toggling a permission on a system role persists, and the name field is loc
   await expect(
     page.locator('label', { has: page.getByText('unit.plc-manage', { exact: true }) }).locator('input[type="checkbox"]'),
   ).toBeChecked();
+});
+
+// Regression coverage for isIntraStateSupply() throwing (not silently
+// defaulting to intra-state) when a company's GST config is incomplete —
+// see CLAUDE.md's "v0.2.0 — upgrade-path permission delivery" entry. The
+// persistent AppShell banner is the only on-screen signal an admin gets
+// before hitting that error on a Booking/Receipt screen, so it needs to
+// actually render, not just exist as dead code that typechecks.
+test('a persistent banner appears when Company Config GST fields are incomplete', async ({ page }) => {
+  const fixture = readFixture('mastersCrud');
+  const prisma = createSystemPrismaClient(DATABASE_URL_SYSTEM);
+  try {
+    // mastersCrud's own spec files (masters-crud, this one) never book —
+    // safe to null this company's GST config without affecting either.
+    await prisma.companyConfig.update({
+      where: { companyId: fixture.companyId },
+      data: { companyGstin: null, gstStateCode: null },
+    });
+
+    await login(page, fixture);
+    await expect(page.getByText('GST configuration is incomplete')).toBeVisible();
+    await page.getByRole('link', { name: 'Complete Company Config' }).click();
+    await expect(page).toHaveURL(/\/admin\/config$/);
+
+    // Fill in both fields and confirm the banner disappears.
+    await controlAfterLabel(page, 'GSTIN').fill('09ABCDE1234F1Z5');
+    await controlAfterLabel(page, 'GST State Code').fill('09');
+    await Promise.all([
+      page.waitForResponse((r) => r.url().includes('/company/config') && r.request().method() === 'PATCH'),
+      page.getByRole('button', { name: 'Save Configuration' }).click(),
+    ]);
+    await expect(page.getByText('GST configuration is incomplete')).not.toBeVisible();
+  } finally {
+    await prisma.$disconnect();
+  }
 });

@@ -249,4 +249,68 @@ describeIf('State machine (system-only) + GST split', () => {
       }
     }, 30_000);
   });
+
+  describe('isIntraStateSupply throws instead of defaulting to intra-state', () => {
+    it('rejects a booking when the company GST state code is unset — no CGST/SGST fallback', async () => {
+      await systemPrisma.companyConfig.update({
+        where: { companyId: fx.companyId },
+        data: { gstStateCode: null },
+      });
+      try {
+        const unitId = await makeUnit(systemPrisma, fx);
+        const applicantId = await makeApplicant(systemPrisma, fx.companyId);
+        await expect(
+          svc.bookings.createBooking(
+            fx.companyId,
+            {
+              unitId,
+              primaryApplicantId: applicantId,
+              coApplicantIds: [],
+              bookingDate: new Date('2026-06-01'),
+              placeOfSupplyStateCode: '09',
+              costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: 10_00_000n * 100n, gstRateId: gst5Id }],
+            },
+            fx.userId,
+          ),
+        ).rejects.toThrow(/gst state code/i);
+        // Rolled back entirely, not partially booked at an assumed rate —
+        // the throw fires before any Booking row is created at all.
+        const unit = await systemPrisma.unit.findFirst({ where: { id: unitId } });
+        expect(unit.status).toBe('AVAILABLE');
+        const booking = await systemPrisma.booking.findFirst({ where: { unitId } });
+        expect(booking).toBeNull();
+      } finally {
+        await systemPrisma.companyConfig.update({
+          where: { companyId: fx.companyId },
+          data: { gstStateCode: '09' },
+        });
+      }
+    });
+
+    it('rejects a booking when the place-of-supply state code cannot be determined', async () => {
+      const unitId = await makeUnit(systemPrisma, fx);
+      const applicantId = await makeApplicant(systemPrisma, fx.companyId);
+      await expect(
+        svc.bookings.createBooking(
+          fx.companyId,
+          {
+            unitId,
+            primaryApplicantId: applicantId,
+            coApplicantIds: [],
+            bookingDate: new Date('2026-06-01'),
+            // No placeOfSupplyStateCode override, and this test's own
+            // unit's project area location has a real state code ('09',
+            // from the shared fixture) — so isolate the missing-side case
+            // with an explicit empty-string override instead of trying to
+            // null out the shared fixture's area location mid-suite.
+            placeOfSupplyStateCode: '',
+            costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: 10_00_000n * 100n, gstRateId: gst5Id }],
+          },
+          fx.userId,
+        ),
+      ).rejects.toThrow(/place-of-supply/i);
+      const unit = await systemPrisma.unit.findFirst({ where: { id: unitId } });
+      expect(unit.status).toBe('AVAILABLE');
+    });
+  });
 });

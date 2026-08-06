@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { withTenantTx, runWithTenant } from '@openestate/db';
 import { LEDGER_ENTRY_TYPE, isIntraStateSupply, type ExtraChargeDto } from '@openestate/shared';
 import { TENANT_PRISMA } from '../database/database.module';
@@ -20,7 +20,12 @@ export class ExtraChargeService {
         const booking = await tx.booking.findFirst({ where: { id: bookingId, companyId } });
         if (!booking) throw new NotFoundException('Booking not found');
         const config = await tx.companyConfig.findFirst({ where: { companyId } });
-        const intraState = isIntraStateSupply(config?.gstStateCode, booking.placeOfSupplyStateCode);
+        let intraState: boolean;
+        try {
+          intraState = isIntraStateSupply(config?.gstStateCode, booking.placeOfSupplyStateCode);
+        } catch (e) {
+          throw new BadRequestException((e as Error).message);
+        }
 
         // GST rate snapshotted at entry-time: explicit gstRateId wins; otherwise
         // the linked ChargeType's current effective GST rate (immutable after).

@@ -4332,3 +4332,111 @@ whose risk is "does the frontend build this request correctly," a
 local Playwright run against the real stack is not a lesser proof than
 a VM click-through — it's the same proof, run somewhere that doesn't
 require SSH access to a specific machine.
+
+### Seed-only-reachable-data audit — one more real bug (GST state code), two non-bugs by design
+
+Prompted directly by the two upgrade-path bugs above: audited every
+other piece of data `seed.ts` populates for the same "reaches a fresh
+install only, never an existing one" shape.
+
+- **Seeded masters (item-level) and any hypothetical brand-new master
+  TYPE: correctly NOT auto-synced, no change.** This is the existing,
+  deliberate design `sync-permissions.ts`'s own doc comment already
+  states — both are per-company data an admin may have renamed,
+  deactivated, or deleted; auto-injecting new rows into every existing
+  company's live list on every upgrade would be a real bug of its own
+  ("an admin who deleted a master should not have it resurrected"), not
+  a fix. Letter templates, ticket categories, GST rates, TDS rules are
+  all the same category — no change needed.
+- **A brand-new `SYSTEM_ROLES` entry in a future release: real gap,
+  deliberately NOT built yet — decided now, built when needed.** Unlike
+  a master item, a system role can't be deleted (`RolesService.remove()`
+  blocks it) and, as of this session's fix above, can't be renamed
+  either — so there's no "admin already customised this, don't
+  resurrect it" risk the master-sync restraint exists to protect
+  against. When a release first adds a new `SYSTEM_ROLES` entry,
+  **extend `sync-permissions.ts` to also create any `Role` row (by
+  slug) that doesn't yet exist for a company, seeded with
+  `ROLE_PERMISSIONS[thatSlug]`** — safe for exactly the reason above.
+  Do NOT extend it to touch `role_permissions` for an EXISTING role
+  (that's a permission-composition change, already deliberately
+  excluded — an admin may have already customised it, same as any other
+  seeded role). No release has added a new system role yet, so this
+  stays a documented decision, not code, until one does.
+- **`CompanyConfig.gstStateCode`/`companyGstin`: a real, active
+  correctness bug, not just a delivery gap — found, fixed, and
+  documented as a correctness release in `CHANGELOG.md`.** Both columns
+  were added nullable with no default (Phase 4 migration); every other
+  `CompanyConfig` column added since then got either a safe
+  `NOT NULL DEFAULT` or is purely cosmetic (see the migration audit
+  below). `isIntraStateSupply()` used to return `true` (intra-state)
+  whenever either side was null — meaning any company that existed
+  before that migration, or simply never visited the (later-added, see
+  the "Full production-readiness pass" entry) Company Config screen,
+  has been charged CGST+SGST on every booking regardless of the
+  property's real place of supply, silently, since Phase 4. No error,
+  no warning — the exact "wrong tax, no error, costs money silently"
+  shape this session's ChargeType GST decision was written to prevent,
+  just in a different corner of the same feature.
+
+  **Migration audit of every other `company_configs` column ADD COLUMN
+  since Phase 1** (`chequeBounceChargePaise`, `commissionAccrualTrigger`,
+  `commissionClawbackPolicy`, `logoUrl`, `primaryColorHex`): all either
+  `NOT NULL DEFAULT <safe value>` or nullable-and-cosmetic (branding,
+  already handled when absent — "the header falls back to the
+  'OpenEstate' text label when no logoUrl is set"). `gstStateCode`/
+  `companyGstin` are the only two that are both nullable AND feed a
+  silent, financially-consequential default. Not fixed by adding a
+  default — **you cannot guess a company's GST state code**, and
+  guessing wrong is exactly the bug being fixed, just moved earlier.
+
+  **Fix, fail loud not silent:**
+  1. `isIntraStateSupply()` (`packages/shared/src/finance.ts`) now
+     THROWS a plain `Error` naming exactly which side is missing and
+     where to fix it (Company Config for the company's own state code;
+     the project's Area Location, or an explicit
+     `placeOfSupplyStateCode` override, for the other side) — never
+     silently defaults. Its two callers
+     (`BookingService.createBooking`, `ExtraChargeService.add`) catch
+     and re-throw as `BadRequestException` with the same message, so a
+     real HTTP caller gets a clear 400, not a raw 500.
+  2. `CompanyService` (new `OnApplicationBootstrap` hook) logs a single
+     warning at boot listing every company with incomplete GST config
+     (missing `companyGstin` and/or `gstStateCode`) — visible in
+     `journalctl -u openestate-api` the moment the app comes up, not
+     discovered days later when a sales team is locked out of booking.
+  3. `apps/web`'s `AppShell.tsx` gained a persistent banner (shown on
+     every page, not just Company Config — the error surfaces on
+     Booking/Receipt screens instead) for any staff user who can read
+     Company Config, linking straight to it. Reuses the same
+     `['company-config']` query `CompanyConfig.tsx` already has, so no
+     extra endpoint.
+  4. `apps/e2e/fixtures/seed.ts` needed the same fix as every other test
+     fixture that books a unit: it never set `gstStateCode`/
+     `companyGstin`, and had no `AreaLocation` on its project at all —
+     every Playwright scenario that books (`cheque-bounce.spec.ts`,
+     `plc-booking.spec.ts`) would otherwise 400 on the very first
+     booking attempt. Set both to `'09'`, matching
+     `apps/api/test/helpers/postsales-harness.ts`'s own default — the
+     computed intra-state result is unchanged from before (both sides
+     were previously silently defaulting to the same outcome), so no
+     existing assertion values needed to change, only the throw needed
+     preventing.
+  5. New tests: two direct-service tests in
+     `postsales-statemachine-gst.test.ts` (missing company state code;
+     missing place-of-supply state code — both assert the specific
+     error message AND that no `Booking` row was created, i.e. full
+     rollback, not a partially-booked-at-a-guessed-rate state); a new
+     Playwright test (`role-permission-edit.spec.ts`) driving the
+     banner in a real browser — appears when GST config is incomplete,
+     links to Company Config, disappears once both fields are filled
+     and saved.
+  6. `CHANGELOG.md`'s `[Unreleased]` section flags this explicitly as a
+     correctness fix and tells affected installs to check already-issued
+     invoices — this release does not retroactively correct GST already
+     charged wrong before upgrading, only prevents it going forward
+     (see the REPORTS-phase `is_reversed` backfill migration for how
+     this project handles the "also fix past data" half when that's
+     feasible; here it isn't — there's no way to know after the fact
+     what the correct historical treatment should have been without a
+     human reviewing each affected booking).

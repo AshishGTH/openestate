@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, Logger, NotFoundException, OnApplicationBootstrap } from '@nestjs/common';
 import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import {
@@ -8,7 +8,9 @@ import {
 } from '@openestate/shared';
 
 @Injectable()
-export class CompanyService {
+export class CompanyService implements OnApplicationBootstrap {
+  private readonly logger = new Logger(CompanyService.name);
+
   constructor(
     @Inject(TENANT_PRISMA)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -16,6 +18,34 @@ export class CompanyService {
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
   ) {}
+
+  /**
+   * Warn, don't fail, at boot: a company with an incomplete GST config
+   * doesn't stop the app from starting (other companies, and non-GST
+   * work, must keep functioning), but isIntraStateSupply() now throws
+   * the moment that company actually tries to book or add a charge — an
+   * admin should find out from the log the moment the app comes up, not
+   * from a locked-out sales team days later. See CLAUDE.md's "v0.2.0 —
+   * upgrade-path permission delivery" entry for why this was never
+   * caught before: gstStateCode/companyGstin were added nullable, no
+   * default, so every company that existed before that migration has
+   * been silently getting intra-state GST ever since.
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    const companies = await this.systemPrisma.company.findMany({
+      select: { id: true, name: true, config: { select: { companyGstin: true, gstStateCode: true } } },
+    });
+    const incomplete = companies.filter((c) => !c.config?.gstStateCode || !c.config?.companyGstin);
+    if (incomplete.length > 0) {
+      this.logger.warn(
+        `${incomplete.length} of ${companies.length} companies have incomplete GST config ` +
+          '(missing companyGstin and/or gstStateCode) — bookings and extra charges will be ' +
+          `rejected until Company Config is completed for: ${incomplete
+            .map((c) => `${c.name} (${c.id})`)
+            .join(', ')}`,
+      );
+    }
+  }
 
   async findOne(companyId: string) {
     const company = await this.systemPrisma.company.findUnique({

@@ -65,7 +65,12 @@ export class BookingService {
           dto.placeOfSupplyStateCode ??
           unit.floor.tower.project.areaLocation?.stateCode ??
           null;
-        const intraState = isIntraStateSupply(config?.gstStateCode, placeOfSupplyStateCode);
+        let intraState: boolean;
+        try {
+          intraState = isIntraStateSupply(config?.gstStateCode, placeOfSupplyStateCode);
+        } catch (e) {
+          throw new BadRequestException((e as Error).message);
+        }
 
         // Compute the cost breakup with GST snapshots.
         const costLines: Array<{
