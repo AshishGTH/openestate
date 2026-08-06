@@ -8,6 +8,7 @@ import { PERMISSIONS } from '@openestate/shared';
 const NAV_ITEMS = [
   { label: 'Dashboard', to: '/', icon: 'H' },
   { label: 'Settings', to: '/settings', icon: 'S' },
+  { label: 'Support', to: '/support/tickets', icon: 'T', perm: PERMISSIONS.ADMIN_TICKET_RESPOND },
   {
     label: 'Pre-sales',
     icon: 'I',
@@ -145,6 +146,8 @@ export default function AppShell() {
                 </div>
               );
             }
+
+            if ('perm' in item && item.perm && !hasPermission(item.perm)) return null;
 
             return (
               <NavLink

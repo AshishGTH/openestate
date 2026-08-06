@@ -5,8 +5,10 @@ import { defineConfig } from '@playwright/test';
 // without port conflicts.
 const API_PORT = 3900;
 const WEB_PORT = 5273;
+const PORTAL_PORT = 5274;
 export const API_URL = `http://localhost:${API_PORT}`;
 export const WEB_URL = `http://localhost:${WEB_PORT}`;
+export const PORTAL_URL = `http://localhost:${PORTAL_PORT}`;
 
 // Same disposable Postgres/Redis this project's own backend integration
 // tests use (scripts/test-setup.sh / deploy/docker-compose.test.yml) —
@@ -49,7 +51,11 @@ export default defineConfig({
         DATABASE_URL: DATABASE_URL_APP,
         DATABASE_URL_SYSTEM,
         REDIS_URL,
-        CORS_ALLOWLIST: WEB_URL,
+        // Both frontends are separate origins (different ports) from the
+        // API's point of view — apps/portal joined this allowlist for the
+        // cross-app ticket-reply scenario, which is the first one to
+        // actually need the portal origin talking to this same API.
+        CORS_ALLOWLIST: `${WEB_URL},${PORTAL_URL}`,
         SWAGGER_ENABLED: 'false',
         JWT_ACCESS_SECRET: HARNESS_HEX_KEY,
         JWT_REFRESH_SECRET: HARNESS_HEX_KEY,
@@ -89,6 +95,28 @@ export default defineConfig({
           : `pnpm --filter @openestate/web exec vite build && pnpm --filter @openestate/web exec vite preview --port ${WEB_PORT} --strictPort`,
       cwd: '../..',
       url: WEB_URL,
+      timeout: 120_000,
+      reuseExistingServer: !process.env.CI,
+      env: {
+        VITE_API_URL: API_URL,
+      },
+    },
+    {
+      // Dev mode, not the production build, unlike apps/web above:
+      // apps/portal's vite.config.ts only sets base:'/portal/' for a real
+      // `build` (production is served under nginx's /portal/ alias) — the
+      // dev server stays at base '/'. Building it here would mean this
+      // harness would additionally have to replicate that path-prefix
+      // serving locally for no benefit, since the StrictMode double-effect
+      // race this project cares about testing against a real build
+      // (see apps/web's own comment) was already fixed as shared,
+      // mirrored code and is already proven against apps/web in both
+      // modes — there is nothing portal-build-specific left to prove here.
+      // BrowserRouter's own basename="/portal" (apps/portal/src/App.tsx)
+      // still applies in dev mode, so routes are under /portal/... either way.
+      command: `pnpm --filter @openestate/portal exec vite --port ${PORTAL_PORT} --strictPort`,
+      cwd: '../..',
+      url: PORTAL_URL,
       timeout: 120_000,
       reuseExistingServer: !process.env.CI,
       env: {
