@@ -3,7 +3,16 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.2.0]
+
+**Upgrade note:** `upgrade-native.sh` now syncs new `PERMISSIONS` rows to
+existing installs automatically (see the permission-delivery fix below),
+but it does not — and should not — grant them to any role for you. After
+upgrading, an admin must open **Admin → Roles**, edit each role that
+should get the new PLC/charge-management capability, check
+`inventory.unit.plc-manage` / `inventory.unit.charge-manage`, and save.
+This is a deliberate, permissions-only sync — see the entry below for why
+auto-granting them would be its own bug, not a fix.
 
 ### Fixed
 
@@ -44,6 +53,41 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   alter any ledger entry, allocation, or installment. If your reported
   collection totals looked too high before upgrading, they'll drop by
   the sum of any previously-bounced cheques once this runs.
+
+- **A release that adds a `PERMISSIONS` constant never reached an
+  existing install — only a fresh one.** `seed.ts`'s permission-upsert
+  loop ran unconditionally, but the early-return gate right after it
+  (`if (existingCompany) return`) meant no other seeded content, and
+  critically no *later* permission addition, was ever re-applied to a
+  company created in an earlier release. `upgrade-native.sh` now runs a
+  dedicated `sync-permissions.ts` step (idempotent, permissions-table
+  only) on every upgrade, so new permission rows reach existing installs
+  the same way they reach fresh ones. Deliberately does NOT extend to
+  masters or roles — see the upgrade note above and `CLAUDE.md` for why
+  that's a different (and mostly correct-as-is) problem.
+- **A system role (`super_admin`, `company_admin`, etc.) could never be
+  granted a newly-added permission through the UI, at all.**
+  `RolesService.update()` rejected any change to a system role, not just
+  a rename — so even with the fix above delivering the permission *row*,
+  there was no way to actually grant it to a role. Scoped the guard to
+  an actual name change only; a system role's permission set is now
+  freely editable (its name and existence stay protected, as before).
+
+### Added
+
+- **PLC and unit-charge management.** Unit-level PLCs (park-facing,
+  corner, etc.) and extra charges (IFMS, legal, etc.) can now be
+  assigned per unit from the Inventory → Project → Pricing panel, and
+  flow into a booking's cost breakup and the confirm step's total
+  automatically. PLC amounts are snapshotted in paise at assignment time
+  (from a percentage of the unit's rate, or a flat amount) and never
+  retroactively change if the base rate is revised later.
+- **Per-charge-type GST rates.** Charge Types now carry their own
+  optional GST rate and HSN/SAC code (Masters → Charge Types). A cost
+  line's GST resolves in order: its own rate, then its charge type's
+  rate, then the booking's base-line rate — never silently zero-rated.
+  A PLC line has no charge type, so it always inherits the base line's
+  rate; this is stated explicitly rather than left implicit.
 
 ### Changed
 
