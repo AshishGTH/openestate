@@ -139,3 +139,19 @@ export async function downloadFile(path: string, filename: string): Promise<void
   a.remove();
   URL.revokeObjectURL(objectUrl);
 }
+
+/**
+ * Fetches an authenticated binary response as a blob object URL, for
+ * rendering inline (an <img src>) rather than triggering a save-as
+ * download — v0.2.2's project/construction-progress photo galleries.
+ * Caller owns the returned URL and must URL.revokeObjectURL() it when
+ * done (see Property.tsx's AuthedImage, which does this on unmount).
+ */
+export async function fetchAsObjectUrl(path: string): Promise<string> {
+  const url = `${API_BASE}/api/v1${path}`;
+  const headers = new Headers();
+  if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+  const res = await fetch(url, { headers, credentials: 'include' });
+  if (!res.ok) throw new Error(`Failed to load image: ${res.status}`);
+  return URL.createObjectURL(await res.blob());
+}

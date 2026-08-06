@@ -88,6 +88,8 @@ export class CompanyService implements OnApplicationBootstrap {
         timezone: 'Asia/Kolkata',
         fyStartMonth: 4,
         dateFormat: 'DD-MM-YYYY',
+        projectMediaMaxFiles: 50,
+        projectMediaMaxBytes: 524288000,
       };
     }
     return config;

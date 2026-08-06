@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../../lib/api';
+import { api, downloadFile } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 
 interface Project {
@@ -51,7 +51,19 @@ interface UnitCharge {
   chargeType: MasterOption;
 }
 
+interface ProjectMediaItem {
+  id: string;
+  category: string;
+  originalName: string;
+}
+
 const rupees = (paise: string | number) => `₹${(Number(paise) / 100).toLocaleString('en-IN')}`;
+
+const MEDIA_CATEGORY_LABELS: Record<string, string> = {
+  layout_plan: 'Layout Plan',
+  brochure: 'Brochure',
+  photo: 'Photo',
+};
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -89,6 +101,10 @@ export default function ProjectDetailPage() {
   const [newChargeTypeId, setNewChargeTypeId] = useState('');
   const [newChargeAmountRupees, setNewChargeAmountRupees] = useState('');
   const [pricingError, setPricingError] = useState('');
+
+  const [mediaCategory, setMediaCategory] = useState<'layout_plan' | 'brochure' | 'photo'>('layout_plan');
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaError, setMediaError] = useState('');
 
   const { data: project } = useQuery<Project>({
     queryKey: ['project', id],
@@ -140,6 +156,12 @@ export default function ProjectDetailPage() {
     enabled: !!id && !!pricingUnitId,
   });
 
+  const { data: projectMedia } = useQuery<ProjectMediaItem[]>({
+    queryKey: ['project-media', id],
+    queryFn: () => api(`/projects/${id}/media`),
+    enabled: !!id,
+  });
+
   const addPlcMutation = useApiMutation<UnitPlc, Record<string, unknown>>(
     'POST',
     `/projects/${id}/units/${pricingUnitId}/plcs`,
@@ -184,6 +206,29 @@ export default function ProjectDetailPage() {
     } catch (err) {
       setPricingError((err as Error).message);
     }
+  };
+
+  const handleUploadMedia = async () => {
+    setMediaError('');
+    if (!mediaFile) {
+      setMediaError('Choose a file first');
+      return;
+    }
+    try {
+      const formData = new FormData();
+      formData.append('category', mediaCategory);
+      formData.append('file', mediaFile);
+      await api(`/projects/${id}/media`, { method: 'POST', body: formData });
+      setMediaFile(null);
+      qc.invalidateQueries({ queryKey: ['project-media', id] });
+    } catch (err) {
+      setMediaError((err as Error).message);
+    }
+  };
+
+  const handleDeleteMedia = async (mediaId: string) => {
+    await api(`/projects/${id}/media/${mediaId}`, { method: 'DELETE' });
+    qc.invalidateQueries({ queryKey: ['project-media', id] });
   };
 
   const createTowerMutation = useApiMutation<Tower, Record<string, unknown>>(
@@ -548,6 +593,65 @@ export default function ProjectDetailPage() {
             </div>
           </div>
         )}
+      </section>
+
+      <section className="mt-6">
+        <h2 className="text-lg font-medium text-slate-800">Media</h2>
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-4">
+          <ul className="space-y-1 text-sm text-slate-700">
+            {(projectMedia ?? []).length === 0 ? (
+              <li className="text-slate-500">No layout plans, brochures, or photos yet</li>
+            ) : (
+              projectMedia!.map((m) => (
+                <li key={m.id} className="flex items-center justify-between">
+                  <span>
+                    <span className="mr-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                      {MEDIA_CATEGORY_LABELS[m.category] ?? m.category}
+                    </span>
+                    {m.originalName}
+                  </span>
+                  <span className="space-x-3">
+                    <button
+                      onClick={() => downloadFile(`/projects/${id}/media/${m.id}/download`, m.originalName)}
+                      className="text-xs text-blue-600 hover:text-blue-800"
+                    >
+                      Download
+                    </button>
+                    <button onClick={() => handleDeleteMedia(m.id)} className="text-xs text-red-600 hover:text-red-800">
+                      Delete
+                    </button>
+                  </span>
+                </li>
+              ))
+            )}
+          </ul>
+          <div className="mt-3 flex items-end gap-2">
+            <div>
+              <label className="block text-xs font-medium text-slate-700">Category</label>
+              <select
+                value={mediaCategory}
+                onChange={(e) => setMediaCategory(e.target.value as typeof mediaCategory)}
+                className="mt-1 rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              >
+                <option value="layout_plan">Layout Plan</option>
+                <option value="brochure">Brochure</option>
+                <option value="photo">Photo</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700">File</label>
+              <input type="file" onChange={(e) => setMediaFile(e.target.files?.[0] ?? null)} className="mt-1 block text-sm" />
+            </div>
+            <button
+              onClick={handleUploadMedia}
+              disabled={!mediaFile}
+              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              Upload
+            </button>
+          </div>
+          {mediaError && <p className="mt-2 text-sm text-red-600">{mediaError}</p>}
+        </div>
       </section>
     </div>
   );

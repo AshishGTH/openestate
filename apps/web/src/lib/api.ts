@@ -63,7 +63,10 @@ export async function api<T = unknown>(
   const url = `${API_BASE}/api/v1${path}`;
 
   const headers = new Headers(options.headers);
-  if (!headers.has('Content-Type') && options.body) {
+  // FormData (file uploads) must NOT get an explicit Content-Type — the
+  // browser sets multipart/form-data with the correct boundary itself;
+  // overriding it here would break every field the browser encodes.
+  if (!headers.has('Content-Type') && options.body && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json');
   }
   if (accessToken) {

@@ -263,7 +263,9 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     'receipt_allocations', 'ledger_entries', 'payment_vouchers', 'refunds', 'cancellations',
     'transfers', 'extra_charges', 'receipts', 'installments', 'payment_plans',
     'booking_cost_lines', 'booking_co_applicants', 'bookings', 'unit_status_changes',
-    'units', 'floors', 'towers', 'projects',
+    // v0.2.2: layout plan/brochure/photo rows — CASCADE from projects but
+    // listed explicitly anyway, same discipline as construction_update_media.
+    'units', 'floors', 'towers', 'project_media', 'projects',
     // Masters referenced by the financial rows above.
     'cancellation_rules', 'interest_rules', 'gst_rates', 'tds_rules', 'transfer_fee_rules',
     'payment_plan_milestones', 'payment_plan_templates', 'area_locations',

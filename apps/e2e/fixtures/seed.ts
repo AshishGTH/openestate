@@ -12,6 +12,7 @@ export interface E2eFixture {
   companyId: string;
   adminEmail: string;
   adminPassword: string;
+  projectId: string;
   projectName: string;
   unitNumber: string;
   // Only set when opts.withPricingMasters is passed (scenario 4) — the
@@ -125,7 +126,7 @@ export async function seedE2eFixture(
       data: { companyId: company.id, towerId: tower.id, name: 'Floor 1', floorNumber: 1 },
     });
     const unitNumber = `E2E-${tag}`;
-    await prisma.unit.create({
+    const unit = await prisma.unit.create({
       data: {
         companyId: company.id,
         floorId: floor.id,
@@ -209,12 +210,32 @@ export async function seedE2eFixture(
         data: { companyId: company.id, name: `E2E Ticket Category ${tag}` },
       });
       ticketCategoryName = category.name;
+
+      // A real booking on the fixture's own unit, linking this portal
+      // applicant to fx.projectId — required for
+      // portal_can_access_booking()-gated RLS (project_media, tickets are
+      // applicant-direct so didn't need this, but the v0.2.2 media gallery
+      // scenario needs a genuine booking to see the project at all). Raw
+      // Prisma write, not through BookingService, same as
+      // apps/api/test/portal-rls.test.ts's own makeBooking() helper —
+      // fixture data, not a flow under test.
+      await prisma.booking.create({
+        data: {
+          companyId: company.id,
+          unitId: unit.id,
+          primaryApplicantId: applicant.id,
+          bookingNumber: `E2E-BOOKING-${tag}`,
+          agreedPricePaise: BigInt(50_00_000_00),
+          bookingDate: new Date(),
+        },
+      });
     }
 
     return {
       companyId: company.id,
       adminEmail,
       adminPassword,
+      projectId: project.id,
       projectName: project.name,
       unitNumber,
       plcTypeName,
