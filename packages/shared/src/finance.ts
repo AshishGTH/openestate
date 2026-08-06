@@ -138,12 +138,36 @@ export function formatBookingNumber(fyLabel: string, seq: number): string {
  * place-of-supply state code; otherwise inter-state (IGST). For immovable
  * property the place of supply is the PROPERTY location (IGST Act §12(3)(a)),
  * snapshotted on the booking — not the customer's residential state.
+ *
+ * THROWS if either state code is missing, rather than defaulting to
+ * intra-state. A silent intra-state default previously meant any company
+ * whose gstStateCode was never configured (every install created before
+ * the column existed, or any install where an admin simply hasn't visited
+ * Company Config yet) got CGST+SGST on every booking regardless of whether
+ * the property's actual place of supply was in a different state — wrong
+ * tax on a real invoice, with no error to notice it by. A blocked booking
+ * is a worse UX than a silently wrong one only if you never find out;
+ * here you always find out.
  */
 export function isIntraStateSupply(
   companyStateCode: string | null | undefined,
   placeOfSupplyStateCode: string | null | undefined,
 ): boolean {
-  if (!companyStateCode || !placeOfSupplyStateCode) return true; // default intra when unknown
+  if (!companyStateCode) {
+    throw new Error(
+      "Cannot determine GST treatment: the company's GST state code is not set " +
+        '(CompanyConfig.gstStateCode). Set it in Company Config before booking or ' +
+        'adding charges — GST treatment must never silently default to intra-state.',
+    );
+  }
+  if (!placeOfSupplyStateCode) {
+    throw new Error(
+      'Cannot determine GST treatment: the place-of-supply state code is not set ' +
+        "(no explicit override, and the property's project has no Area Location " +
+        'state code). Set the Area Location state code, or pass an explicit ' +
+        'place-of-supply state code — GST treatment must never silently default to intra-state.',
+    );
+  }
   return companyStateCode === placeOfSupplyStateCode;
 }
 

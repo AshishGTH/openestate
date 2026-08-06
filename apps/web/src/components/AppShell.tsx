@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link, NavLink, Outlet } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '../lib/auth';
+import { api } from '../lib/api';
 import { PERMISSIONS } from '@openestate/shared';
 
 const NAV_ITEMS = [
@@ -56,6 +58,42 @@ const linkClasses = ({ isActive }: { isActive: boolean }) =>
       ? 'bg-blue-50 text-blue-700 font-medium'
       : 'text-slate-700 hover:bg-slate-100'
   }`;
+
+interface CompanyConfigGstFields {
+  companyGstin: string | null;
+  gstStateCode: string | null;
+}
+
+/**
+ * isIntraStateSupply() (packages/shared) now throws instead of silently
+ * defaulting to intra-state GST when either the company's or a booking's
+ * place-of-supply state code is missing — a company with incomplete GST
+ * config can no longer create bookings or extra charges at all, with no
+ * on-screen indication of why until someone hits the error. Shown to
+ * anyone who can read Company Config (same permission that gates the nav
+ * link), on every page, not just Company Config itself, since the error
+ * surfaces on Booking/Receipt screens, not there.
+ */
+function GstConfigBanner() {
+  const { hasPermission } = useAuth();
+  const canRead = hasPermission(PERMISSIONS.ADMIN_CONFIG_READ);
+  const { data } = useQuery<CompanyConfigGstFields>({
+    queryKey: ['company-config'],
+    queryFn: () => api('/company/config'),
+    enabled: canRead,
+  });
+  if (!canRead || !data || (data.companyGstin && data.gstStateCode)) return null;
+
+  return (
+    <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 lg:px-6">
+      GST configuration is incomplete — bookings and extra charges will be
+      rejected until it's set.{' '}
+      <Link to="/admin/config" className="font-medium underline hover:text-amber-900">
+        Complete Company Config
+      </Link>
+    </div>
+  );
+}
 
 export default function AppShell() {
   const { user, logout, hasPermission } = useAuth();
@@ -146,6 +184,8 @@ export default function AppShell() {
           <div className="flex-1" />
           <span className="text-sm text-slate-500 hidden sm:inline">{user?.email}</span>
         </header>
+
+        <GstConfigBanner />
 
         <main className="flex-1 p-4 lg:p-6">
           <Outlet />

@@ -7,6 +7,29 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **Correctness fix affecting GST charged on bookings and extra charges —
+  check your invoices if your company's GST State Code was ever unset.**
+  `isIntraStateSupply()` used to silently default to intra-state
+  (CGST+SGST) whenever the company's GST state code or a booking's
+  place-of-supply state code was missing, instead of raising an error.
+  Any company whose Company Config GST fields were never filled in —
+  every install created before those columns existed, or any install
+  where nobody had visited Company Config yet — has been charging
+  CGST+SGST on every booking and extra charge regardless of where the
+  property actually is, which is the WRONG tax treatment (IGST) whenever
+  the real place of supply is in a different state from the company's
+  own. This produced no error and no warning; the only way to notice was
+  to already know the correct treatment and check by hand. **If this
+  applies to you, review bookings/extra charges made while your GST
+  config was incomplete and correct any wrongly-taxed invoices — this
+  release does not retroactively fix already-issued invoices.** Going
+  forward, `isIntraStateSupply()` now throws instead of guessing — a
+  booking or extra charge with incomplete GST config is rejected with a
+  clear error naming what to set in Company Config, rather than silently
+  taxed wrong. The app also now logs a warning at boot listing any
+  company with incomplete GST config, and the staff admin UI shows a
+  persistent banner linking to Company Config until it's completed.
+
 - **Correctness fix affecting reported collection figures — upgrade and
   let the migration run before trusting any collection report.** A prior
   bug (see the REPORTS-phase entry in `CLAUDE.md`) left bounced-cheque

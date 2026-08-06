@@ -90,6 +90,13 @@ export async function seedE2eFixture(
         // before/after Collection Summary delta to the receipt amount
         // alone, with no separate bounce-charge line to account for.
         chequeBounceChargePaise: BigInt(0),
+        // isIntraStateSupply() throws (not silently defaults to
+        // intra-state) when either side's state code is missing — every
+        // scenario here books a unit, so this must be set or every
+        // booking attempt 400s. Matches
+        // apps/api/test/helpers/postsales-harness.ts's own default.
+        gstStateCode: '09',
+        companyGstin: '09ABCDE1234F1Z5',
       },
     });
 
@@ -97,8 +104,13 @@ export async function seedE2eFixture(
     // writes, not through the Inventory UI, since inventory creation is
     // out of scope for these three scenarios (mirrors
     // apps/api/test/helpers/postsales-harness.ts's seedCompany/makeUnit).
+    // areaLocation gives the project a place-of-supply state code — the
+    // other half of what isIntraStateSupply() now requires.
+    const areaLocation = await prisma.areaLocation.create({
+      data: { companyId: company.id, name: `E2E Area ${tag}`, stateCode: '09' },
+    });
     const project = await prisma.project.create({
-      data: { companyId: company.id, name: `E2E Project ${tag}`, code: `E2E-${tag}` },
+      data: { companyId: company.id, name: `E2E Project ${tag}`, code: `E2E-${tag}`, areaLocationId: areaLocation.id },
     });
     const tower = await prisma.tower.create({
       data: { companyId: company.id, projectId: project.id, name: 'Tower 1', code: 'T1' },
