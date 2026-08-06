@@ -9,12 +9,13 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import { createConstructionUpdateSchema, PERMISSIONS } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
@@ -55,5 +56,19 @@ export class ConstructionUpdateAdminController {
   listForProject(@Query('projectId') projectId: string, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.updates.listForProject(user.companyId, projectId);
+  }
+
+  @Get('media/:mediaId/download')
+  @RequirePermissions(PERMISSIONS.ADMIN_CONSTRUCTION_UPDATE_MANAGE)
+  @ApiOperation({ summary: 'Download a construction-update photo' })
+  async downloadMedia(@Param('mediaId') mediaId: string, @Req() req: Request, @Res() res: Response) {
+    const user = req.user as JwtPayload;
+    const { buffer, mimeType, originalName } = await this.updates.getMediaBytes(user.companyId, mediaId);
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `inline; filename="${originalName}"`,
+      'Content-Length': buffer.length,
+    });
+    res.send(buffer);
   }
 }

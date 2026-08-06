@@ -91,6 +91,7 @@ const TENANT_SCOPED_MODELS = new Set([
   'TicketMessage',
   'ConstructionUpdate',
   'ConstructionUpdateMedia',
+  'ProjectMedia',
   'PluginInstallation',
   'WebhookEndpoint',
   'WebhookDelivery',

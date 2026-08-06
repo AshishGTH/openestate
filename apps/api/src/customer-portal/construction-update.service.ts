@@ -1,8 +1,10 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import * as fs from 'node:fs';
 import { withTenantTx, type PrismaClient } from '@openestate/db';
 import { NOTIFICATION_EVENT, type CreateConstructionUpdateDto } from '@openestate/shared';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import { UploadService } from '../inventory/upload.service';
+import { assertProjectMediaCapacity } from '../inventory/project-media-limits';
 import { NotificationService } from '../notifications/notification.service';
 
 @Injectable()
@@ -60,6 +62,8 @@ export class ConstructionUpdateService {
       const update = await tx.constructionUpdate.findFirst({ where: { id: updateId } });
       if (!update) throw new NotFoundException('Construction update not found');
 
+      await assertProjectMediaCapacity(tx, companyId, update.projectId, file.size);
+
       const uploaded = await this.uploadService.validateAndStore(file, 'construction_progress');
       const count = await tx.constructionUpdateMedia.count({ where: { constructionUpdateId: updateId } });
 
@@ -85,5 +89,30 @@ export class ConstructionUpdateService {
         orderBy: { publishedAt: 'desc' },
       }),
     );
+  }
+
+  /** Staff download — direct company-scoped lookup, same shape as DocumentService.getDocumentBytes. */
+  async getMediaBytes(companyId: string, mediaId: string): Promise<{ buffer: Buffer; mimeType: string; originalName: string }> {
+    const media = await this.systemPrisma.constructionUpdateMedia.findFirst({ where: { id: mediaId, companyId } });
+    if (!media) throw new NotFoundException('Media not found');
+    const filePath = this.uploadService.pathFor('construction_progress', media.storedName);
+    const buffer = await fs.promises.readFile(filePath);
+    return { buffer, mimeType: media.mimeType, originalName: media.originalName };
+  }
+
+  /**
+   * Portal counterpart to getMediaBytes() — RLS
+   * (construction_update_media_portal_scope) is the sole enforcement,
+   * same "RLS is the primary IDOR defense" discipline as
+   * DocumentService.getDocumentBytesForPortal.
+   */
+  async getMediaBytesForPortal(companyId: string, mediaId: string): Promise<{ buffer: Buffer; mimeType: string; originalName: string }> {
+    const media = await withTenantTx(this.tenantPrisma, companyId, (tx) =>
+      tx.constructionUpdateMedia.findFirst({ where: { id: mediaId } }),
+    );
+    if (!media) throw new NotFoundException('Media not found');
+    const filePath = this.uploadService.pathFor('construction_progress', media.storedName);
+    const buffer = await fs.promises.readFile(filePath);
+    return { buffer, mimeType: media.mimeType, originalName: media.originalName };
   }
 }

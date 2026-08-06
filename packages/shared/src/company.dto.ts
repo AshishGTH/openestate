@@ -41,6 +41,10 @@ export const updateCompanyConfigSchema = z
       .regex(/^#[0-9A-Fa-f]{6}$/, 'Must be a 6-digit hex color, e.g. #2563EB')
       .nullable()
       .optional(),
+    // v0.2.2: shared per-project media storage cap (see ProjectMedia /
+    // ConstructionUpdateMedia) — configurable, sensible defaults.
+    projectMediaMaxFiles: z.number().int().min(1).max(10000).optional(),
+    projectMediaMaxBytes: z.number().int().min(1024 * 1024).max(2147483647).optional(),
   })
   .strict();
 

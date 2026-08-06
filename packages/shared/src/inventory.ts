@@ -58,6 +58,14 @@ export type UploadCategory = (typeof UPLOAD_CATEGORIES)[number];
 
 export const uploadCategorySchema = z.enum(UPLOAD_CATEGORIES);
 
+// v0.2.2: the subset of UPLOAD_CATEGORIES a project-level upload may use
+// — 'document' and 'construction_progress' belong to other flows
+// (GeneratedDocument, ConstructionUpdateMedia) that already own those
+// categories' storage rows.
+export const PROJECT_MEDIA_CATEGORIES = ['layout_plan', 'brochure', 'photo'] as const;
+export type ProjectMediaCategory = (typeof PROJECT_MEDIA_CATEGORIES)[number];
+export const projectMediaCategorySchema = z.enum(PROJECT_MEDIA_CATEGORIES);
+
 // ── Zod Schemas: Project ────────────────────────────────────
 
 export const createProjectSchema = z

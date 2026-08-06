@@ -1,6 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import * as fs from 'node:fs';
 import { withTenantTx } from '@openestate/db';
+import type { UploadCategory } from '@openestate/shared';
 import { TENANT_PRISMA } from '../database/database.module';
+import { UploadService } from '../inventory/upload.service';
 
 /**
  * All reachability (which bookings/units/projects this session can see) is
@@ -14,6 +17,7 @@ export class PortalPropertyService {
     @Inject(TENANT_PRISMA)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private readonly tenantPrisma: any,
+    private readonly uploadService: UploadService,
   ) {}
 
   async getMyProperties(companyId: string, applicantId: string) {
@@ -36,11 +40,17 @@ export class PortalPropertyService {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const properties = await Promise.all((bookings as any[]).map(async (b) => {
         const projectId = b.unit.floor.tower.project.id;
-        const updates = await tx.constructionUpdate.findMany({
-          where: { projectId },
-          include: { media: { orderBy: { sortOrder: 'asc' } } },
-          orderBy: { publishedAt: 'desc' },
-        });
+        const [updates, projectMedia] = await Promise.all([
+          tx.constructionUpdate.findMany({
+            where: { projectId },
+            include: { media: { orderBy: { sortOrder: 'asc' } } },
+            orderBy: { publishedAt: 'desc' },
+          }),
+          tx.projectMedia.findMany({
+            where: { projectId },
+            orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }],
+          }),
+        ]);
         return {
           bookingId: b.id,
           bookingNumber: b.bookingNumber,
@@ -61,10 +71,29 @@ export class PortalPropertyService {
             expectedEndDate: b.unit.floor.tower.project.expectedEndDate,
           },
           constructionUpdates: updates,
+          projectMedia,
         };
       }));
 
       return properties;
     });
+  }
+
+  /**
+   * Portal counterpart to ProjectMediaService.getBytes() — RLS
+   * (project_media_portal_scope) is the sole enforcement, same
+   * discipline as DocumentService.getDocumentBytesForPortal.
+   */
+  async getProjectMediaBytesForPortal(
+    companyId: string,
+    mediaId: string,
+  ): Promise<{ buffer: Buffer; mimeType: string; originalName: string }> {
+    const media = await withTenantTx(this.tenantPrisma, companyId, (tx) =>
+      tx.projectMedia.findFirst({ where: { id: mediaId } }),
+    );
+    if (!media) throw new NotFoundException('Media not found');
+    const filePath = this.uploadService.pathFor(media.category as UploadCategory, media.storedName);
+    const buffer = await fs.promises.readFile(filePath);
+    return { buffer, mimeType: media.mimeType, originalName: media.originalName };
   }
 }

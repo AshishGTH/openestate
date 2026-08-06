@@ -3,6 +3,49 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.2]
+
+### Added
+
+- **Layout plan / brochure / photo uploads.** `UploadService` has
+  supported these categories since Phase 2 but no route ever called it
+  — this release wires it up. Staff get a **Media** panel on a
+  project's detail page (upload, list, download, delete); customers
+  see the same files under a new "Layout plans & brochures" section on
+  the portal Property page, with real download links.
+- **Construction-progress photos actually render now.** The upload
+  path for `ConstructionUpdateMedia` has existed since v0.2.1's own
+  predecessor, but there was never a serving route on either side —
+  the portal only ever showed a photo *count*. Staff and portal both
+  gained a download route, and the portal Property page now renders
+  the real images inline instead of a bare "N photo(s)" line.
+- **Per-project storage cap.** Layout plans, brochures, photos, and
+  construction-progress photos all roll up disk usage under one
+  project — unbounded uploads on a self-hosted box eventually fill the
+  disk, which surfaces as Postgres refusing writes and looks like
+  total system failure rather than a storage problem. A configurable
+  file-count cap (default 50) and total-size cap (default 500MB) per
+  project are enforced before any file touches disk, with a clear
+  error naming the limit. Configurable via Company Config
+  (`projectMediaMaxFiles`/`projectMediaMaxBytes`).
+- IDOR coverage for both new download routes: a customer with a
+  booking in one project cannot fetch another project's media by
+  guessing an id — proven via the same raw-connection RLS discipline
+  as every other portal IDOR test in this codebase, since both
+  `project_media`/`construction_update_media`'s portal RLS predicates
+  are multi-hop and therefore not mirrored at the JS layer.
+- Two new e2e Playwright scenarios: staff uploads a layout plan
+  through the real UI and the customer downloads it in the portal;
+  and a staff-published construction-progress photo renders as a real
+  decoded image in the portal (not just a 200 response).
+
+### Still missing
+
+- **Custom field values.** Admins can define custom fields (Applicant,
+  Unit, etc.) via Admin → Custom Fields, but no form anywhere in either
+  app captures or displays a *value* for one — defining a field has no
+  effect elsewhere in the product yet.
+
 ## [0.2.1]
 
 ### Added

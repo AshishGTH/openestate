@@ -11,6 +11,8 @@ import { UnitPricingService } from './unit-pricing.service';
 import { ImportExportController } from './import-export.controller';
 import { ImportExportService } from './import-export.service';
 import { UploadService } from './upload.service';
+import { ProjectMediaController } from './project-media.controller';
+import { ProjectMediaService } from './project-media.service';
 
 @Module({
   controllers: [
@@ -18,6 +20,7 @@ import { UploadService } from './upload.service';
     TowerController,
     UnitController,
     ImportExportController,
+    ProjectMediaController,
   ],
   providers: [
     ProjectService,
@@ -28,6 +31,7 @@ import { UploadService } from './upload.service';
     UnitPricingService,
     ImportExportService,
     UploadService,
+    ProjectMediaService,
   ],
   exports: [
     UnitStateMachineService,
