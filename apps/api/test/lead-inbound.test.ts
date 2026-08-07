@@ -12,6 +12,7 @@ import { PluginCapabilityError, type Plugin } from '@openestate/plugin-sdk';
 import { z } from 'zod';
 import { makeClients, seedCompany, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
 import { InquiryService } from '../src/presales/inquiry.service';
+import { CustomFieldsService } from '../src/custom-fields/custom-fields.service';
 import { AssignmentService } from '../src/presales/assignment.service';
 import { ApplicantService } from '../src/presales/applicant.service';
 import { PanEncryptionService } from '../src/common/pan-encryption.service';
@@ -51,8 +52,8 @@ describeIf('Inbound lead API (Phase 7 commit 2)', () => {
     ({ tenantPrisma, systemPrisma } = makeClients());
     fx = await seedCompany(systemPrisma);
     const assignmentService = new AssignmentService(tenantPrisma);
-    const applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService());
-    inquiryService = new InquiryService(tenantPrisma, systemPrisma, SYSTEM_CLOCK, assignmentService, applicantService);
+    const applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService(), new CustomFieldsService(tenantPrisma, systemPrisma));
+    inquiryService = new InquiryService(tenantPrisma, systemPrisma, SYSTEM_CLOCK, assignmentService, applicantService, new CustomFieldsService(tenantPrisma, systemPrisma));
     leadApiKeyService = new LeadApiKeyService(systemPrisma);
     inboundController = new LeadInboundController(inquiryService);
   });
@@ -101,7 +102,7 @@ describeIf('Inbound lead API (Phase 7 commit 2)', () => {
     let runtime: PluginRuntimeService;
 
     beforeAll(() => {
-      runtime = new PluginRuntimeService(new PluginSecretEncryptionService(), new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService()), new CompanyService(tenantPrisma, systemPrisma), inquiryService);
+      runtime = new PluginRuntimeService(new PluginSecretEncryptionService(), new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService(), new CustomFieldsService(tenantPrisma, systemPrisma)), new CompanyService(tenantPrisma, systemPrisma), inquiryService);
     });
 
     function makePlugin(capabilities: Plugin['manifest']['capabilities']): Plugin {

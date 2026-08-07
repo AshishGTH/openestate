@@ -184,4 +184,71 @@ export class ReportsService {
       interactionCount: counts.get(m.id) ?? 0,
     }));
   }
+
+  /**
+   * v0.2.3: per-inquiry row export, with one column per ACTIVE custom
+   * field definition appended after the fixed columns.
+   *
+   * Every other report here is an aggregate (funnel, ageing,
+   * staff-performance) where a custom field value has no meaning — this
+   * is the row-level export that makes "custom fields appear in
+   * exports" real. Columns are computed from the definitions, so a
+   * newly-defined field shows up with no code change.
+   *
+   * Column keys are prefixed (`inquiry.` / `applicant.`) because the
+   * two entity types can legitimately define the SAME key, and an
+   * unprefixed collision would silently drop one of them from every
+   * exported row.
+   */
+  async inquiriesExport(companyId: string, scope: ReportScope) {
+    const [inquiries, definitions] = await Promise.all([
+      this.systemPrisma.inquiry.findMany({
+        where: this.scopedWhere(companyId, scope),
+        include: {
+          applicant: { select: { name: true, primaryPhone: true, email: true, customFields: true } },
+          project: { select: { name: true } },
+          source: { select: { name: true } },
+          temperature: { select: { name: true } },
+          assignedTo: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.systemPrisma.customFieldDefinition.findMany({
+        where: { companyId, entityType: { in: ['INQUIRY', 'APPLICANT'] }, isActive: true },
+        orderBy: { sortOrder: 'asc' },
+      }),
+    ]);
+
+    const flatten = (v: unknown): string => {
+      if (v === undefined || v === null) return '';
+      if (Array.isArray(v)) return v.join(', ');
+      if (typeof v === 'boolean') return v ? 'Yes' : 'No';
+      return String(v);
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (inquiries as any[]).map((i) => {
+      const row: Record<string, unknown> = {
+        inquiryId: i.id,
+        createdAt: i.createdAt.toISOString().slice(0, 10),
+        status: i.status,
+        applicantName: i.applicant?.name ?? '',
+        applicantPhone: i.applicant?.primaryPhone ?? '',
+        applicantEmail: i.applicant?.email ?? '',
+        project: i.project?.name ?? '',
+        source: i.source?.name ?? '',
+        temperature: i.temperature?.name ?? '',
+        assignedTo: i.assignedTo?.name ?? '',
+      };
+      for (const def of definitions) {
+        const bag = (def.entityType === 'APPLICANT' ? i.applicant?.customFields : i.customFields) as
+          | Record<string, unknown>
+          | null
+          | undefined;
+        const prefix = def.entityType === 'APPLICANT' ? 'applicant' : 'inquiry';
+        row[`${prefix}.${def.label}`] = flatten(bag?.[def.key]);
+      }
+      return row;
+    });
+  }
 }

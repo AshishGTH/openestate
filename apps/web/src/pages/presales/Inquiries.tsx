@@ -5,6 +5,10 @@ import { usePaginatedQuery } from '../../lib/hooks';
 import { api } from '../../lib/api';
 import DataTable, { type Column } from '../../components/DataTable';
 import Pagination from '../../components/Pagination';
+import CustomFieldInputs, {
+  useCustomFieldDefinitions,
+  buildCustomFieldPayload,
+} from '../../components/CustomFieldInputs';
 
 interface Inquiry {
   id: string;
@@ -35,6 +39,11 @@ export default function InquiriesPage() {
   const [projectId, setProjectId] = useState('');
   const [sourceId, setSourceId] = useState('');
   const [temperatureId, setTemperatureId] = useState('');
+  const [inquiryCf, setInquiryCf] = useState<Record<string, unknown>>({});
+  const [applicantCf, setApplicantCf] = useState<Record<string, unknown>>({});
+
+  const { definitions: inquiryDefs } = useCustomFieldDefinitions('INQUIRY');
+  const { definitions: applicantDefs } = useCustomFieldDefinitions('APPLICANT');
 
   const qc = useQueryClient();
   const { data, isLoading } = usePaginatedQuery<Inquiry>(['inquiries'], '/inquiries', { page, limit: 20 });
@@ -59,10 +68,16 @@ export default function InquiriesPage() {
       const res = await api<{ possibleDuplicateApplicantIds?: string[] }>('/inquiries', {
         method: 'POST',
         body: JSON.stringify({
-          applicant: { name: applicantName, primaryPhone: applicantPhone, alternatePhones: [] },
+          applicant: {
+            name: applicantName,
+            primaryPhone: applicantPhone,
+            alternatePhones: [],
+            customFields: buildCustomFieldPayload(applicantDefs, applicantCf),
+          },
           projectId: projectId === '' ? undefined : projectId,
           sourceId: sourceId === '' ? undefined : sourceId,
           temperatureId: temperatureId === '' ? undefined : temperatureId,
+          customFields: buildCustomFieldPayload(inquiryDefs, inquiryCf),
         }),
       });
       if (res.possibleDuplicateApplicantIds && res.possibleDuplicateApplicantIds.length > 0) {
@@ -75,6 +90,8 @@ export default function InquiriesPage() {
       setProjectId('');
       setSourceId('');
       setTemperatureId('');
+      setInquiryCf({});
+      setApplicantCf({});
     } catch (err) {
       setError((err as Error).message);
     }
@@ -137,6 +154,28 @@ export default function InquiriesPage() {
               </select>
             </div>
           </div>
+
+          {applicantDefs.length > 0 && (
+            <div data-testid="applicant-custom-fields">
+              <p className="mt-3 text-xs font-medium uppercase tracking-wide text-slate-400">Applicant</p>
+              <CustomFieldInputs
+                definitions={applicantDefs}
+                values={applicantCf}
+                onChange={(k, v) => setApplicantCf((p) => ({ ...p, [k]: v }))}
+              />
+            </div>
+          )}
+          {inquiryDefs.length > 0 && (
+            <div data-testid="inquiry-custom-fields">
+              <p className="mt-3 text-xs font-medium uppercase tracking-wide text-slate-400">Inquiry</p>
+              <CustomFieldInputs
+                definitions={inquiryDefs}
+                values={inquiryCf}
+                onChange={(k, v) => setInquiryCf((p) => ({ ...p, [k]: v }))}
+              />
+            </div>
+          )}
+
           <div className="mt-3 flex gap-3">
             <button onClick={handleCreate} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Create</button>
             <button onClick={() => setShowForm(false)} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>

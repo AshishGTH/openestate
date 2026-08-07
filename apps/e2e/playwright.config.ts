@@ -31,6 +31,16 @@ const HARNESS_HEX_KEY = 'ab'.repeat(32);
 export default defineConfig({
   testDir: './tests',
   fullyParallel: false, // tests share one seeded fixture company; keep runs serial and simple
+  // Playwright defaults to half the CPU count — 8 on this project's dev
+  // box. At 12 scenarios that reliably crashed Chromium workers with
+  // Windows STATUS_STACK_BUFFER_OVERRUN (0xC0000409): a resource
+  // exhaustion signature, not a test failure — the same 12 specs pass
+  // at 2 workers, and passed at 8 when there were only 9 of them.
+  // Capped for the same reason vitest's maxForks is capped in
+  // apps/api/vitest.config.ts (see CLAUDE.md's Phase 7→8 CI-reliability
+  // entry). No effect on CI, whose 2-core runners already resolve to
+  // fewer workers than this.
+  workers: 4,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   globalSetup: './global-setup.ts',

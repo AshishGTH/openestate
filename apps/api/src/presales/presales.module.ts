@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ClockProvider, CLOCK } from '../common/clock.provider';
 import { PanEncryptionService } from '../common/pan-encryption.service';
 import { QueuesModule } from '../queues/queues.module';
+import { CustomFieldsModule } from '../custom-fields/custom-fields.module';
 import { CommunicationProcessor } from '../queues/communication.processor';
 import { ApplicantController } from './applicant.controller';
 import { ApplicantService } from './applicant.service';
@@ -22,7 +23,7 @@ import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';
 
 @Module({
-  imports: [QueuesModule],
+  imports: [QueuesModule, CustomFieldsModule],
   controllers: [
     ApplicantController,
     InquiryController,

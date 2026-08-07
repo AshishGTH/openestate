@@ -45,10 +45,10 @@ describeIf('generic-sales plugin (Phase 7 commit 3)', () => {
 
     registry = new PluginRegistryService([genericSalesPlugin as Plugin]);
     registry.onModuleInit();
-    const applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService());
+    const applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService(), new CustomFieldsService(tenantPrisma, systemPrisma));
     companyService = new CompanyService(tenantPrisma, systemPrisma);
     const assignmentService = new AssignmentService(tenantPrisma);
-    const inquiryService = new InquiryService(tenantPrisma, systemPrisma, SYSTEM_CLOCK, assignmentService, applicantService);
+    const inquiryService = new InquiryService(tenantPrisma, systemPrisma, SYSTEM_CLOCK, assignmentService, applicantService, new CustomFieldsService(tenantPrisma, systemPrisma));
     const runtime = new PluginRuntimeService(new PluginSecretEncryptionService(), applicantService, companyService, inquiryService);
     const customFieldsService = new CustomFieldsService(tenantPrisma, systemPrisma);
     admin = new PluginAdminService(systemPrisma, registry, runtime, new PluginSecretEncryptionService(), companyService, customFieldsService);

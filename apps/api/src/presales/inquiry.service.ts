@@ -20,6 +20,7 @@ import type {
 import { CLOCK } from '../common/clock.provider';
 import { AssignmentService } from './assignment.service';
 import { ApplicantService } from './applicant.service';
+import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 
 export interface InquiryScope {
   /** When set, results are restricted to inquiries assigned to this user (sales_executive). */
@@ -52,6 +53,7 @@ export class InquiryService {
     private readonly clock: Clock,
     private readonly assignmentService: AssignmentService,
     private readonly applicantService: ApplicantService,
+    private readonly customFields: CustomFieldsService,
   ) {}
 
   async findAll(companyId: string, query: PaginationQuery, scope: InquiryScope) {
@@ -121,6 +123,22 @@ export class InquiryService {
   }
 
   async create(companyId: string, dto: CreateInquiryDto) {
+    // Resolved BEFORE the transaction opens: validation reads the
+    // definitions table, and there's no reason to hold a pooled
+    // connection open across those reads.
+    const inquiryCustomFields = await this.customFields.resolveValuesForWrite(
+      companyId,
+      'INQUIRY',
+      dto.customFields,
+    );
+    const applicantCustomFields = dto.applicant
+      ? await this.customFields.resolveValuesForWrite(
+          companyId,
+          'APPLICANT',
+          dto.applicant.customFields,
+        )
+      : undefined;
+
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
         let applicantId = dto.applicantId;
@@ -154,7 +172,7 @@ export class InquiryService {
               state: dto.applicant.state,
               pincode: dto.applicant.pincode,
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              customFields: dto.applicant.customFields as any,
+              customFields: applicantCustomFields as any,
             },
           });
           applicantId = created.id;
@@ -183,7 +201,7 @@ export class InquiryService {
             temperatureId: dto.temperatureId,
             nextFollowupAt: dto.nextFollowupAt,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            customFields: dto.customFields as any,
+            customFields: inquiryCustomFields as any,
           },
         });
 
@@ -281,11 +299,20 @@ export class InquiryService {
   }
 
   async update(companyId: string, id: string, dto: UpdateInquiryDto, scope: InquiryScope) {
-    await this.findOne(companyId, id, scope);
+    const existing = await this.findOne(companyId, id, scope);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = { ...dto };
+    if (dto.customFields !== undefined) {
+      data.customFields = await this.customFields.resolveValuesForWrite(
+        companyId,
+        'INQUIRY',
+        dto.customFields,
+        (existing as { customFields?: Record<string, unknown> | null }).customFields ?? null,
+      );
+    }
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        tx.inquiry.update({ where: { id }, data: dto as any }),
+        tx.inquiry.update({ where: { id }, data }),
       ),
     );
   }

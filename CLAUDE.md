@@ -4440,3 +4440,125 @@ install only, never an existing one" shape.
      feasible; here it isn't — there's no way to know after the fact
      what the correct historical treatment should have been without a
      human reviewing each affected booking).
+
+### v0.2.3 — custom field VALUES (and an integrity hole open since Phase 3)
+
+- **The premise this release started from was wrong, and the correction
+  changed the work.** The gap was described as "nothing captures,
+  stores, validates, displays, filters or exports a value." Reading the
+  code first showed values were **already being stored**:
+  `Applicant.custom_fields`/`Inquiry.custom_fields` JSONB columns have
+  existed since `20260722000000_phase3_presales`, the presales DTOs
+  already accepted `customFields: z.record(z.unknown())`, and four
+  service call sites already wrote them. What was missing was
+  everything *around* storage — and, more seriously, `z.record(z.unknown())`
+  meant **any key with any value** went straight into JSONB with no type
+  check, no required check, no option check, and no rejection of keys
+  that were never defined. `CustomFieldsService.buildValidationSchema()`
+  /`validateCustomFields()` were fully written and called by **nothing**.
+  So this was not a greenfield feature; it was closing a live
+  write-side integrity hole plus building the read side.
+
+- **Storage: JSONB inline per entity, not EAV — argued on isolation
+  surface, not convenience.** A JSONB column on an
+  already-RLS-protected, already-`TENANT_SCOPED_MODELS`-registered row
+  inherits that row's isolation entirely: zero new tables, zero new
+  policies, zero new registrations, and no new portal-scope analysis.
+  EAV would have needed all four — and that is exactly the surface
+  where Phase 6 found two real IDOR-class bugs. CLAUDE.md principle 5
+  permits either ("EAV/JSONB per entity"), and CLAUDE.md's own
+  `cleanupCompany` note already asserted values "live inline as JSON on
+  each entity," so EAV would have invalidated a documented assumption
+  too. The honest cost is real: JSONB values are untyped at the SQL
+  level, so sorting a NUMBER field lexicographically is wrong without
+  a cast, and per-key indexes can't be created at migration time for
+  admin-defined keys. **Sorting was therefore deferred rather than
+  shipped subtly wrong**, and filtering is limited to exact match.
+  Proven, not assumed: `custom-field-values-isolation.test.ts` asserts
+  cross-company invisibility through a raw connection under a real
+  tenant session, for both the pre-existing and the new columns.
+
+- **`.strict()` is the whole fix.** zod's default is to *strip* unknown
+  keys, which would have let a client keep writing junk that silently
+  vanished. The builder now rejects. The one existing test of this
+  logic (`packages/db/test/custom-fields-validation.test.ts`) had
+  re-implemented its **own local copy** of the builder — because
+  `packages/db` has no dependency on `@openestate/shared` — so it proved
+  nothing about the function the API calls, and its copy already called
+  `.strict()` while production did not. Fixed at the root: the builder
+  moved to `packages/shared`, the service delegates to it, and the test
+  moved alongside it so there is exactly one implementation.
+
+- **Reject bad WRITES; preserve existing DATA.** Validating the whole
+  merged object strictly would have made any record carrying an unknown
+  stored key **permanently uneditable** — and two such keys are written
+  by the product itself (`leadNote` from `createFromLead`,
+  `importNotes` from CSV import), so every imported inquiry would have
+  been bricked. `resolveValuesForWrite` therefore rejects unknown keys
+  arriving from the *client*, but carries unknown *stored* keys through
+  untouched and excludes them from validation. Found by tracing the
+  interaction before writing the code, not by a failing test.
+
+- **PATCH validates the merged result, not the patch.** Validating the
+  patch alone would let a partial update bypass every required field by
+  omitting it.
+
+- **Definition lifecycle: never mutate stored values.** `key`,
+  `fieldType` and `entityType` were already absent from
+  `updateCustomFieldSchema`, which turned out to do most of the work —
+  values are keyed by the immutable `key`, so a label rename can never
+  orphan one, and a type change (which would mean silently coercing or
+  discarding every stored value) is simply not expressible. Emptying a
+  SELECT's options is now refused (it would leave a field rejecting
+  every possible value; `z.enum([])` also throws at *construction*, so
+  the builder guards defensively too). Delete became a **soft**
+  delete — the previous hard delete orphaned JSONB keys invisibly.
+
+- **Hard purge requires the field key typed back, not just a count.** A
+  count ("will strip 340 rows") is a number the admin has no way to
+  verify before agreeing to it, so confirming against it is not really
+  consent; typing the key makes the confirmation about the *thing* being
+  destroyed. The affected row count is written to the audit log, so the
+  size of what happened stays recoverable even though the values do not.
+
+- **SECURITY: portal responses withheld custom field values.**
+  `PortalProfileService.getProfile` returned the whole applicant row
+  (omitting only PAN) to the customer **and their co-applicants** — so
+  any internal note staff had written into a custom field was already
+  being served to customers. Nothing in the definition model marks a
+  field customer-safe, so **the only defensible default is to withhold
+  all of them**; guessing from a label would be exactly the kind of
+  silent-wrong-data call this project keeps getting burned by, and
+  per-field opt-in is a real feature, not something to approximate.
+  Implemented as a named `PORTAL_APPLICANT_OMIT` constant used by every
+  portal applicant read, so a future portal read cannot quietly omit it
+  — the same discipline `panCiphertext` already gets. Audited the rest
+  of the portal surface rather than fixing only the reported spot:
+  `portal-account`/`portal-property` use explicit field projections and
+  `brokers-portal` reads no entity rows at all, so this was the only
+  leak.
+
+- **BOOKING deliberately excluded, and made visible rather than
+  silent.** Supporting it means touching `BookingService`, which this
+  file freezes. `CUSTOM_FIELD_VALUE_ENTITIES` in
+  `packages/shared/src/custom-field.dto.ts` is the single source of
+  truth for what is supported, consumed by both the API guard and the
+  admin UI so the two can never drift; the UI marks the tab
+  "(unsupported)" with an explanation and disables Add Field. Letting
+  an admin define a BOOKING field that silently did nothing would have
+  reproduced the exact bug this release exists to close.
+
+- **A constructor change broke three test files, and the fix was to
+  restore prior behaviour rather than paper over it.** Adding
+  `CustomFieldsService` to `ApplicantService`/`InquiryService` broke
+  every direct-`new`-construction test. Two of them
+  (`presales-follow-up`, `presales-inquiry`) turned out to have been
+  passing only **four** of `InquiryService`'s five arguments all along —
+  `applicantService` was already `undefined`, harmlessly, because it is
+  reached only from `createFromLead()` which neither file exercises.
+  The first fix attempt supplied a real `ApplicantService`, which
+  promptly failed on `PAN_ENCRYPTION_KEY is not set` (those files never
+  needed that env var before). Reverted to passing `undefined as never`
+  with a comment explaining why, adding only the genuinely-required
+  `CustomFieldsService` — smaller diff, no behaviour change, and no new
+  env dependency introduced into unrelated tests.

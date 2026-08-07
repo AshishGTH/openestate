@@ -80,6 +80,11 @@ export const createProjectSchema = z
     startDate: z.coerce.date().optional(),
     expectedEndDate: z.coerce.date().optional(),
     isActive: z.boolean().default(true),
+    // v0.2.3: admin-defined custom field values. Deliberately untyped
+    // here — the real shape is per-company runtime data, so it is
+    // validated server-side against the active CustomFieldDefinitions,
+    // never against a compile-time contract.
+    customFields: z.record(z.unknown()).optional(),
   })
   .strict();
 
@@ -130,6 +135,7 @@ export const createUnitSchema = z
     superBuiltUpSqft: z.number().positive().optional(),
     baseRatePaise: z.coerce.bigint().min(0n).default(0n),
     isActive: z.boolean().default(true),
+    customFields: z.record(z.unknown()).optional(),
   })
   .strict();
 
@@ -142,6 +148,7 @@ export const updateUnitSchema = z
     builtUpAreaSqft: z.number().positive().optional(),
     superBuiltUpSqft: z.number().positive().optional(),
     isActive: z.boolean().optional(),
+    customFields: z.record(z.unknown()).optional(),
   })
   .strict();
 

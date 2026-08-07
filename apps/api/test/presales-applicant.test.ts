@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTenantPrismaClient, createSystemPrismaClient, runWithTenant, withTenantTx } from '@openestate/db';
 import { ApplicantService } from '../src/presales/applicant.service';
+import { CustomFieldsService } from '../src/custom-fields/custom-fields.service';
 import { PanEncryptionService } from '../src/common/pan-encryption.service';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
@@ -26,7 +27,7 @@ describeIf('Applicant dedup, consent, merge', () => {
   beforeAll(async () => {
     tenantPrisma = createTenantPrismaClient(APP_URL!);
     systemPrisma = createSystemPrismaClient(SYSTEM_URL!);
-    applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService());
+    applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService(), new CustomFieldsService(tenantPrisma, systemPrisma));
 
     const company = await systemPrisma.company.create({
       data: { name: 'Applicant Test Co', slug: `applicant-test-${Date.now()}` },

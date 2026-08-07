@@ -695,6 +695,8 @@ model Project {
   startDate       DateTime? @map("start_date") @db.Date
   expectedEndDate DateTime? @map("expected_end_date") @db.Date
   isActive        Boolean   @default(true) @map("is_active")
+  // v0.2.3: see Unit.customFields for the shared contract.
+  customFields    Json?     @map("custom_fields")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -758,6 +760,11 @@ model Unit {
   superBuiltUpSqft Decimal?   @map("super_built_up_sqft") @db.Decimal(10, 2)
   baseRatePaise    BigInt     @default(0) @map("base_rate_paise")
   isActive         Boolean    @default(true) @map("is_active")
+  // v0.2.3: admin-defined custom field VALUES, keyed by
+  // CustomFieldDefinition.key (immutable, so a label rename never
+  // orphans a value). Validated server-side against the active
+  // definitions for this entityType — never trusted from the client.
+  customFields     Json?      @map("custom_fields")
   createdAt        DateTime   @default(now()) @map("created_at")
   updatedAt        DateTime   @updatedAt @map("updated_at")
 

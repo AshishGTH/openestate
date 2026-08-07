@@ -9,6 +9,31 @@ import { TENANT_PRISMA } from '../database/database.module';
  * co-applicant-visibility requirement is RLS's job here, not this
  * service's.
  */
+
+/**
+ * v0.2.3 SECURITY: `customFields` is withheld from every portal
+ * response, for the caller AND their co-applicants.
+ *
+ * Custom fields are admin-defined and admin-populated — staff routinely
+ * use them for internal notes ("negotiation margin", "credit risk",
+ * "do not call before 11am"). Nothing in the definition model marks a
+ * field as customer-safe, so the only defensible default is to withhold
+ * all of them; per-field opt-in visibility is a deliberate future
+ * feature, not something to approximate by guessing from a label.
+ *
+ * This is a real fix, not a precaution: `getProfile` returned the whole
+ * applicant row with only PAN omitted, so any value staff had already
+ * written was being served to the customer.
+ *
+ * Kept as a named constant used by every portal applicant read rather
+ * than inline, so a new portal read can't quietly omit it — the same
+ * discipline `panCiphertext`/`panKeyVersion` already get here.
+ */
+const PORTAL_APPLICANT_OMIT = {
+  panCiphertext: true,
+  panKeyVersion: true,
+  customFields: true,
+} as const;
 @Injectable()
 export class PortalProfileService {
   constructor(
@@ -21,7 +46,7 @@ export class PortalProfileService {
     return withTenantTx(this.tenantPrisma, companyId, async (tx) => {
       const self = await tx.applicant.findFirstOrThrow({
         where: { id: applicantId },
-        omit: { panCiphertext: true, panKeyVersion: true },
+        omit: PORTAL_APPLICANT_OMIT,
       });
 
       const bookings = await tx.booking.findMany({
@@ -29,8 +54,8 @@ export class PortalProfileService {
           OR: [{ primaryApplicantId: applicantId }, { coApplicants: { some: { applicantId } } }],
         },
         include: {
-          primaryApplicant: { omit: { panCiphertext: true, panKeyVersion: true } },
-          coApplicants: { include: { applicant: { omit: { panCiphertext: true, panKeyVersion: true } } } },
+          primaryApplicant: { omit: PORTAL_APPLICANT_OMIT },
+          coApplicants: { include: { applicant: { omit: PORTAL_APPLICANT_OMIT } } },
         },
       });
 
