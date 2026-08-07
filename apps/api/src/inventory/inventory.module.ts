@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CustomFieldsModule } from '../custom-fields/custom-fields.module';
 import { ProjectController } from './project.controller';
 import { ProjectService } from './project.service';
 import { TowerController } from './tower.controller';
@@ -15,6 +16,7 @@ import { ProjectMediaController } from './project-media.controller';
 import { ProjectMediaService } from './project-media.service';
 
 @Module({
+  imports: [CustomFieldsModule],
   controllers: [
     ProjectController,
     TowerController,

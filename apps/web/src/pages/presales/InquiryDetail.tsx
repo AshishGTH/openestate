@@ -2,13 +2,23 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
+import {
+  CustomFieldDisplay,
+  useCustomFieldDefinitions,
+} from '../../components/CustomFieldInputs';
 
 interface Inquiry {
   id: string;
   status: string;
-  applicant: { id: string; name: string; primaryPhone: string };
+  applicant: {
+    id: string;
+    name: string;
+    primaryPhone: string;
+    customFields?: Record<string, unknown> | null;
+  };
   project: { id: string; name: string } | null;
   assignedTo: { id: string; name: string } | null;
+  customFields?: Record<string, unknown> | null;
 }
 
 interface FollowUp {
@@ -42,6 +52,9 @@ export default function InquiryDetailPage() {
   const [scheduledAt, setScheduledAt] = useState('');
   const [venue, setVenue] = useState('');
   const [followUpError, setFollowUpError] = useState('');
+
+  const { definitions: inquiryDefs } = useCustomFieldDefinitions('INQUIRY');
+  const { definitions: applicantDefs } = useCustomFieldDefinitions('APPLICANT');
 
   const [toUserId, setToUserId] = useState('');
   const [assignReason, setAssignReason] = useState('');
@@ -142,6 +155,11 @@ export default function InquiryDetailPage() {
           ))}
         </div>
         {statusError && <p className="mt-2 text-sm text-red-600">{statusError}</p>}
+      </section>
+
+      <section className="mt-6" data-testid="inquiry-custom-field-display">
+        <CustomFieldDisplay definitions={inquiryDefs} values={inquiry.customFields} />
+        <CustomFieldDisplay definitions={applicantDefs} values={inquiry.applicant.customFields} />
       </section>
 
       <section className="mt-6">

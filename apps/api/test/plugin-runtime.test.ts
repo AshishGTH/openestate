@@ -13,6 +13,7 @@ import { runWithTenant } from '@openestate/db';
 import { isSecretRef, PluginCapabilityError, type Plugin } from '@openestate/plugin-sdk';
 import { makeClients, seedCompany, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
 import { ApplicantService } from '../src/presales/applicant.service';
+import { CustomFieldsService } from '../src/custom-fields/custom-fields.service';
 import { PanEncryptionService } from '../src/common/pan-encryption.service';
 import { CompanyService } from '../src/company/company.service';
 import { PluginSecretEncryptionService } from '../src/plugins/plugin-secret-encryption.service';
@@ -54,7 +55,7 @@ describeIf('PluginRuntimeService (Phase 7 commit 1)', () => {
     ({ tenantPrisma, systemPrisma } = makeClients());
     fx = await seedCompany(systemPrisma);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    runtime = new PluginRuntimeService(new PluginSecretEncryptionService(), new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService()), new CompanyService(tenantPrisma, systemPrisma), null as any);
+    runtime = new PluginRuntimeService(new PluginSecretEncryptionService(), new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService(), new CustomFieldsService(tenantPrisma, systemPrisma)), new CompanyService(tenantPrisma, systemPrisma), null as any);
   });
 
   afterAll(async () => {

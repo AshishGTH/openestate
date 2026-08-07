@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
+import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import type {
   CreateProjectDto,
   UpdateProjectDto,
@@ -19,6 +20,7 @@ export class ProjectService {
     private readonly tenantPrisma: any,
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
+    private readonly customFields: CustomFieldsService,
   ) {}
 
   async findAll(companyId: string, query: PaginationQuery) {
@@ -65,20 +67,38 @@ export class ProjectService {
   }
 
   async create(companyId: string, dto: CreateProjectDto) {
+    const { customFields: incoming, ...rest } = dto;
+    const customFields = await this.customFields.resolveValuesForWrite(
+      companyId,
+      'PROJECT',
+      incoming,
+    );
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>
         tx.project.create({
-          data: { ...dto, companyId },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          data: { ...rest, companyId, customFields: customFields as any },
         }),
       ),
     );
   }
 
   async update(companyId: string, id: string, dto: UpdateProjectDto) {
-    await this.findOne(companyId, id);
+    const existing = await this.findOne(companyId, id);
+    const { customFields: incoming, ...rest } = dto;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = { ...rest };
+    if (incoming !== undefined) {
+      data.customFields = await this.customFields.resolveValuesForWrite(
+        companyId,
+        'PROJECT',
+        incoming,
+        (existing as { customFields?: Record<string, unknown> | null }).customFields ?? null,
+      );
+    }
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>
-        tx.project.update({ where: { id }, data: dto }),
+        tx.project.update({ where: { id }, data }),
       ),
     );
   }

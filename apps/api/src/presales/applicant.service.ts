@@ -14,6 +14,7 @@ import type {
   PaginationQuery,
 } from '@openestate/shared';
 import { PanEncryptionService } from '../common/pan-encryption.service';
+import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 
 @Injectable()
 export class ApplicantService {
@@ -24,6 +25,7 @@ export class ApplicantService {
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
     private readonly panEncryption: PanEncryptionService,
+    private readonly customFields: CustomFieldsService,
   ) {}
 
   async findAll(companyId: string, query: PaginationQuery) {
@@ -96,6 +98,15 @@ export class ApplicantService {
       emailNormalized,
     );
 
+    // Server-side validation against the company's ACTIVE definitions.
+    // Until v0.2.3 this was `z.record(z.unknown())` — any key, any
+    // value, straight into JSONB.
+    const customFields = await this.customFields.resolveValuesForWrite(
+      companyId,
+      'APPLICANT',
+      dto.customFields,
+    );
+
     const applicant = await runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>
         tx.applicant.create({
@@ -114,7 +125,7 @@ export class ApplicantService {
             panCiphertext: dto.pan ? this.panEncryption.encrypt(dto.pan) : null,
             panMasked: dto.pan ? this.panEncryption.mask(dto.pan) : null,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            customFields: dto.customFields as any,
+            customFields: customFields as any,
           },
         }),
       ),
@@ -147,6 +158,16 @@ export class ApplicantService {
     if (pan !== undefined) {
       data.panCiphertext = this.panEncryption.encrypt(pan);
       data.panMasked = this.panEncryption.mask(pan);
+    }
+    if (dto.customFields !== undefined) {
+      // Merged against what's stored, so omitting a required field in a
+      // PATCH can't silently bypass it.
+      data.customFields = await this.customFields.resolveValuesForWrite(
+        companyId,
+        'APPLICANT',
+        dto.customFields,
+        existing.customFields as Record<string, unknown> | null,
+      );
     }
 
     return runWithTenant({ companyId }, () =>

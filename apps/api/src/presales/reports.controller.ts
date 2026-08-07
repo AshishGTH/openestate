@@ -47,6 +47,21 @@ export class ReportsController {
     respond(res, format, 'daily-inquiries', rows);
   }
 
+  @Get('inquiries-export')
+  @RequirePermissions(PERMISSIONS.PRESALES_REPORT_VIEW)
+  @ApiOperation({
+    summary: 'Per-inquiry export, including a column per active custom field',
+  })
+  async inquiriesExport(
+    @Query('format') format: string | undefined,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const user = req.user as JwtPayload;
+    const rows = await this.reportsService.inquiriesExport(user.companyId, scopeFor(user));
+    respond(res, format, 'inquiries-export', rows);
+  }
+
   @Get('funnel')
   @RequirePermissions(PERMISSIONS.PRESALES_REPORT_VIEW)
   @ApiOperation({ summary: 'Funnel by status' })

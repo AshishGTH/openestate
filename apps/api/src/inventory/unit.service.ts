@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
+import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import type {
   CreateUnitDto,
   UpdateUnitDto,
@@ -21,6 +22,7 @@ export class UnitService {
     private readonly tenantPrisma: any,
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
+    private readonly customFields: CustomFieldsService,
   ) {}
 
   async findAll(companyId: string, projectId: string, query: PaginationQuery & { towerId?: string; floorId?: string; status?: string }) {
@@ -82,6 +84,12 @@ export class UnitService {
   }
 
   async create(companyId: string, floorId: string, dto: CreateUnitDto) {
+    const { customFields: incoming, ...rest } = dto;
+    const customFields = await this.customFields.resolveValuesForWrite(
+      companyId,
+      'UNIT',
+      incoming,
+    );
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
         const floor = await tx.floor.findFirst({
@@ -90,20 +98,32 @@ export class UnitService {
         });
         if (!floor) throw new NotFoundException('Floor not found');
 
-        await this.validateTowerScopedUniqueness(tx, companyId, floor.tower.id, [dto.number]);
+        await this.validateTowerScopedUniqueness(tx, companyId, floor.tower.id, [rest.number]);
 
         return tx.unit.create({
-          data: { ...dto, companyId, floorId },
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          data: { ...rest, companyId, floorId, customFields: customFields as any },
         });
       }),
     );
   }
 
   async update(companyId: string, id: string, dto: UpdateUnitDto) {
-    await this.findOne(companyId, id);
+    const existing = await this.findOne(companyId, id);
+    const { customFields: incoming, ...rest } = dto;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data: any = { ...rest };
+    if (incoming !== undefined) {
+      data.customFields = await this.customFields.resolveValuesForWrite(
+        companyId,
+        'UNIT',
+        incoming,
+        (existing as { customFields?: Record<string, unknown> | null }).customFields ?? null,
+      );
+    }
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>
-        tx.unit.update({ where: { id }, data: dto }),
+        tx.unit.update({ where: { id }, data }),
       ),
     );
   }

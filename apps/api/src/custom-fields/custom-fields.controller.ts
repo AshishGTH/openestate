@@ -15,6 +15,7 @@ import { createZodDto } from 'nestjs-zod';
 import {
   createCustomFieldSchema,
   updateCustomFieldSchema,
+  purgeCustomFieldSchema,
   CUSTOM_FIELD_ENTITIES,
   PERMISSIONS,
 } from '@openestate/shared';
@@ -24,6 +25,7 @@ import { CustomFieldsService } from './custom-fields.service';
 
 class CreateCustomFieldDto extends createZodDto(createCustomFieldSchema) {}
 class UpdateCustomFieldDto extends createZodDto(updateCustomFieldSchema) {}
+class PurgeCustomFieldDto extends createZodDto(purgeCustomFieldSchema) {}
 
 @ApiTags('Custom Fields')
 @Controller('custom-fields')
@@ -77,9 +79,34 @@ export class CustomFieldsController {
 
   @Delete(':id')
   @RequirePermissions(PERMISSIONS.ADMIN_CUSTOM_FIELD_DELETE)
-  @ApiOperation({ summary: 'Delete custom field' })
+  @ApiOperation({
+    summary: 'Deactivate a custom field (soft delete — stored values are preserved)',
+  })
   remove(@Param('id') id: string, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.customFieldsService.remove(user.companyId, id);
+  }
+
+  @Get(':id/value-count')
+  @RequirePermissions(PERMISSIONS.ADMIN_CUSTOM_FIELD_READ)
+  @ApiOperation({ summary: 'How many rows currently store a value for this field' })
+  countValues(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.customFieldsService.countValues(user.companyId, id);
+  }
+
+  @Post(':id/purge')
+  @RequirePermissions(PERMISSIONS.ADMIN_CUSTOM_FIELD_DELETE)
+  @ApiOperation({
+    summary:
+      'Permanently delete a custom field AND strip its value from every row. Irreversible; requires the field key typed back as confirmation.',
+  })
+  purge(
+    @Param('id') id: string,
+    @Body() dto: PurgeCustomFieldDto,
+    @Req() req: Request,
+  ) {
+    const user = req.user as JwtPayload;
+    return this.customFieldsService.purge(user.companyId, id, dto.confirmKey, user.sub);
   }
 }

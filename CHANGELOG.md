@@ -3,6 +3,96 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.3]
+
+### Security
+
+- **Custom field values are no longer sent to portal users.** Until this
+  release, `GET /portal/profile` returned the customer's whole applicant
+  record — including any admin-defined custom field values — to the
+  customer themselves **and to their co-applicants**. Custom fields are
+  routinely used by staff for internal notes ("negotiation margin",
+  "credit risk", "do not call before 11am"), and nothing in the field
+  definition marks a field as safe to show a customer, so all of them
+  are now withheld from every portal response. Per-field opt-in
+  visibility is a deliberate future feature; withholding is the only
+  defensible default in the meantime.
+
+  **If your staff have written anything sensitive into a custom field on
+  an Applicant, assume portal users could have seen it before
+  upgrading.** Values themselves are untouched — only what the portal
+  returns has changed.
+
+### Fixed
+
+- **Integrity fix: custom field values have accepted arbitrary,
+  unvalidated data since Phase 3 — your database may already contain
+  junk.** `customFields` on Applicant and Inquiry was declared as
+  "any object" at the API boundary (`z.record(z.unknown())`), so any
+  caller could write any key with any value straight into storage: no
+  type checking, no required-field checking, no check that a SELECT
+  value was one of its options, and no rejection of keys that were never
+  defined as custom fields at all. The validation code to prevent this
+  had been written but was never called by anything.
+
+  Validation is now enforced server-side against your active field
+  definitions on every write, for Applicant, Inquiry, Unit and Project.
+  Unknown keys are **rejected** rather than silently discarded.
+
+  To see whether an existing install has junk values, run this against
+  your database — it lists every stored key that has no matching custom
+  field definition:
+
+  ```sql
+  SELECT 'applicant' AS entity, a.id, k AS unknown_key, a.custom_fields -> k AS value
+    FROM applicants a, jsonb_object_keys(a.custom_fields) k
+   WHERE a.custom_fields IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM custom_field_definitions d
+                      WHERE d.company_id = a.company_id
+                        AND d.entity_type = 'APPLICANT' AND d.key = k)
+  UNION ALL
+  SELECT 'inquiry', i.id, k, i.custom_fields -> k
+    FROM inquiries i, jsonb_object_keys(i.custom_fields) k
+   WHERE i.custom_fields IS NOT NULL
+     AND NOT EXISTS (SELECT 1 FROM custom_field_definitions d
+                      WHERE d.company_id = i.company_id
+                        AND d.entity_type = 'INQUIRY' AND d.key = k);
+  ```
+
+  Anything it returns is either junk written before the fix, or one of
+  two expected system-written keys (`leadNote` from inbound leads,
+  `importNotes` from CSV import). Values belonging to a field you merely
+  *deactivated* will **not** appear — that definition still exists, so
+  those values are accounted for.
+
+  **Nothing is deleted by upgrading.** Existing values are preserved and
+  still shown on detail screens, marked "(inactive)" where no active
+  definition covers them, and records carrying such keys stay editable —
+  validation rejects unknown keys arriving from a client, but never
+  retroactively invalidates what is already stored.
+
+- Deleting a custom field used to be a hard delete, which left its
+  values orphaned in the database with nothing left to explain what they
+  meant. Delete is now a **deactivate** (values preserved, field stops
+  appearing on forms). Permanently destroying values is a separate
+  action that requires typing the field's key to confirm, and records
+  the affected row count to the audit log.
+
+### Added
+
+- **Custom field values now actually work.** Admins could define custom
+  fields since Phase 1, but nothing anywhere captured or displayed a
+  *value* — defining a field had no effect elsewhere in the product.
+  Values are now captured on real forms, validated, displayed on detail
+  screens, and exported. Supported on **Applicant, Inquiry, Unit and
+  Project**; a field's definition drives the form with no code change.
+- New per-inquiry CSV export (`/reports/presales/inquiries-export`) with
+  one column per active custom field.
+- `BOOKING` is explicitly marked unsupported in the admin UI (with an
+  explanation) and rejected by the API, rather than letting an admin
+  define a field there that would silently do nothing. See
+  `docs/todo.md`.
+
 ## [0.2.2]
 
 ### Added

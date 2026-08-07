@@ -6,6 +6,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTenantPrismaClient, createSystemPrismaClient, runWithTenant, withTenantTx } from '@openestate/db';
 import { SYSTEM_CLOCK } from '@openestate/shared';
 import { FollowUpService } from '../src/presales/follow-up.service';
+import { CustomFieldsService } from '../src/custom-fields/custom-fields.service';
 import { InquiryService } from '../src/presales/inquiry.service';
 import { AssignmentService } from '../src/presales/assignment.service';
 
@@ -29,7 +30,17 @@ describeIf('Follow-ups: timeline, site visit, my day', () => {
     systemPrisma = createSystemPrismaClient(SYSTEM_URL!);
     followUpService = new FollowUpService(tenantPrisma, systemPrisma);
     const assignmentService = new AssignmentService(tenantPrisma);
-    inquiryService = new InquiryService(tenantPrisma, systemPrisma, SYSTEM_CLOCK, assignmentService);
+    inquiryService = new InquiryService(
+      tenantPrisma,
+      systemPrisma,
+      SYSTEM_CLOCK,
+      assignmentService,
+      // applicantService is only reached from createFromLead(), which
+      // this file never exercises — same as before v0.2.3, when this
+      // call site already passed only four arguments.
+      undefined as never,
+      new CustomFieldsService(tenantPrisma, systemPrisma),
+    );
 
     const company = await systemPrisma.company.create({
       data: { name: 'FollowUp Test Co', slug: `followup-test-${Date.now()}` },

@@ -3,8 +3,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CUSTOM_FIELD_TYPES,
   CUSTOM_FIELD_ENTITIES,
+  supportsCustomFieldValues,
 } from '@openestate/shared';
 import { api } from '../../lib/api';
+import { toast } from '../../lib/toast';
 import DataTable, { type Column } from '../../components/DataTable';
 
 interface CustomField {
@@ -15,7 +17,13 @@ interface CustomField {
   label: string;
   isRequired: boolean;
   options: string[] | null;
+  isActive: boolean;
   sortOrder: number;
+}
+
+interface PurgeTarget {
+  field: CustomField;
+  affectedRows: number;
 }
 
 export default function CustomFieldsPage() {
@@ -29,7 +37,12 @@ export default function CustomFieldsPage() {
     options: '',
   });
   const [formError, setFormError] = useState('');
+  const [purgeTarget, setPurgeTarget] = useState<PurgeTarget | null>(null);
+  const [purgeConfirm, setPurgeConfirm] = useState('');
+  const [purgeError, setPurgeError] = useState('');
   const qc = useQueryClient();
+
+  const entitySupported = supportsCustomFieldValues(selectedEntity);
 
   const { data: fields, isLoading } = useQuery<CustomField[]>({
     queryKey: ['custom-fields', selectedEntity],
@@ -61,10 +74,44 @@ export default function CustomFieldsPage() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Delete this custom field?')) return;
-    await api(`/custom-fields/${id}`, { method: 'DELETE' });
-    qc.invalidateQueries({ queryKey: ['custom-fields', selectedEntity] });
+  // Soft delete: the field stops appearing on forms and stops being
+  // enforced, but every stored value is preserved. Destroying values is
+  // a separate, explicitly-confirmed action (handlePurge below).
+  const handleDeactivate = async (id: string) => {
+    if (!confirm('Deactivate this field? It will stop appearing on forms. Stored values are kept.')) return;
+    try {
+      await api(`/custom-fields/${id}`, { method: 'DELETE' });
+      qc.invalidateQueries({ queryKey: ['custom-fields', selectedEntity] });
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
+  const openPurge = async (field: CustomField) => {
+    setPurgeConfirm('');
+    setPurgeError('');
+    try {
+      const res = await api<{ affectedRows: number }>(`/custom-fields/${field.id}/value-count`);
+      setPurgeTarget({ field, affectedRows: res.affectedRows });
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
+  const handlePurge = async () => {
+    if (!purgeTarget) return;
+    setPurgeError('');
+    try {
+      await api(`/custom-fields/${purgeTarget.field.id}/purge`, {
+        method: 'POST',
+        body: JSON.stringify({ confirmKey: purgeConfirm }),
+      });
+      qc.invalidateQueries({ queryKey: ['custom-fields', selectedEntity] });
+      setPurgeTarget(null);
+      setPurgeConfirm('');
+    } catch (err) {
+      setPurgeError((err as Error).message);
+    }
   };
 
   const columns: Column<CustomField>[] = [
@@ -90,16 +137,36 @@ export default function CustomFieldsPage() {
       render: (f) => (f.options ? f.options.join(', ') : '—'),
     },
     {
+      key: 'status',
+      header: 'Status',
+      render: (f) =>
+        f.isActive ? (
+          <span className="text-green-700 text-xs">Active</span>
+        ) : (
+          <span className="text-slate-400 text-xs">Inactive</span>
+        ),
+    },
+    {
       key: 'actions',
       header: '',
       className: 'text-right',
       render: (f) => (
-        <button
-          onClick={() => handleDelete(f.id)}
-          className="text-red-600 hover:text-red-800 text-xs"
-        >
-          Delete
-        </button>
+        <span className="space-x-3">
+          {f.isActive && (
+            <button
+              onClick={() => handleDeactivate(f.id)}
+              className="text-amber-700 hover:text-amber-900 text-xs"
+            >
+              Deactivate
+            </button>
+          )}
+          <button
+            onClick={() => openPurge(f)}
+            className="text-red-600 hover:text-red-800 text-xs"
+          >
+            Delete permanently
+          </button>
+        </span>
       ),
     },
   ];
@@ -123,21 +190,76 @@ export default function CustomFieldsPage() {
             }`}
           >
             {entity}
+            {!supportsCustomFieldValues(entity) && (
+              <span className="ml-1 text-xs opacity-70">(unsupported)</span>
+            )}
           </button>
         ))}
       </div>
+
+      {!entitySupported && (
+        <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <strong>Custom fields are not supported for {selectedEntity} yet.</strong> There is nowhere
+          to store a value for this entity, so defining a field here would have no effect anywhere
+          in the product. Adding support requires changes to the booking service, which is
+          deliberately frozen — ask before it is enabled.
+        </div>
+      )}
 
       <div className="mt-4 flex items-center justify-between">
         <h2 className="text-lg font-medium text-slate-800">{selectedEntity} Fields</h2>
         <button
           onClick={() => setShowForm(true)}
-          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700"
+          disabled={!entitySupported}
+          className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Add Field
         </button>
       </div>
 
-      {showForm && (
+      {purgeTarget && (
+        <div className="mt-4 rounded-lg border border-red-300 bg-red-50 p-4">
+          <h3 className="text-sm font-semibold text-red-900">
+            Permanently delete “{purgeTarget.field.label}”?
+          </h3>
+          <p className="mt-1 text-sm text-red-800">
+            This deletes the field definition <strong>and strips its stored value from{' '}
+            {purgeTarget.affectedRows} {purgeTarget.affectedRows === 1 ? 'record' : 'records'}</strong>.
+            It cannot be undone. If you only want it to stop appearing on forms, use Deactivate
+            instead — that keeps the values.
+          </p>
+          <p className="mt-2 text-sm text-red-800">
+            Type <code className="rounded bg-red-100 px-1 font-mono">{purgeTarget.field.key}</code>{' '}
+            to confirm:
+          </p>
+          <input
+            type="text"
+            value={purgeConfirm}
+            onChange={(e) => setPurgeConfirm(e.target.value)}
+            placeholder={purgeTarget.field.key}
+            className="mt-2 block w-full max-w-sm rounded-md border border-red-300 px-3 py-2 text-sm"
+          />
+          <div className="mt-3 flex gap-3">
+            <button
+              data-testid="purge-confirm"
+              onClick={handlePurge}
+              disabled={purgeConfirm !== purgeTarget.field.key}
+              className="rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Delete permanently
+            </button>
+            <button
+              onClick={() => setPurgeTarget(null)}
+              className="rounded-md border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+          </div>
+          {purgeError && <p className="mt-2 text-sm text-red-700">{purgeError}</p>}
+        </div>
+      )}
+
+      {showForm && entitySupported && (
         <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>

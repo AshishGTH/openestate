@@ -159,15 +159,54 @@ third model in this originally-three-way gap,
 charge type became a real money-correctness risk, not just a cosmetic
 one.
 
-## Custom field definitions have no value-capture anywhere
+## Custom field values on BOOKING need a frozen-service exception
 
-`CustomFieldDefinition` (admin CRUD at `/admin/custom-fields`) lets an
-admin define a field on Applicant/Unit/Booking/Inquiry/Project, but
-that's the entire feature — there is no `CustomFieldValue` model, no
-API for setting/reading a value against a real entity, and none of the
-Applicant/Unit/Booking/Inquiry/Project forms fetch or render the
-definitions at all. Defining a field today has zero effect anywhere
-else in the product. Unblocked by: a `CustomFieldValue` table
-(entityId + definitionId + value), an endpoint per entity to read/write
-values, and wiring each of the five forms to fetch definitions for
-their entity type and render+submit them dynamically.
+**Resolved for four of the five entity types in v0.2.3** — APPLICANT,
+INQUIRY, UNIT and PROJECT now capture, validate, store, display and
+export custom field values (stored inline as JSONB on each entity; see
+CLAUDE.md's v0.2.3 decisions entry for why inline rather than EAV).
+
+`BOOKING` is the one remaining gap, deliberately. Giving it values
+means adding a `custom_fields` column to `bookings` and accepting the
+field in `BookingService.createBooking`, and that service is on
+CLAUDE.md's frozen list ("don't modify without asking"). Adding a
+nullable JSONB column does not affect ledger math, so this is a small
+change — but it crosses a line that is documented as requiring an
+explicit decision, so it waits until someone actually asks for it
+rather than being slipped in.
+
+Until then the gap is **visible rather than silent**: the API rejects
+a definition created for BOOKING (`supportsCustomFieldValues()` in
+`packages/shared/src/custom-field.dto.ts` is the single source of
+truth) and the admin UI marks the BOOKING tab "(unsupported)" with an
+explanation and a disabled Add Field button. When it is enabled, add
+`'BOOKING'` to `CUSTOM_FIELD_VALUE_ENTITIES`, add the column +
+migration, and wire `resolveValuesForWrite` into the booking
+create/update path exactly as the other four do.
+
+## Legacy system-written keys inside `custom_fields`
+
+`InquiryService.createFromLead` writes `{ leadNote }` and
+`InquiryImportService` writes `{ importNotes }` directly into
+`Inquiry.custom_fields`. These are server-generated, not client input,
+so they are not a validation hole — but they are undefined keys living
+in a column that is otherwise admin-defined, and they show up in the
+"orphaned value" UI as `(inactive)`.
+
+They are preserved rather than rejected (v0.2.3's
+`resolveValuesForWrite` carries unknown STORED keys through untouched,
+so an imported inquiry stays editable), which is correct behaviour but
+not a clean design. The tidy-up is a real `notes` column on `Inquiry`
+and a migration moving those two keys onto it. Low priority; noted so
+the next person to see `leadNote` in a custom-fields display knows it
+is expected, not corruption.
+
+## `toCsv` emits nothing at all for an empty result set
+
+`apps/api/src/presales/csv.util.ts`'s `toCsv` returns `''` when
+`rows.length === 0` — so a report with no rows downloads as a
+completely blank file, with no header row to show what the columns
+would have been. Pre-existing, affects all seven presales reports
+equally (not specific to the v0.2.3 custom-field columns, which are
+derived from the rows). Fixing it means passing the expected headers in
+explicitly rather than deriving them from `rows[0]`.

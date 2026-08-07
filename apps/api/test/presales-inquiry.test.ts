@@ -8,6 +8,7 @@ import * as ExcelJS from 'exceljs';
 import { createTenantPrismaClient, createSystemPrismaClient } from '@openestate/db';
 import { SYSTEM_CLOCK } from '@openestate/shared';
 import { InquiryService } from '../src/presales/inquiry.service';
+import { CustomFieldsService } from '../src/custom-fields/custom-fields.service';
 import { AssignmentService } from '../src/presales/assignment.service';
 import { InquiryImportService } from '../src/presales/inquiry-import.service';
 
@@ -31,7 +32,17 @@ describeIf('Inquiry role scoping and import', () => {
     tenantPrisma = createTenantPrismaClient(APP_URL!);
     systemPrisma = createSystemPrismaClient(SYSTEM_URL!);
     const assignmentService = new AssignmentService(tenantPrisma);
-    inquiryService = new InquiryService(tenantPrisma, systemPrisma, SYSTEM_CLOCK, assignmentService);
+    inquiryService = new InquiryService(
+      tenantPrisma,
+      systemPrisma,
+      SYSTEM_CLOCK,
+      assignmentService,
+      // applicantService is only reached from createFromLead(), which
+      // this file never exercises — same as before v0.2.3, when this
+      // call site already passed only four arguments.
+      undefined as never,
+      new CustomFieldsService(tenantPrisma, systemPrisma),
+    );
     importService = new InquiryImportService(tenantPrisma);
 
     const company = await systemPrisma.company.create({

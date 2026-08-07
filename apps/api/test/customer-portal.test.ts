@@ -11,6 +11,7 @@ import { runWithTenant } from '@openestate/db';
 import { PERMISSIONS, SYSTEM_ROLES, ROLE_PERMISSIONS, GENERATED_DOCUMENT_TYPE } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { PermissionsGuard } from '../src/auth/guards/permissions.guard';
+import { CustomFieldsService } from '../src/custom-fields/custom-fields.service';
 import { ApplicantChangeRequestService } from '../src/customer-portal/applicant-change-request.service';
 import { PortalProfileService } from '../src/customer-portal/portal-profile.service';
 import { ApplicantService } from '../src/presales/applicant.service';
@@ -95,7 +96,7 @@ describeIf('Phase 6 customer-portal (commit 2)', () => {
 
     changeRequests = new ApplicantChangeRequestService(tenantPrisma, systemPrisma);
     profileService = new PortalProfileService(tenantPrisma);
-    applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService());
+    applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService(), new CustomFieldsService(tenantPrisma, systemPrisma));
     const ledger = new LedgerService(tenantPrisma);
     documents = new DocumentService(
       tenantPrisma,
