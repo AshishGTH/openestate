@@ -4644,3 +4644,99 @@ super_admin to the full set, that a second run is a no-op, and — the half
 that protects the surviving decision — that a deliberately-narrowed
 `company_admin` (5 permissions) and a custom role (3) are left exactly as
 they were.
+
+### Boundary of browser-automation verification in this project (what it does and does not prove)
+
+The browser tooling available in these sessions **cannot deliver real
+keystrokes to this app**. Confirmed directly, not assumed: clicking an
+input and issuing a type action leaves the field reading back
+`value.length === 0`, and no submit ever fires because react-hook-form
+never sees an event. A DOM-level `form_input`-style write is equally
+useless on its own — it sets `.value` without dispatching anything, so
+React's controlled-input state stays empty and the form silently
+refuses to submit with no visible error.
+
+The method that does work, and the one every click-through in this
+session used:
+
+```js
+const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+setter.call(el, value);
+el.dispatchEvent(new Event('input', { bubbles: true }));
+```
+
+then a real `.click()` on the submit button.
+
+**What this DOES prove** — and it is most of what the "verify in a real
+browser" rule exists for: the real frontend bundle runs, the real
+component builds the request, the real `api()` client attaches
+headers/CSRF/auth, the request crosses the real network to the real
+nginx + API + Postgres, and the real response drives the real
+re-render. Every bug class the PRIMARY LESSON at the top of this file
+names — a page that renders zero rows, a `.strict()` DTO rejecting the
+body the frontend actually sends, a missing Authorization header, a
+Secure-cookie that never gets stored — is fully in scope and would be
+caught.
+
+**What this does NOT prove**, and must not be claimed as covered:
+
+- **Paste handling.** A `paste` event never fires, so any `onPaste`
+  handler (splitting a pasted TOTP code across boxes, stripping
+  formatting from a pasted PAN/phone) is unexercised.
+- **IME / composition input.** No `compositionstart`/`compositionend`,
+  so anything that defers parsing until composition ends is untested —
+  relevant for a product that will take Indian-language names.
+- **keydown/keyup-gated logic.** Enter-to-submit, Escape-to-close,
+  arrow-key navigation in a dropdown, per-character maxlength or
+  numeric-only filtering implemented in `onKeyDown` — all bypassed,
+  because the value arrives in one synthetic `input` event.
+- **Focus/blur sequencing.** Validation that only runs `onBlur`, and
+  anything depending on real tab order.
+- **Native browser constraint validation** triggered by real typing.
+
+So: a green click-through in one of these sessions is genuine evidence
+about request construction and end-to-end wiring, and no evidence at
+all about keyboard-level input handling. If a future change touches an
+`onKeyDown`/`onPaste`/composition handler, it needs a real human at a
+real keyboard, or a Playwright run (`apps/e2e`, which drives Chromium
+through CDP and DOES send real key events) — state which one was used
+rather than reporting "verified in a browser" flatly.
+
+### Standing rule: an upgrade assertion must assert the OUTCOME, not the mechanism
+
+The `native-upgrade` CI job spent four consecutive releases watching
+the super_admin permission bug happen and reporting green. This
+session's push proved it with the job's own log, not by argument: on
+the very first run carrying the fix, the repair step printed
+
+```
+super_admin grants: 2 missing permission(s) restored.
+```
+
+That is CI reporting that its own baseline-to-current upgrade had
+produced a super_admin missing two permissions — **on every previous
+run too**, silently, for four releases.
+
+The job wasn't negligent; it asserted the wrong half of the property.
+It checked that the new permission ROWS existed (`GET /roles/permissions`
+contains the keys) — a *precondition*. It never checked that any role
+could actually USE them — the *outcome*. Every release satisfied the
+precondition and failed the outcome, and the gate had nothing to say.
+
+**Generalised rule: an upgrade-path assertion must assert the thing a
+user would notice, not the mechanism that is supposed to cause it.**
+
+- Not "the migration ran" — that the screen the migration exists for
+  renders the new data.
+- Not "the permission row exists" — that the role holds it, which is
+  what gates the feature. (Assertion 3b now does exactly this.)
+- Not "the seed script exited 0" — that the seeded thing is reachable
+  through the API a user's browser would call.
+- Not "the service restarted" — that a real request through nginx
+  returns what it should.
+
+A precondition check is cheap and feels like coverage, which is
+precisely why it is dangerous: it turns green for the same reason the
+bug survives. When adding any future upgrade assertion, write down the
+user-visible symptom the release is supposed to prevent, then assert
+*that*.
