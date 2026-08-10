@@ -725,6 +725,32 @@ jobs:
               || { echo "::error::permission '${KEY}' did not arrive after upgrade — sync-permissions.ts regression"; exit 1; }
           done
 
+          # 3b. super_admin must hold EVERY permission after an upgrade.
+          # Assertion 3 above only proves the permission ROWS arrived; it
+          # says nothing about whether any role can actually USE them.
+          # That gap shipped for four consecutive releases, each with this
+          # job green: on a real v0.1.2 -> v0.2.3 upgrade of the
+          # 192.168.1.2 VM, `permissions` had all 142 rows while
+          # super_admin still held only the 140 it was seeded with,
+          # silently making v0.2.0's PLC pricing UI unreachable on every
+          # upgraded install. super_admin is the only role this is
+          # assertable for — ROLE_PERMISSIONS.super_admin is literally
+          # Object.values(PERMISSIONS), so "all of them" is its
+          # definition, not a default. Every other role is deliberately
+          # left alone (an admin may have narrowed it), which is why this
+          # check is scoped to this one slug.
+          ROLES_AFTER="$(auth http://localhost/api/v1/roles)"
+          echo "$ROLES_AFTER" | jq -e '.[] | select(.slug=="super_admin")' > /dev/null \
+            || { echo "::error::no super_admin role found after upgrade — cannot verify permission completeness"; exit 1; }
+          echo "$ALL_PERMS_AFTER" | jq -r '.[].key' | sort > /tmp/all-perm-keys.txt
+          echo "$ROLES_AFTER" | jq -r '.[] | select(.slug=="super_admin") | .permissions[].permission.key' | sort > /tmp/super-admin-keys.txt
+          MISSING_FOR_SUPER="$(comm -23 /tmp/all-perm-keys.txt /tmp/super-admin-keys.txt || true)"
+          if [ -n "$MISSING_FOR_SUPER" ]; then
+            echo "::error::super_admin is missing $(echo "$MISSING_FOR_SUPER" | wc -l) permission(s) after upgrade — a release added permissions that the most privileged role cannot use. Missing: $(echo "$MISSING_FOR_SUPER" | tr '\n' ' ')"
+            exit 1
+          fi
+          echo "super_admin holds all $(wc -l < /tmp/all-perm-keys.txt) permissions after upgrade."
+
           # 4. A SEEDED SYSTEM ROLE can be granted the new permission — the
           # RolesService fix (task #63) exercised through the actual
           # upgrade path, not just a fresh install.

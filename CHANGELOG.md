@@ -3,6 +3,38 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Upgrading an existing install left the Super Admin role unable to use
+  newly-shipped features.** Since v0.2.0, upgrades correctly added new
+  permission *rows* to the database, but never granted them to anyone —
+  so on any install created before a given release, the `super_admin`
+  role kept exactly the permissions it was first seeded with. In
+  practice this meant **PLC and unit-charge pricing (shipped in v0.2.0)
+  was unreachable on every upgraded install**, for the most privileged
+  role in the product, with no error message explaining why. Found on a
+  real v0.1.2 → v0.2.3 upgrade: the `permissions` table held all 142
+  rows while `super_admin` held only 140.
+
+  Upgrades now re-grant `super_admin` any permission it is missing.
+  This runs automatically as part of `upgrade-native.sh` — no manual
+  step. **If you have upgraded before and found a feature missing from
+  the UI, this is very likely why**; re-running the upgrade repairs it.
+
+  Only `super_admin` is repaired, deliberately. Its definition *is*
+  "every permission that exists", so a missing one is drift rather than
+  a choice. `company_admin`, `sales_manager` and any custom role are
+  left exactly as configured — an upgrade must never silently widen a
+  permission set an admin deliberately narrowed. Grant new permissions
+  to those roles through Admin → Roles.
+
+- `packages/db` imported `@openestate/shared` in two shipped scripts
+  (`seed.ts`, `sync-permissions.ts`) without declaring it as a
+  dependency; it resolved only by package-manager hoisting. Now
+  declared explicitly.
+
 ## [0.2.3]
 
 ### Security

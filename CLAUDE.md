@@ -4562,3 +4562,85 @@ install only, never an existing one" shape.
   with a comment explaining why, adding only the genuinely-required
   `CustomFieldsService` — smaller diff, no behaviour change, and no new
   env dependency introduced into unrelated tests.
+
+### Pre-pilot walkthrough — super_admin never received permissions added after its install (partially reverses a prior decision)
+
+Found on the verification VM (now `192.168.1.2`) while taking a real,
+populated install from v0.1.2 to v0.2.3 — 3 companies, 13 bookings, 12
+receipts. The upgrade itself was clean: both migrations applied, the
+healthcheck gate passed, `"version":"0.2.3"`, no data lost. The tell was
+one line of its own output — `Permissions synced: 0 new, 142 already
+present` — which is impossible-looking on a box coming from a release
+that only had 140.
+
+The `permissions` TABLE was complete. The GRANTS were not:
+`super_admin` on both pre-existing companies held 140 of 142, missing
+exactly the two v0.2.0 added (`inventory.unit.plc-manage`,
+`inventory.unit.charge-manage`). **So PLC/unit-charge pricing — the
+headline feature of v0.2.0 — has been unreachable on every upgraded
+install since that release, for the most privileged role in the product,
+with no error to explain why.** A pilot customer upgrading would simply
+find a documented feature absent.
+
+**This partially reverses the "Seed-only-reachable-data audit" entry
+above**, which stated: *"Do NOT extend it to touch `role_permissions`
+for an EXISTING role (that's a permission-composition change... an admin
+may have already customised it)."* That reasoning is correct — and it is
+still correct for every role except one. `ROLE_PERMISSIONS.super_admin`
+is literally `Object.values(PERMISSIONS)` (`packages/shared/src/roles.ts`).
+"Every permission that exists" is not a default someone picked for
+super_admin; it IS super_admin's definition. So a super_admin missing a
+key is not a customisation to respect — it is drift from its own
+contract, and the earlier entry's premise ("an admin may have customised
+it") is the one case where it does not hold. The narrowing stops
+strictly there:
+
+- `company_admin`, `sales_manager`, `accounts`, `customer`, `broker` and
+  every custom role: **still untouched**, for exactly the original
+  reason. An admin may have deliberately narrowed any of them, and an
+  upgrade that silently widens a permission set is a privilege-escalation
+  bug, not a fix. These are granted new permissions through Admin →
+  Roles, which v0.2.0's `RolesService.update` fix unblocked.
+- The restraint on seeded MASTERS is entirely unchanged — a deleted or
+  deactivated master must never be resurrected by an upgrade.
+
+`syncSuperAdminPermissions()` (`packages/db/prisma/sync-permissions.ts`)
+implements only that one exception. `upgrade-native.sh` needed no change
+— it runs the script as a module, so the new step is picked up by the
+existing invocation.
+
+**Why four consecutive releases missed this, and the fix for that.** The
+`native-upgrade` CI job (added at v0.2.0 specifically to catch
+upgrade-path gaps) *did* assert that v0.2.0's new permission rows
+arrived — assertion 3, `GET /roles/permissions` contains both keys. That
+assertion passes on a database where no role can use them. The job never
+checked a grant. Added assertion 3b: after upgrade, `super_admin` must
+hold every key in `PERMISSIONS`, diffed key-by-key so the error names
+what is missing rather than reporting a count mismatch.
+
+**Verified this would have caught it, rather than assuming so.** Counting
+permission constants at each ref: baseline `c2c32e0` = 140, v0.2.0 = 142,
+v0.2.1/v0.2.2/v0.2.3 = 142. The job seeds its baseline from `c2c32e0`, so
+super_admin is created with 140 and never re-granted — meaning assertion
+3b would have failed on **v0.2.0 and on all three releases after it**,
+each of which shipped with this job green. That is the honest answer: the
+gate existed, ran, and passed, because it was checking the easier half of
+the property.
+
+**Second, smaller finding surfaced while writing the regression test:**
+`packages/db` imports `@openestate/shared` in two SHIPPED scripts
+(`prisma/seed.ts`, `prisma/sync-permissions.ts`) but never declared it in
+`package.json` — it resolved only via pnpm hoisting. Vitest refused to
+resolve it the moment a test in that package imported the same module,
+which is also the real reason v0.2.3 found a hand-copied duplicate of
+`buildValidationSchema` in `packages/db/test` (the author could not
+import the original). Declared it properly (`workspace:*`); confirmed no
+cycle, since `packages/shared` has no dependency on `packages/db`.
+
+Regression coverage: `packages/db/test/sync-super-admin-permissions.test.ts`
+(6 tests, real Postgres) — reproduces the pre-upgrade shape first and
+asserts the keys are genuinely absent, then that the sync restores
+super_admin to the full set, that a second run is a no-op, and — the half
+that protects the surviving decision — that a deliberately-narrowed
+`company_admin` (5 permissions) and a custom role (3) are left exactly as
+they were.

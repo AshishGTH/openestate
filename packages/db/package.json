@@ -21,6 +21,7 @@
     "sync-permissions": "tsx prisma/sync-permissions.ts"
   },
   "dependencies": {
+    "@openestate/shared": "workspace:*",
     "@prisma/client": "^6.1.0",
     "@node-rs/argon2": "^2",
     "prisma": "^6.1.0",
