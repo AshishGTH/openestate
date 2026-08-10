@@ -56,13 +56,17 @@ done
 
 log "Checking prerequisites..."
 command -v node >/dev/null 2>&1 || die "Node.js not found. Install Node.js 20 via NodeSource:
+  sudo apt-get install -y curl          # a stock Ubuntu image has no curl
   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
   sudo apt-get install -y nodejs"
 NODE_MAJOR="$(node -e 'console.log(process.versions.node.split(".")[0])')"
 [ "$NODE_MAJOR" -ge 20 ] || die "Node.js 20+ required, found $(node -v). See --help output above for the NodeSource install command."
 
-command -v psql >/dev/null 2>&1 || die "PostgreSQL client not found. Install PostgreSQL 16:
-  sudo apt-get install -y postgresql-16 postgresql-client-16"
+command -v psql >/dev/null 2>&1 || die "PostgreSQL client not found. Install PostgreSQL:
+  # Ubuntu 22.04/24.04 package PostgreSQL 16 under an explicit version:
+  sudo apt-get install -y postgresql-16 postgresql-client-16
+  # Ubuntu 25.04+ have no postgresql-16 package — use the default (17):
+  sudo apt-get install -y postgresql postgresql-client"
 command -v redis-cli >/dev/null 2>&1 || die "Redis client not found. Install Redis:
   sudo apt-get install -y redis-server"
 redis-cli ping >/dev/null 2>&1 || warn "Could not reach a local Redis via 'redis-cli ping' — if Redis runs elsewhere, that's expected; otherwise install/start it: sudo apt-get install -y redis-server && sudo systemctl enable --now redis-server"

@@ -8,9 +8,13 @@ OpenEstate is AGPL-3.0 licensed. Install it natively on your own server —
 your own PostgreSQL and Redis, a systemd service, standard Linux paths —
 like you would Zabbix or Wazuh, not a stack of containers you don't control.
 
-> **Status: Phase 0 — scaffolding.** The core product (auth, inventory,
-> pre-sales, post-sales ledger, brokers, portals, plugins) lands in the phases
-> below. This README reflects what exists today plus the roadmap.
+> **Status: v0.2.3 — feature-complete for a first pilot, not yet
+> battle-tested at scale.** Auth/RBAC, multi-tenancy, inventory, pre-sales,
+> the post-sales ledger, brokers/commissions, both portals, plugins,
+> webhooks and custom fields are all built and exercised end to end in a
+> real browser against a real install. See [CHANGELOG.md](CHANGELOG.md)
+> for what each release added and
+> [docs/todo.md](docs/todo.md) for known gaps.
 
 ## Why OpenEstate
 
@@ -31,19 +35,52 @@ like you would Zabbix or Wazuh, not a stack of containers you don't control.
 
 ## Quickstart
 
-### Native install (Ubuntu 22.04/24.04 — recommended)
+### Native install (Ubuntu — see "Verified on" below)
 
-Prerequisites: PostgreSQL 16, Redis, Node.js 20 (via NodeSource), and
-nginx, installed and running (see the
-[Installation Guide](docs/docs/installation.md#2-before-you-start--requirements)
-for the exact commands). This project never installs or manages your
-database or cache for you — it connects to what you already run.
+**Step 1 — install the prerequisites.** OpenEstate connects to
+PostgreSQL, Redis and nginx that *you* own and manage; it never installs,
+configures, upgrades or takes responsibility for them. That's a
+deliberate design choice (the Zabbix/Wazuh model), which is why the
+installer checks for them and refuses to run rather than installing them
+behind your back. So you run this yourself, once, on a stock Ubuntu
+server — nothing here is assumed to be present already:
 
 ```bash
-git clone https://github.com/AshishGTH/openestate.git /opt/openestate-src
+# Base tools the install itself needs (a stock Ubuntu image has none of these)
+sudo apt-get update
+sudo apt-get install -y git curl build-essential python3
+
+# Node.js 20 (NodeSource)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# PostgreSQL, Redis, nginx — YOUR services, yours to back up and upgrade.
+# Ubuntu 22.04/24.04 ship PostgreSQL 16 under an explicit package name;
+# 25.04+ ship 17 as the default `postgresql`. Either works.
+sudo apt-get install -y postgresql-16 postgresql-client-16 || \
+  sudo apt-get install -y postgresql postgresql-client
+sudo apt-get install -y redis-server nginx
+```
+
+**Step 2 — install OpenEstate.** Note the `sudo` on the clone: `/opt` is
+not writable by a normal user.
+
+```bash
+sudo git clone https://github.com/AshishGTH/openestate.git /opt/openestate-src
 cd /opt/openestate-src/deploy/native
 sudo ./install-native.sh --server-name crm.yourcompany.com
 ```
+
+`--server-name` is what nginx matches on, so use a hostname that actually
+resolves to this server. If you're just trying it out on a LAN box with no
+DNS, the install is also reachable at the server's IP address directly.
+
+**Verified on:** Ubuntu 25.10 (PostgreSQL 17) — a full clean-VM install
+from these exact commands, ending in a working login and a completed
+booking. Ubuntu 24.04 (PostgreSQL 16) is the documented target and is
+exercised by CI's `native-install` job on `ubuntu-latest`, but has not been
+hand-verified on a real 24.04 box recently. Other distributions are
+unverified.
 
 This creates a dedicated `openestate` system user, builds the app from
 source, sets up the database roles, installs a systemd service

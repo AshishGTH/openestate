@@ -15,7 +15,15 @@ interface Tower {
   id: string;
   name: string;
   code: string;
+  /**
+   * Planned floor count, captured once on the Add Tower form and never
+   * updated afterwards — bulk-generating units creates real Floor rows
+   * without touching it. Kept because it IS the admin's stated intent
+   * at creation, but never rendered as if it were the actual count.
+   */
   totalFloors: number;
+  /** Real floor count, computed by the API (`_count: { floors: true }`). */
+  _count?: { floors: number };
 }
 
 interface Unit {
@@ -344,7 +352,7 @@ export default function ProjectDetailPage() {
         <div className="mt-3 flex flex-wrap gap-2">
           {towers?.map((t) => (
             <span key={t.id} className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
-              {t.name} ({t.code}) — {t.totalFloors} floors
+              {t.name} ({t.code}) — {t._count?.floors ?? 0} floors
             </span>
           ))}
         </div>
