@@ -75,6 +75,16 @@ export interface CompanyFixture {
   projectId: string;
   towerId: string;
   floorId: string;
+  /**
+   * A 0%-rate GstRate row, created for every fixture company so existing
+   * booking fixtures across this suite (written before the base-line
+   * rate picker made a BASE line's gstRateId effectively mandatory) can
+   * keep sending the same baseAmountPaise/expected-total numbers they
+   * always did — 0% now, same as the old silent-fallback default, just
+   * explicit instead of implicit. Tests that care about a real non-zero
+   * rate (postsales-statemachine-gst.test.ts) create and use their own.
+   */
+  defaultGstRateId: string;
 }
 
 let seq = 0;
@@ -114,7 +124,30 @@ export async function seedCompany(
   const floor = await systemPrisma.floor.create({
     data: { companyId: company.id, towerId: tower.id, name: 'F1', floorNumber: 1 },
   });
-  return { companyId: company.id, userId: user.id, projectId: project.id, towerId: tower.id, floorId: floor.id };
+  // A CLOSED, clearly-historical date range — not open-ended. GstRateService
+  // .create()'s overlap check treats an effectiveTo: null row as overlapping
+  // ANY future date range unconditionally (found the hard way:
+  // e2e-master-creation.test.ts's real POST /masters/gst-rates for
+  // 2026-01-01..2026-12-31 400'd against an open-ended default here). Every
+  // real booking fixture in this suite uses a 2026 bookingDate, so a range
+  // safely in the past never collides with anything a test creates for real.
+  const gstRate = await systemPrisma.gstRate.create({
+    data: {
+      companyId: company.id,
+      rate: 0,
+      description: 'No GST (test default)',
+      effectiveFrom: new Date('2019-04-01'),
+      effectiveTo: new Date('2019-04-02'),
+    },
+  });
+  return {
+    companyId: company.id,
+    userId: user.id,
+    projectId: project.id,
+    towerId: tower.id,
+    floorId: floor.id,
+    defaultGstRateId: gstRate.id,
+  };
 }
 
 let unitSeq = 0;

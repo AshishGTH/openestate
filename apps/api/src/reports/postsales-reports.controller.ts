@@ -158,6 +158,25 @@ export class PostsalesReportsController {
     return this.reports.companyRollup(u.companyId);
   }
 
+  @Get('zero-gst-bookings-count')
+  @RequirePermissions(PERMISSIONS.REPORTS_SALES_VIEW)
+  @ApiOperation({ summary: 'Count of bookings whose base cost line has no GST rate (pre-dates the rate picker)' })
+  async zeroGstBookingsCount(@Req() req: Request) {
+    const u = req.user as JwtPayload;
+    return { count: await this.reports.zeroGstBaseBookingsCount(u.companyId) };
+  }
+
+  @Get('zero-gst-bookings')
+  @RequirePermissions(PERMISSIONS.REPORTS_SALES_VIEW)
+  @ApiOperation({ summary: 'Bookings whose base cost line has no GST rate (streamed CSV supported)' })
+  async zeroGstBookings(@Query('format') format: string | undefined, @Req() req: Request, @Res() res: Response) {
+    const u = req.user as JwtPayload;
+    const headers = ['Booking No.', 'Applicant', 'Unit', 'Booking Date'];
+    const gen = this.reports.zeroGstBaseBookings(u.companyId);
+    if (format === 'csv') return streamCsv(res, 'zero-gst-bookings.csv', headers, gen);
+    res.json(await collect(gen));
+  }
+
   @Get('birthday-list')
   @RequirePermissions(PERMISSIONS.REPORTS_BIRTHDAY_VIEW)
   @ApiOperation({ summary: 'Applicants with a birthday within N days (default 30)' })

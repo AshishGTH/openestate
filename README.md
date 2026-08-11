@@ -15,9 +15,9 @@ like you would Zabbix or Wazuh, not a stack of containers you don't control.
 > fields are all built and exercised end to end in a real browser against
 > a real install. Before onboarding a real customer, read
 > [Known gaps](docs/docs/features-and-usage.md#known-gaps-before-you-run-a-real-project-on-this) —
-> a project can't be edited after creation, and GST on a booking's cost
-> lines silently defaults to 0% unless every charge type carries its own
-> rate. See [CHANGELOG.md](CHANGELOG.md) for what each release added and
+> a project can't be edited after creation, and there's no staff screen
+> yet to publish construction updates or respond to support tickets.
+> See [CHANGELOG.md](CHANGELOG.md) for what each release added and
 > [docs/todo.md](docs/todo.md) for the full gap list.
 
 ## Why OpenEstate

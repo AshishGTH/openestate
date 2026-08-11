@@ -4,11 +4,12 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
-## Must-fix-before-pilot (found on the pre-pilot walkthrough, not built)
+## Must-fix-before-pilot (found on the pre-pilot walkthrough)
 
-Three gaps found walking a realistic project through the real product,
-deliberately sized here rather than fixed inline — each is a real,
-standalone UI/feature build, not a wiring fix:
+Three gaps found walking a realistic project through the real product.
+One has since been fixed; the other two remain deliberately sized here
+rather than fixed inline — each is a real, standalone UI/feature build,
+not a wiring fix:
 
 - **No project-edit UI at all.** A project holds the RERA number, the
   address, and — via its `AreaLocation` — the state code that drives GST
@@ -17,19 +18,6 @@ standalone UI/feature build, not a wiring fix:
   option once a project has towers/units/bookings. Needs a real edit
   screen wired to the existing `PATCH /projects/:id` endpoint (the
   backend already accepts partial updates; only the UI is missing).
-- **No base-line GST rate picker anywhere in the booking flow.** A
-  booking's cost-line GST resolution (`booking.service.ts`) falls back
-  through: the line's own rate → its charge type's rate → the booking's
-  `BASE` line's rate. If the base line itself has no rate — which is
-  every booking today, since nothing in `BookingWizard.tsx` ever sets
-  one — every PLC/charge line that doesn't carry its own `gstRateId`
-  computes at **0% GST**, silently. This is not a calculation bug; it is
-  a configuration gap with no UI to close it. A builder reading a
-  ₹54,00,000 booking with zero GST on the printed documents has no way
-  to know from the product itself that this is a missing setting, not a
-  correct result. Needs a GST-rate selector on the booking wizard's
-  Confirm step, defaulting to nothing (never guessing a rate) but making
-  the absence visible before the booking is created, not after.
 - **No staff UI to publish a construction update or attach a progress
   photo.** `ConstructionUpdateAdminController` is fully built and tested
   (Phase 6, real IDOR tests, real Playwright coverage on the portal
@@ -38,6 +26,20 @@ standalone UI/feature build, not a wiring fix:
   if a developer hand-crafts one via the raw API — confirmed by grep,
   not assumption. Needs a list+create+photo-attach screen, comparable in
   size to the Letter Templates admin page built for v0.2's PDF gap.
+
+**Fixed: the base-line GST rate picker.** A booking's cost-line GST
+resolution (`booking.service.ts`) falls back through: the line's own
+rate → its charge type's rate → the booking's `BASE` line's rate — and
+with no rate ever settable on the base line, this was reprioritised
+ahead of the other two gaps above because it fails *silently* (a wrong
+number on a printed document, no error) where the other two fail loud
+or merely create friction. `BookingService.createBooking` now rejects
+the whole booking if any line's rate can't be resolved, and
+`BookingWizard.tsx` has a real rate picker on the base line
+(auto-selected only when exactly one active rate exists). See
+CHANGELOG.md's `[Unreleased]` entry for the full writeup, including how
+already-created zero-GST bookings are surfaced (boot-time log + admin
+banner + a "Zero-GST bookings" CSV report) rather than silently altered.
 
 ## UNIT custom field values have no frontend capture or display path
 

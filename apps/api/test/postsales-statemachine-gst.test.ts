@@ -63,7 +63,7 @@ describeIf('State machine (system-only) + GST split', () => {
       const applicantId = await makeApplicant(systemPrisma, fx.companyId);
       await svc.bookings.createBooking(
         fx.companyId,
-        { unitId, primaryApplicantId: applicantId, coApplicantIds: [], bookingDate: new Date('2026-06-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: 10_00_000n * 100n }] },
+        { unitId, primaryApplicantId: applicantId, coApplicantIds: [], bookingDate: new Date('2026-06-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: 10_00_000n * 100n, gstRateId: gst5Id }] },
         fx.userId,
       );
       const booked = await systemPrisma.unit.findFirst({ where: { id: unitId } });
@@ -177,6 +177,49 @@ describeIf('State machine (system-only) + GST split', () => {
       });
       expect(lines[1].gstRateId).toBe(gst5Id);
       expect(lines[1].gstRatePercentSnapshot.toString()).toBe('5');
+    });
+
+    it('rejects the whole booking (no rows written) when the base line has no rate and a PLC line has nothing to fall back to', async () => {
+      const unitId = await makeUnit(systemPrisma, fx);
+      const applicantId = await makeApplicant(systemPrisma, fx.companyId);
+      await expect(
+        svc.bookings.createBooking(
+          fx.companyId,
+          {
+            unitId,
+            primaryApplicantId: applicantId,
+            coApplicantIds: [],
+            bookingDate: new Date('2026-06-01'),
+            placeOfSupplyStateCode: '09',
+            costLines: [
+              { kind: 'BASE', label: 'Base', baseAmountPaise: 50_00_000n * 100n }, // no gstRateId
+              { kind: 'PLC', label: 'Corner Plot', baseAmountPaise: 75_000n * 100n },
+            ],
+          },
+          fx.userId,
+        ),
+      ).rejects.toThrow(/select a gst rate for the base line/i);
+      const booking = await systemPrisma.booking.findFirst({ where: { companyId: fx.companyId, unitId } });
+      expect(booking).toBeNull();
+    });
+
+    it('rejects even a single-line (base-only) booking with no rate — there is nothing else it could fall back to', async () => {
+      const unitId = await makeUnit(systemPrisma, fx);
+      const applicantId = await makeApplicant(systemPrisma, fx.companyId);
+      await expect(
+        svc.bookings.createBooking(
+          fx.companyId,
+          {
+            unitId,
+            primaryApplicantId: applicantId,
+            coApplicantIds: [],
+            bookingDate: new Date('2026-06-01'),
+            placeOfSupplyStateCode: '09',
+            costLines: [{ kind: 'BASE', label: 'Base Sale Price', baseAmountPaise: 50_00_000n * 100n }],
+          },
+          fx.userId,
+        ),
+      ).rejects.toThrow(/base sale price.*select a gst rate for the base line/is);
     });
   });
 

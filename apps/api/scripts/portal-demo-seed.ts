@@ -193,6 +193,11 @@ async function main() {
     category = await systemPrisma.ticketCategory.create({ data: { companyId, name: 'Portal Demo' } });
   }
 
+  // packages/db/prisma/seed.ts already seeds real GST rates for demo-realty
+  // (5%/12%) — reused here rather than creating a throwaway one, since a
+  // booking's base line now needs a real gstRateId to be created at all.
+  const gstRate = await systemPrisma.gstRate.findFirstOrThrow({ where: { companyId } });
+
   const notifications = new NotificationService(systemPrisma, new ConsoleCommunicationProvider());
   const ledger = new LedgerService(tenantPrisma);
   const numbers = new NumberSequenceService();
@@ -211,7 +216,7 @@ async function main() {
   });
   const booking = await bookings.createBooking(
     companyId,
-    { unitId: unit.id, primaryApplicantId: customer.id, coApplicantIds: [], bookingDate: SYSTEM_CLOCK.now(), costLines: [{ kind: 'BASE', label: 'Base Price', baseAmountPaise: L(30_00_000) }] },
+    { unitId: unit.id, primaryApplicantId: customer.id, coApplicantIds: [], bookingDate: SYSTEM_CLOCK.now(), costLines: [{ kind: 'BASE', label: 'Base Price', baseAmountPaise: L(30_00_000), gstRateId: gstRate.id }] },
     admin.id,
   );
   await systemPrisma.booking.update({ where: { id: booking.id }, data: { bookingNumber: CUSTOMER_BOOKING_NUMBER } });
@@ -252,7 +257,7 @@ async function main() {
   });
   const brokerBooking = await bookings.createBooking(
     companyId,
-    { unitId: brokerUnit.id, primaryApplicantId: brokerCustomer.id, coApplicantIds: [], bookingDate: SYSTEM_CLOCK.now(), costLines: [{ kind: 'BASE', label: 'Base Price', baseAmountPaise: L(40_00_000) }] },
+    { unitId: brokerUnit.id, primaryApplicantId: brokerCustomer.id, coApplicantIds: [], bookingDate: SYSTEM_CLOCK.now(), costLines: [{ kind: 'BASE', label: 'Base Price', baseAmountPaise: L(40_00_000), gstRateId: gstRate.id }] },
     admin.id,
   );
   await systemPrisma.booking.update({ where: { id: brokerBooking.id }, data: { bookingNumber: BROKER_BOOKING_NUMBER, brokerId: broker.id } });

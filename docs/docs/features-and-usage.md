@@ -150,14 +150,13 @@ limitation of the current build, not a bug you'll hit by accident:
 - **You cannot edit a project once created.** No screen exists to fix a
   typo'd RERA number, address, or location after the fact. Get these
   right at creation, or expect to rebuild the project.
-- **GST on a booking's cost lines defaults to 0% unless every line names
-  its own rate.** There is no UI yet to set a rate on a booking's base
-  price line, and any preferential-location or other charge line without
-  its own GST rate falls back to that base line's rate. Until you assign
-  a GST rate to your charge-type masters (Admin → Masters → Charge
-  Types), or the base-line picker ships, a booking's printed cost
-  breakup can show ₹0 GST — check every generated document before
-  sending it to a customer.
+- ~~GST on a booking's cost lines defaults to 0% unless every line names
+  its own rate~~ — **fixed.** The booking wizard now has a GST-rate
+  picker on the base price line, and the booking is rejected outright
+  (not silently priced at 0%) if any cost line's rate can't be resolved.
+  Bookings created before this fix are unaffected (rates are
+  immutable snapshots) — check Post-sales → Reports → "Zero-GST
+  bookings" for any that need a manually-corrected document.
 - **Custom fields on a Unit can be defined but never captured or shown.**
   Applicant, Inquiry, and Project custom fields work end to end; a
   Unit-level custom field has no form to fill it in on today.

@@ -69,7 +69,7 @@ describeIf('Phase 5 broker/commission tenant isolation (RLS)', () => {
     const applicantId = await makeApplicant(systemPrisma, fx.companyId);
     const booking = await svc.bookings.createBooking(
       fx.companyId,
-      { unitId, primaryApplicantId: applicantId, coApplicantIds: [], bookingDate: new Date('2026-06-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: L(20_00_000) }] },
+      { unitId, primaryApplicantId: applicantId, coApplicantIds: [], bookingDate: new Date('2026-06-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: L(20_00_000), gstRateId: fx.defaultGstRateId }] },
       fx.userId,
     );
     await systemPrisma.booking.update({ where: { id: booking.id }, data: { brokerId } });

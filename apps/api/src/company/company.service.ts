@@ -57,6 +57,39 @@ export class CompanyService implements OnApplicationBootstrap {
     } catch (e) {
       this.logger.warn(`GST config completeness check failed at boot (non-fatal): ${(e as Error).message}`);
     }
+
+    // Bookings created before the base-line GST rate picker existed can
+    // have a BASE cost line with no gstRateId, snapshotted at 0% GST —
+    // BookingCostLine is immutable, so this can't be fixed retroactively,
+    // only surfaced. One grouped count query, not a per-company loop or
+    // any row materialization — safe to run at every boot regardless of
+    // company/booking volume. Mirrors the GST-config-completeness check
+    // above: warn at boot, never fail it (same try/catch reasoning).
+    try {
+      const groups = await this.systemPrisma.bookingCostLine.groupBy({
+        by: ['companyId'],
+        where: { kind: 'BASE', gstRateId: null },
+        _count: true,
+      });
+      const affected = groups.filter((g) => g._count > 0);
+      if (affected.length > 0) {
+        const companies = await this.systemPrisma.company.findMany({
+          where: { id: { in: affected.map((g) => g.companyId) } },
+          select: { id: true, name: true },
+        });
+        const nameById = new Map(companies.map((c) => [c.id, c.name]));
+        this.logger.warn(
+          `${affected.reduce((s, g) => s + g._count, 0)} booking(s) across ${affected.length} ` +
+            'company(ies) have no GST rate on their base cost line — check Post-sales → Reports → ' +
+            `"Zero-GST bookings" for the affected booking numbers before sending any generated ` +
+            `document: ${affected
+              .map((g) => `${nameById.get(g.companyId) ?? g.companyId} (${g._count})`)
+              .join(', ')}`,
+        );
+      }
+    } catch (e) {
+      this.logger.warn(`Zero-GST-booking check failed at boot (non-fatal): ${(e as Error).message}`);
+    }
   }
 
   async findOne(companyId: string) {

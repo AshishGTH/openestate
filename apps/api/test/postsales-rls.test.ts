@@ -51,7 +51,7 @@ describeIf('Phase 4 financial tenant isolation (RLS)', () => {
     const appA = await makeApplicant(systemPrisma, fxA.companyId);
     const bA = await svc.bookings.createBooking(
       fxA.companyId,
-      { unitId: unitA, primaryApplicantId: appA, coApplicantIds: [], bookingDate: new Date('2026-06-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: 10_00_000n * 100n }] },
+      { unitId: unitA, primaryApplicantId: appA, coApplicantIds: [], bookingDate: new Date('2026-06-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: 10_00_000n * 100n, gstRateId: fxA.defaultGstRateId }] },
       fxA.userId,
     );
     // And company B a separate booking.
@@ -59,7 +59,7 @@ describeIf('Phase 4 financial tenant isolation (RLS)', () => {
     const appB = await makeApplicant(systemPrisma, fxB.companyId);
     const bB = await svc.bookings.createBooking(
       fxB.companyId,
-      { unitId: unitB, primaryApplicantId: appB, coApplicantIds: [], bookingDate: new Date('2026-06-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: 20_00_000n * 100n }] },
+      { unitId: unitB, primaryApplicantId: appB, coApplicantIds: [], bookingDate: new Date('2026-06-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: 20_00_000n * 100n, gstRateId: fxB.defaultGstRateId }] },
       fxB.userId,
     );
     bookingBId = bB.id;

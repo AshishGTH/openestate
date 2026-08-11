@@ -80,7 +80,7 @@ describeIf('BrokerReportsService', () => {
     const applicantId = await makeApplicant(systemPrisma, fxA.companyId);
     const booking = await svc.bookings.createBooking(
       fxA.companyId,
-      { unitId, primaryApplicantId: applicantId, coApplicantIds: [], bookingDate: new Date('2026-06-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: L(20_00_000) }] },
+      { unitId, primaryApplicantId: applicantId, coApplicantIds: [], bookingDate: new Date('2026-06-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: L(20_00_000), gstRateId: fxA.defaultGstRateId }] },
       fxA.userId,
     );
     bookingAId = booking.id;

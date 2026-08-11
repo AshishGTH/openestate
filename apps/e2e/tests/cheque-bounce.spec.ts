@@ -63,6 +63,11 @@ test('book a unit → record a cheque receipt → bounce it → Collection Summa
   await expect(unitSelect.locator('option')).toHaveCount(2);
   await unitSelect.selectOption({ index: 1 });
   await controlAfterLabel(page, 'Agreed base price (₹)').fill(priceRupees);
+  // The fixture seeds exactly one active GST rate, which BookingWizard
+  // auto-preselects (never guessing when there's more than one option,
+  // but nothing to guess when there's only one) — wait for that to land
+  // before Next, since the button is disabled until a rate is selected.
+  await expect(controlAfterLabel(page, 'GST rate for base price')).not.toHaveValue('');
   await page.getByRole('button', { name: 'Next' }).click(); // step 1 → 2
 
   // ── Step 2: co-applicants (skip) ──

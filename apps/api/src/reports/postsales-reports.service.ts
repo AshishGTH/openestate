@@ -251,6 +251,52 @@ export class PostsalesReportsService {
     };
   }
 
+  // ── GST-rate configuration gap: bookings priced before the base-line
+  // rate picker existed, so their BASE line has no gstRateId ──────────
+
+  /**
+   * The base-line rate picker (BookingService.createBooking) stops this
+   * from happening for new bookings, but does not retroactively touch
+   * bookings created before it existed — BookingCostLine is an immutable
+   * snapshot, and there is no way to know after the fact what the
+   * correct historical rate should have been without a human reviewing
+   * each one (same reasoning as the CompanyConfig gstStateCode gap).
+   * This surfaces the count cheaply (indexed count, no row
+   * materialization) so an admin finds out from the app, not from a
+   * customer holding a demand letter with ₹0 GST on it.
+   */
+  async zeroGstBaseBookingsCount(companyId: string): Promise<number> {
+    return this.systemPrisma.bookingCostLine.count({
+      where: { companyId, kind: 'BASE', gstRateId: null },
+    });
+  }
+
+  async *zeroGstBaseBookings(companyId: string) {
+    const lines = await this.systemPrisma.bookingCostLine.findMany({
+      where: { companyId, kind: 'BASE', gstRateId: null },
+      select: {
+        booking: {
+          select: {
+            bookingNumber: true,
+            bookingDate: true,
+            primaryApplicant: { select: { name: true } },
+            unit: { select: { number: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    for (const l of lines) {
+      const b = l.booking;
+      yield [
+        b.bookingNumber,
+        b.primaryApplicant.name,
+        b.unit.number,
+        b.bookingDate.toISOString().slice(0, 10),
+      ];
+    }
+  }
+
   // ── Ageing (reuses the Phase 3 ageing-bucket helper) ────────
 
   async duesAgeing(companyId: string, scope: ReportScope, projectId?: string) {

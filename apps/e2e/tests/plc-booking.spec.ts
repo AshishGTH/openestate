@@ -11,12 +11,13 @@ import { DATABASE_URL_SYSTEM } from '../playwright.config';
 // expectations — proving the charge type's OWN gstRateId is what taxed
 // it, not a coincidence.
 //
-// The wizard has no rate picker for the BASE line itself (a pre-existing,
-// separate gap, out of scope here), so the base line and the PLC line
-// (which has no chargeType to carry a rate at all) are untaxed — only the
-// charge line is, at its charge type's own 5%. That asymmetry is
-// deliberate: it's the clearest possible proof that GST resolution is
-// genuinely per-line, not inherited from a blanket booking-level setting.
+// The base line's rate is explicitly picked as the fixture's 0% default
+// (a real, deliberate choice through the real picker — not the old
+// "no picker exists" gap), so the base line and the PLC line (which has
+// no chargeType to carry a rate at all) are untaxed — only the charge
+// line is, at its charge type's own 5%. That asymmetry is deliberate:
+// it's the clearest possible proof that GST resolution is genuinely
+// per-line, not inherited from a blanket booking-level setting.
 test('assign a PLC and a GST-rated charge to a unit, book it, and confirm the total is right', async ({ page }) => {
   const fixture = readFixture('plcBooking');
   const baseRupees = 5_000_000; // ₹50,00,000
@@ -81,6 +82,12 @@ test('assign a PLC and a GST-rated charge to a unit, book it, and confirm the to
   expect(plcsResp.ok()).toBe(true);
   expect(chargesResp.ok()).toBe(true);
   await controlAfterLabel(page, 'Agreed base price (₹)').fill(String(baseRupees));
+  // withPricingMasters seeds TWO active GST rates (the always-on 0%
+  // default plus this fixture's own 5% one for the charge type), so the
+  // wizard's "only one option ⇒ auto-preselect" never fires here — pick
+  // the 0% one explicitly, through the real select, same as a real admin
+  // choosing not to tax the base price.
+  await controlAfterLabel(page, 'GST rate for base price').selectOption({ label: fixture.defaultGstRateLabel });
   await page.getByRole('button', { name: 'Next' }).click(); // step 1 → 2
 
   await page.getByRole('button', { name: 'Next' }).click(); // step 2 → 3
@@ -129,7 +136,7 @@ test('assign a PLC and a GST-rated charge to a unit, book it, and confirm the to
 
     const baseLine = lines.find((l: { kind: string }) => l.kind === 'BASE')!;
     const plcLine = lines.find((l: { kind: string }) => l.kind === 'PLC')!;
-    expect(baseLine.gstRatePercentSnapshot.toString()).toBe('0'); // no rate picker for the base line exists yet
+    expect(baseLine.gstRatePercentSnapshot.toString()).toBe('0'); // the fixture's 0% rate, picked explicitly
     expect(plcLine.gstRatePercentSnapshot.toString()).toBe('0'); // inherits the (untaxed) base line's rate
   } finally {
     await prisma.$disconnect();

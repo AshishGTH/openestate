@@ -15,6 +15,10 @@ export interface E2eFixture {
   projectId: string;
   projectName: string;
   unitNumber: string;
+  // Always set — the 0%-rate row every scenario's BookingWizard run needs
+  // to resolve the base line. Exposed so a spec that explicitly selects a
+  // rate (rather than relying on auto-preselect) can match its label text.
+  defaultGstRateLabel: string;
   // Only set when opts.withPricingMasters is passed (scenario 4) — the
   // other scenarios have no use for a PLC type/GST-rated charge type.
   plcTypeName?: string;
@@ -136,6 +140,17 @@ export async function seedE2eFixture(
       },
     });
 
+    // A booking's BASE cost line now needs a real gstRateId to be created
+    // at all — the base-line rate picker made an unresolvable line a hard
+    // 400, not a silent 0%. One 0%-rate row here so every scenario's
+    // BookingWizard run sees exactly one active option and auto-preselects
+    // it (matches production's own "only one active rate ⇒ no need to
+    // ask" behaviour) — except withPricingMasters, which adds a SECOND,
+    // real 5% rate below and so must explicitly pick this one in the UI.
+    const defaultGstRate = await prisma.gstRate.create({
+      data: { companyId: company.id, rate: 0, description: 'No GST (e2e default)', effectiveFrom: new Date('2019-04-01') },
+    });
+
     let plcTypeName: string | undefined;
     let chargeTypeName: string | undefined;
     let chargeTypeGstRatePercent: number | undefined;
@@ -238,6 +253,7 @@ export async function seedE2eFixture(
       projectId: project.id,
       projectName: project.name,
       unitNumber,
+      defaultGstRateLabel: `${defaultGstRate.rate}% — ${defaultGstRate.description}`,
       plcTypeName,
       chargeTypeName,
       chargeTypeGstRatePercent,

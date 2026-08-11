@@ -67,7 +67,7 @@ describeIf('Data migration: backfill is_reversed on pre-fix bounced receipts', (
         primaryApplicantId: applicantId,
         coApplicantIds: [],
         bookingDate: new Date('2026-06-01'),
-        costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: price }],
+        costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: price , gstRateId: fx.defaultGstRateId }],
       },
       fx.userId,
     );
