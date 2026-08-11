@@ -5,6 +5,7 @@ import { usePaginatedQuery, useApiMutation } from '../../lib/hooks';
 import { api } from '../../lib/api';
 import DataTable, { type Column } from '../../components/DataTable';
 import Pagination from '../../components/Pagination';
+import CustomFieldInputs, { buildCustomFieldPayload, useCustomFieldDefinitions } from '../../components/CustomFieldInputs';
 
 interface Project {
   id: string;
@@ -29,6 +30,9 @@ export default function ProjectsPage() {
   const [projectTypeId, setProjectTypeId] = useState('');
   const [areaLocationId, setAreaLocationId] = useState('');
   const [address, setAddress] = useState('');
+  const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>({});
+
+  const { definitions: projectDefs } = useCustomFieldDefinitions('PROJECT');
 
   const { data, isLoading } = usePaginatedQuery<Project>(['projects'], '/projects', { page, limit: 20 });
 
@@ -53,6 +57,7 @@ export default function ProjectsPage() {
         projectTypeId: projectTypeId === '' ? undefined : projectTypeId,
         areaLocationId: areaLocationId === '' ? undefined : areaLocationId,
         address: address.trim() === '' ? undefined : address.trim(),
+        customFields: buildCustomFieldPayload(projectDefs, customFieldValues),
       });
       setShowForm(false);
       setName('');
@@ -61,6 +66,7 @@ export default function ProjectsPage() {
       setProjectTypeId('');
       setAreaLocationId('');
       setAddress('');
+      setCustomFieldValues({});
     } catch (err) {
       setError((err as Error).message);
     }
@@ -119,6 +125,11 @@ export default function ProjectsPage() {
               <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
             </div>
           </div>
+          <CustomFieldInputs
+            definitions={projectDefs}
+            values={customFieldValues}
+            onChange={(key, value) => setCustomFieldValues((prev) => ({ ...prev, [key]: value }))}
+          />
           <div className="mt-3 flex gap-3">
             <button onClick={handleCreate} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">Create</button>
             <button onClick={() => setShowForm(false)} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
