@@ -88,6 +88,15 @@ const NO_NAME_TABLES = new Set(['gst-rates', 'tds-rules']);
 // create/edit form at all).
 const TYPE_FIELDS: Record<string, FieldDef[]> = {
   'document-types': [{ key: 'entityType', label: 'Entity Type', type: 'text', required: true }],
+  // GST State Code is what makes projects in this location bookable at
+  // all — place-of-supply resolution fails loud without it, so a location
+  // created without one blocks every booking on its projects.
+  'area-locations': [
+    { key: 'stateCode', label: 'GST State Code (2 digits, e.g. 09 = Uttar Pradesh)', type: 'text' },
+    { key: 'city', label: 'City', type: 'text' },
+    { key: 'state', label: 'State', type: 'text' },
+    { key: 'pincode', label: 'Pincode', type: 'text' },
+  ],
   'interest-rules': [
     { key: 'rateType', label: 'Rate Type', type: 'select', options: Object.values(INTEREST_RATE_TYPE), required: true },
     { key: 'ratePercent', label: 'Rate %', type: 'number', required: true },

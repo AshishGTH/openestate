@@ -18,7 +18,31 @@ const SIMPLE_MASTERS = [
   { modelName: 'ProjectType', routePath: 'project-types', apiTag: 'Project Types' },
   { modelName: 'ReceiptType', routePath: 'receipt-types', apiTag: 'Receipt Types' },
   { modelName: 'RegistrationType', routePath: 'registration-types', apiTag: 'Registration Types' },
-  { modelName: 'AreaLocation', routePath: 'area-locations', apiTag: 'Area Locations' },
+  // stateCode is the GST place-of-supply source for every project in this
+  // location, and since v0.2.0 made place-of-supply fail loud rather than
+  // silently defaulting to intra-state, an AreaLocation without one makes
+  // every booking in its projects IMPOSSIBLE — the wizard rejects at the
+  // final step with "Set the Area Location state code", which the admin
+  // then had no way to do, because the generic master schema only ever
+  // exposed name/description/isActive/sortOrder. Found on the pre-pilot
+  // walkthrough: every admin-created location had state_code NULL while
+  // the seeded ones were fine, so the failure only ever hit real users.
+  // city/pincode are the remaining real columns from the same
+  // docs/todo.md gap, exposed here at the same time.
+  {
+    modelName: 'AreaLocation',
+    routePath: 'area-locations',
+    apiTag: 'Area Locations',
+    extraFields: {
+      stateCode: z
+        .string()
+        .regex(/^\d{2}$/, 'GST state code must be exactly 2 digits (e.g. 09 for Uttar Pradesh)')
+        .optional(),
+      city: z.string().max(100).optional(),
+      state: z.string().max(100).optional(),
+      pincode: z.string().regex(/^\d{6}$/, 'Pincode must be 6 digits').optional(),
+    },
+  },
   // DocumentType.entityType is a required Prisma column (free-text label,
   // not read by any business logic — confirmed by grep — so no enum to
   // validate against beyond "non-empty").

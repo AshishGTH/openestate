@@ -104,7 +104,22 @@ const MASTER_CASES: MasterCase[] = [
   { label: 'ProjectType', path: 'project-types', payload: simpleBase() },
   { label: 'ReceiptType', path: 'receipt-types', payload: simpleBase() },
   { label: 'RegistrationType', path: 'registration-types', payload: simpleBase() },
-  { label: 'AreaLocation', path: 'area-locations', payload: simpleBase() },
+  // stateCode is the GST place-of-supply source for projects in this
+  // location. Before it was exposed here, an admin-created AreaLocation
+  // always had it NULL, and since v0.2.0's fail-loud place-of-supply
+  // check that made every booking on those projects impossible — with
+  // the error telling the admin to set a field the UI had no input for.
+  {
+    label: 'AreaLocation',
+    path: 'area-locations',
+    payload: simpleBase({ stateCode: '09', city: 'Noida', state: 'Uttar Pradesh', pincode: '201301' }),
+    assertExtra: (b) => {
+      expect(b.stateCode).toBe('09');
+      expect(b.city).toBe('Noida');
+      expect(b.state).toBe('Uttar Pradesh');
+      expect(b.pincode).toBe('201301');
+    },
+  },
   {
     label: 'DocumentType',
     path: 'document-types',
