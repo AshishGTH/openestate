@@ -3,12 +3,14 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, downloadFile } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
+import { CustomFieldDisplay, useCustomFieldDefinitions } from '../../components/CustomFieldInputs';
 
 interface Project {
   id: string;
   name: string;
   code: string;
   reraNumber: string | null;
+  customFields?: Record<string, unknown> | null;
 }
 
 interface Tower {
@@ -119,6 +121,7 @@ export default function ProjectDetailPage() {
     queryFn: () => api(`/projects/${id}`),
     enabled: !!id,
   });
+  const { definitions: projectDefs } = useCustomFieldDefinitions('PROJECT');
 
   const { data: towersRes } = useQuery<{ data: Tower[] }>({
     queryKey: ['towers', id],
@@ -318,6 +321,7 @@ export default function ProjectDetailPage() {
       <p className="text-sm text-slate-500">
         Code: {project.code} {project.reraNumber && <>· RERA: {project.reraNumber}</>}
       </p>
+      <CustomFieldDisplay definitions={projectDefs} values={project.customFields} />
 
       <section className="mt-6">
         <div className="flex items-center justify-between">

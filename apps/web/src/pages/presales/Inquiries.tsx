@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { usePaginatedQuery } from '../../lib/hooks';
-import { api } from '../../lib/api';
+import { api, downloadFile } from '../../lib/api';
 import DataTable, { type Column } from '../../components/DataTable';
 import Pagination from '../../components/Pagination';
 import CustomFieldInputs, {
@@ -109,9 +109,17 @@ export default function InquiriesPage() {
     <div>
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-slate-900">Inquiries</h1>
-        <button onClick={() => setShowForm(true)} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
-          Add Inquiry
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => downloadFile('/reports/presales/inquiries-export?format=csv', 'inquiries-export.csv')}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Export CSV
+          </button>
+          <button onClick={() => setShowForm(true)} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
+            Add Inquiry
+          </button>
+        </div>
       </div>
 
       {duplicateWarning.length > 0 && (
