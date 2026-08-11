@@ -8,13 +8,17 @@ OpenEstate is AGPL-3.0 licensed. Install it natively on your own server —
 your own PostgreSQL and Redis, a systemd service, standard Linux paths —
 like you would Zabbix or Wazuh, not a stack of containers you don't control.
 
-> **Status: v0.2.3 — feature-complete for a first pilot, not yet
-> battle-tested at scale.** Auth/RBAC, multi-tenancy, inventory, pre-sales,
-> the post-sales ledger, brokers/commissions, both portals, plugins,
-> webhooks and custom fields are all built and exercised end to end in a
-> real browser against a real install. See [CHANGELOG.md](CHANGELOG.md)
-> for what each release added and
-> [docs/todo.md](docs/todo.md) for known gaps.
+> **Status: v0.2.3 — the core sales funnel works end to end for a first
+> pilot, with a short list of known gaps worth reading before you rely on
+> it.** Auth/RBAC, multi-tenancy, inventory, pre-sales, the post-sales
+> ledger, brokers/commissions, both portals, plugins, webhooks and custom
+> fields are all built and exercised end to end in a real browser against
+> a real install. Before onboarding a real customer, read
+> [Known gaps](docs/docs/features-and-usage.md#known-gaps-before-you-run-a-real-project-on-this) —
+> a project can't be edited after creation, and GST on a booking's cost
+> lines silently defaults to 0% unless every charge type carries its own
+> rate. See [CHANGELOG.md](CHANGELOG.md) for what each release added and
+> [docs/todo.md](docs/todo.md) for the full gap list.
 
 ## Why OpenEstate
 

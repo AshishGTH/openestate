@@ -4,6 +4,43 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## Must-fix-before-pilot (found on the pre-pilot walkthrough, not built)
+
+Three gaps found walking a realistic project through the real product,
+deliberately sized here rather than fixed inline — each is a real,
+standalone UI/feature build, not a wiring fix:
+
+- **No project-edit UI at all.** A project holds the RERA number, the
+  address, and — via its `AreaLocation` — the state code that drives GST
+  place-of-supply. Today the only repair path for a typo in any of these
+  is "rebuild the project and all its inventory," which is not a real
+  option once a project has towers/units/bookings. Needs a real edit
+  screen wired to the existing `PATCH /projects/:id` endpoint (the
+  backend already accepts partial updates; only the UI is missing).
+- **No base-line GST rate picker anywhere in the booking flow.** A
+  booking's cost-line GST resolution (`booking.service.ts`) falls back
+  through: the line's own rate → its charge type's rate → the booking's
+  `BASE` line's rate. If the base line itself has no rate — which is
+  every booking today, since nothing in `BookingWizard.tsx` ever sets
+  one — every PLC/charge line that doesn't carry its own `gstRateId`
+  computes at **0% GST**, silently. This is not a calculation bug; it is
+  a configuration gap with no UI to close it. A builder reading a
+  ₹54,00,000 booking with zero GST on the printed documents has no way
+  to know from the product itself that this is a missing setting, not a
+  correct result. Needs a GST-rate selector on the booking wizard's
+  Confirm step, defaulting to nothing (never guessing a rate) but making
+  the absence visible before the booking is created, not after.
+- **No staff UI to publish a construction update or attach a progress
+  photo.** `ConstructionUpdateAdminController` is fully built and tested
+  (Phase 6, real IDOR tests, real Playwright coverage on the portal
+  render side) but has zero caller anywhere in `apps/web`. A customer's
+  portal "construction progress" section will only ever show something
+  if a developer hand-crafts one via the raw API — confirmed by grep,
+  not assumption. Needs a list+create+photo-attach screen, comparable in
+  size to the Letter Templates admin page built for v0.2's PDF gap.
+
+## UNIT custom field values have no frontend capture or display path
+
 ## Pre-sales (Phase 3)
 
 - **Escalation: notify the project manager instead of all company managers,
@@ -159,12 +196,32 @@ third model in this originally-three-way gap,
 charge type became a real money-correctness risk, not just a cosmetic
 one.
 
+## UNIT custom field values have no frontend capture or display path
+
+The backend fully supports UNIT custom field values (validation, storage,
+portal-strip) since v0.2.3 — the gap is entirely in `apps/web`. APPLICANT
+and INQUIRY get values captured inline on the "Add Inquiry" form
+(`Inquiries.tsx`); PROJECT gets them on the "Add Project" form
+(`Projects.tsx`, added on the pre-pilot walkthrough). UNIT has neither: a
+unit is only ever created via Bulk-Generate (one shared set of parameters
+applied to many units at once — the wrong shape for a per-unit value like
+"facing direction") or CSV import, and there is no single-unit edit screen
+to hang a form on at all. Building one is a real, standalone UI addition
+(a new "Edit Unit" affordance), not a small wiring fix like the other
+three — sized alongside the project-edit gap below, not built opportunistically.
+Confirmed by a real pre-pilot walkthrough: defining a UNIT field through
+the admin Custom Fields page has zero effect anywhere else in the product,
+exactly the same failure shape the original v0.2.3 gap analysis wanted to
+close for every entity.
+
 ## Custom field values on BOOKING need a frozen-service exception
 
-**Resolved for four of the five entity types in v0.2.3** — APPLICANT,
-INQUIRY, UNIT and PROJECT now capture, validate, store, display and
-export custom field values (stored inline as JSONB on each entity; see
-CLAUDE.md's v0.2.3 decisions entry for why inline rather than EAV).
+**Resolved for three of the four supported entity types' frontend, all
+four on the backend, as of the pre-pilot walkthrough** — APPLICANT,
+INQUIRY and PROJECT capture, validate, store, display and export custom
+field values through the real UI; UNIT's backend support is complete but
+has no frontend (see the entry above). See CLAUDE.md's v0.2.3 decisions
+entry for why storage is inline JSONB rather than EAV.
 
 `BOOKING` is the one remaining gap, deliberately. Giving it values
 means adding a `custom_fields` column to `bookings` and accepting the
