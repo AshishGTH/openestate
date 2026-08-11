@@ -55,26 +55,53 @@ done
 [ "$(id -u)" -eq 0 ] || die "Must be run as root (sudo ./install-native.sh)."
 
 log "Checking prerequisites..."
-command -v node >/dev/null 2>&1 || die "Node.js not found. Install Node.js 20 via NodeSource:
-  sudo apt-get install -y curl          # a stock Ubuntu image has no curl
-  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-  sudo apt-get install -y nodejs"
-NODE_MAJOR="$(node -e 'console.log(process.versions.node.split(".")[0])')"
-[ "$NODE_MAJOR" -ge 20 ] || die "Node.js 20+ required, found $(node -v). See --help output above for the NodeSource install command."
 
-command -v psql >/dev/null 2>&1 || die "PostgreSQL client not found. Install PostgreSQL:
-  # Ubuntu 22.04/24.04 package PostgreSQL 16 under an explicit version:
-  sudo apt-get install -y postgresql-16 postgresql-client-16
-  # Ubuntu 25.04+ have no postgresql-16 package — use the default (17):
-  sudo apt-get install -y postgresql postgresql-client"
-command -v redis-cli >/dev/null 2>&1 || die "Redis client not found. Install Redis:
-  sudo apt-get install -y redis-server"
-redis-cli ping >/dev/null 2>&1 || warn "Could not reach a local Redis via 'redis-cli ping' — if Redis runs elsewhere, that's expected; otherwise install/start it: sudo apt-get install -y redis-server && sudo systemctl enable --now redis-server"
-command -v nginx >/dev/null 2>&1 || die "nginx not found. Install it:
-  sudo apt-get install -y nginx"
-command -v openssl >/dev/null 2>&1 || die "openssl not found (needed to generate secrets). Install it: sudo apt-get install -y openssl"
-command -v git >/dev/null 2>&1 || die "git not found. Install it: sudo apt-get install -y git"
-# Password hashing (@node-rs/argon2) ships prebuilt binaries for every
+# Collect EVERY missing prerequisite and report them together, once.
+#
+# This used to `die` on the first miss. On a genuinely stock Ubuntu image
+# that meant six failed runs to discover seven missing things, one per
+# run — which reads as "this product is broken" rather than "this needs
+# setup." A fresh-install test on a clean 25.10 box is what surfaced it.
+# Everything below appends to MISSING_* and nothing exits until the end.
+MISSING_DESC=()   # human-readable "what's missing"
+MISSING_PKGS=()   # apt package names, for the one-line combined command
+NEEDS_NODESOURCE=0
+
+# Package names differ across the Ubuntu versions this project supports,
+# so detect rather than hardcode — printing a command that fails is worse
+# than printing none (two of the seven walls found on the clean-box test
+# were exactly that).
+OS_ID=""; OS_VER=""; OS_PRETTY="unknown OS"
+if [ -r /etc/os-release ]; then
+  # shellcheck disable=SC1091
+  . /etc/os-release
+  OS_ID="${ID:-}"; OS_VER="${VERSION_ID:-}"; OS_PRETTY="${PRETTY_NAME:-$OS_ID $OS_VER}"
+fi
+OS_MAJOR="${OS_VER%%.*}"
+
+# Ubuntu <= 24.10 carry an explicit postgresql-16; 25.04 dropped it and
+# ships 17 as the default `postgresql`. Verified against a real 25.10 box:
+# `apt-get install postgresql-16` there fails with "Unable to locate package".
+PG_PKGS="postgresql postgresql-client"
+if [ "$OS_ID" = "ubuntu" ] && [ -n "$OS_MAJOR" ] && [ "$OS_MAJOR" -lt 25 ] 2>/dev/null; then
+  PG_PKGS="postgresql-16 postgresql-client-16"
+fi
+
+need() { # need <command> <description> [apt-packages]
+  command -v "$1" >/dev/null 2>&1 && return 0
+  MISSING_DESC+=("$2")
+  [ -n "${3:-}" ] && MISSING_PKGS+=("$3")
+  return 0
+}
+
+need git    "git — needed to fetch and update the source"                  "git"
+need curl   "curl — needed by the NodeSource installer below"              "curl"
+need openssl "openssl — needed to generate secrets"                        "openssl"
+need psql   "PostgreSQL client (psql) — YOUR database, see note below"     "$PG_PKGS"
+need redis-cli "Redis client (redis-cli) — YOUR cache, see note below"     "redis-server"
+need nginx  "nginx — YOUR web server, see note below"                      "nginx"
+
+# Build toolchain: @node-rs/argon2 ships prebuilt binaries for every
 # platform this script targets and never needs this — but sharp (image
 # processing, used for document/photo handling) can still fall back to
 # compiling libvips from source via node-gyp if no matching prebuild is
@@ -85,9 +112,48 @@ command -v git >/dev/null 2>&1 || die "git not found. Install it: sudo apt-get i
 # manage, but it's still a package install decision left to the admin,
 # consistent with every other prerequisite in this script.
 if ! command -v make >/dev/null 2>&1 || ! command -v g++ >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
-  die "Build toolchain not found (make/g++/python3 — needed if any native dependency falls back to compiling from source during install). Install it:
-  sudo apt-get install -y build-essential python3"
+  MISSING_DESC+=("build toolchain (make/g++/python3) — needed if a native dependency compiles from source")
+  MISSING_PKGS+=("build-essential python3")
 fi
+
+# Node is special: it is not an apt package on the supported path, and a
+# present-but-too-old Node is a different problem from an absent one.
+if ! command -v node >/dev/null 2>&1; then
+  MISSING_DESC+=("Node.js 20+ — not installed")
+  NEEDS_NODESOURCE=1
+else
+  NODE_MAJOR="$(node -e 'console.log(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)"
+  if [ "$NODE_MAJOR" -lt 20 ] 2>/dev/null; then
+    MISSING_DESC+=("Node.js 20+ — found $(node -v), which is too old")
+    NEEDS_NODESOURCE=1
+  fi
+fi
+
+if [ ${#MISSING_DESC[@]} -gt 0 ]; then
+  echo "" >&2
+  echo "OpenEstate cannot install yet — ${#MISSING_DESC[@]} prerequisite(s) are missing on ${OS_PRETTY}:" >&2
+  echo "" >&2
+  for d in "${MISSING_DESC[@]}"; do echo "  - ${d}" >&2; done
+  echo "" >&2
+  echo "PostgreSQL, Redis and nginx are yours to run, back up and upgrade —" >&2
+  echo "OpenEstate connects to them and never manages them for you. That is why" >&2
+  echo "this script checks instead of installing. Run the following yourself:" >&2
+  echo "" >&2
+  if [ ${#MISSING_PKGS[@]} -gt 0 ]; then
+    echo "  sudo apt-get update" >&2
+    echo "  sudo apt-get install -y ${MISSING_PKGS[*]}" >&2
+  fi
+  if [ "$NEEDS_NODESOURCE" -eq 1 ]; then
+    echo "  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -   # needs curl, above" >&2
+    echo "  sudo apt-get install -y nodejs" >&2
+  fi
+  echo "" >&2
+  echo "Then re-run this script. It is safe to re-run." >&2
+  echo "" >&2
+  exit 1
+fi
+
+redis-cli ping >/dev/null 2>&1 || warn "Could not reach a local Redis via 'redis-cli ping' — if Redis runs elsewhere, that's expected; otherwise start it: sudo systemctl enable --now redis-server"
 
 log "Enabling corepack/pnpm..."
 corepack enable
