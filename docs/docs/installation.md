@@ -79,22 +79,40 @@ split is deliberate: your database and cache are infrastructure you
 already manage (backups, monitoring, tuning, security patching) — this
 project isn't going to quietly take that over.
 
+Run these **in order**. A stock Ubuntu server image has none of them —
+including `git` and `curl`, which the later steps depend on.
+
 ```bash
-# PostgreSQL 16
-sudo apt-get install -y postgresql-16 postgresql-client-16
+sudo apt-get update
+
+# Base tools first — the NodeSource step below pipes through curl, and
+# you need git to fetch the source at all.
+sudo apt-get install -y git curl openssl build-essential python3
+
+# Node.js 20 (via NodeSource — Ubuntu's own repo ships an older version)
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# PostgreSQL. Ubuntu 22.04/24.04 package 16 under an explicit name;
+# 25.04 and later dropped that package and ship 17 as the default.
+# Use whichever matches your release — any recent major works, the
+# installer only checks that a psql client exists.
+sudo apt-get install -y postgresql-16 postgresql-client-16   # 22.04 / 24.04
+# sudo apt-get install -y postgresql postgresql-client       # 25.04+
 sudo systemctl enable --now postgresql
 
 # Redis
 sudo apt-get install -y redis-server
 sudo systemctl enable --now redis-server
 
-# Node.js 20 (via NodeSource — Ubuntu's own repo ships an older version)
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# nginx, git, openssl
-sudo apt-get install -y nginx git openssl
+# nginx
+sudo apt-get install -y nginx
 ```
+
+If you skip any of these, the installer stops and prints the complete
+list of what's missing plus a ready-to-paste command for your Ubuntu
+version — it checks everything in one pass rather than failing one
+package at a time.
 
 **Recommended (for a real deployment, not a demo):**
 - A domain name pointed at the server, with TLS via `certbot --nginx`
