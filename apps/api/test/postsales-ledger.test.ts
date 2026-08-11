@@ -63,7 +63,7 @@ describeIf('Ledger walk-through (balance == Σ ledger at every step)', () => {
         primaryApplicantId: applicantId,
         coApplicantIds: [],
         bookingDate: new Date('2026-06-01'),
-        costLines: [{ kind: 'BASE', label: 'Base Sale Price', baseAmountPaise: L(30_00_000) }],
+        costLines: [{ kind: 'BASE', label: 'Base Sale Price', baseAmountPaise: L(30_00_000) , gstRateId: fx.defaultGstRateId }],
       },
       fx.userId,
     );
@@ -155,7 +155,7 @@ describeIf('Ledger walk-through (balance == Σ ledger at every step)', () => {
         primaryApplicantId: applicantId,
         coApplicantIds: [],
         bookingDate: new Date('2026-06-01'),
-        costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: L(30_00_000) }],
+        costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: L(30_00_000) , gstRateId: fx.defaultGstRateId }],
       },
       fx.userId,
     );
@@ -229,7 +229,7 @@ describeIf('Ledger walk-through (balance == Σ ledger at every step)', () => {
         primaryApplicantId: applicantId,
         coApplicantIds: [],
         bookingDate: new Date('2026-06-01'),
-        costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: L(10_00_000) }],
+        costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: L(10_00_000) , gstRateId: fx.defaultGstRateId }],
       },
       fx.userId,
     );

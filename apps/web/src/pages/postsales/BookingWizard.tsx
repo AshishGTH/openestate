@@ -59,6 +59,13 @@ interface UnitChargeRow {
   chargeType: { id: string; name: string };
 }
 
+interface GstRateRow {
+  id: string;
+  rate: string;
+  description: string;
+  isActive: boolean;
+}
+
 interface DraftData {
   step: number;
   primaryApplicantId?: string;
@@ -74,6 +81,7 @@ interface DraftData {
   paymentPlanTemplateId?: string;
   customInstallments: CustomInstallmentRow[];
   brokerId?: string;
+  gstRateId?: string;
 }
 
 interface BookingDraftRecord {
@@ -282,6 +290,22 @@ export default function BookingWizard() {
     queryFn: () => api('/brokers?limit=100'),
   });
 
+  const { data: gstRates } = useQuery<{ data: GstRateRow[] }>({
+    queryKey: ['gst-rates-all'],
+    queryFn: () => api('/masters/gst-rates?limit=100'),
+  });
+  const activeGstRates = (gstRates?.data ?? []).filter((r) => r.isActive);
+
+  // Never guess a rate — except when there is only one active option, in
+  // which case there is nothing to guess: it's the only choice, and
+  // forcing an explicit pick from a list of one is pure friction.
+  useEffect(() => {
+    if (!draft.gstRateId && activeGstRates.length === 1) {
+      setDraft((d) => (d.gstRateId ? d : { ...d, gstRateId: activeGstRates[0].id }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeGstRates.length]);
+
   async function persistDraft(next: DraftData) {
     try {
       if (draftId) {
@@ -323,7 +347,7 @@ export default function BookingWizard() {
 
   const canProceedFromStep = [
     !!draft.primaryApplicantId,
-    !!draft.unitId && !!draft.basePricePaise,
+    !!draft.unitId && !!draft.basePricePaise && !!draft.gstRateId,
     true,
     draft.planMode === 'template' ? !!draft.paymentPlanTemplateId : draft.customInstallments.length > 0,
     true,
@@ -331,6 +355,17 @@ export default function BookingWizard() {
 
   async function submitBooking() {
     setError('');
+    // The base line can never fall back to anything else — every other
+    // line falls back to IT, and the server rejects the whole booking if
+    // any line's GST rate can't be resolved. Catching this here means a
+    // real reason on screen instead of a round trip to find out.
+    if (!draft.gstRateId) {
+      setError(
+        'Select a GST rate for the base sale price before booking — every PLC/charge line ' +
+          "that doesn't carry its own rate falls back to this one.",
+      );
+      return;
+    }
     setSubmitting(true);
     try {
       const booking = await api<{ id: string }>('/bookings', {
@@ -342,7 +377,7 @@ export default function BookingWizard() {
           bookingDate: draft.bookingDate,
           paymentPlanTemplateId: draft.planMode === 'template' ? draft.paymentPlanTemplateId : undefined,
           costLines: [
-            { kind: 'BASE', label: 'Base Sale Price', baseAmountPaise: draft.basePricePaise },
+            { kind: 'BASE', label: 'Base Sale Price', baseAmountPaise: draft.basePricePaise, gstRateId: draft.gstRateId },
             ...(unitPlcs ?? []).map((p) => ({ kind: 'PLC', label: p.plcType.name, baseAmountPaise: p.amountPaise })),
             ...(unitCharges ?? []).map((c) => ({
               kind: 'OTHER',
@@ -524,6 +559,28 @@ export default function BookingWizard() {
                 </div>
               )}
 
+              {selectedUnit && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">GST rate for base price</label>
+                  <select
+                    value={draft.gstRateId ?? ''}
+                    onChange={(e) => setDraft({ ...draft, gstRateId: e.target.value || undefined })}
+                    className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="">Select…</option>
+                    {activeGstRates.map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.rate}% — {r.description}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Any PLC or charge line without its own GST rate falls back to this one — leave it
+                    unset and booking will be blocked, not silently taxed at 0%.
+                  </p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-slate-700">Booking date</label>
                 <input
@@ -697,6 +754,14 @@ export default function BookingWizard() {
               )}
               <div className="flex justify-between"><dt className="text-slate-500">Unit</dt><dd className="font-medium">{draft.unitLabel}</dd></div>
               <div className="flex justify-between"><dt className="text-slate-500">Base price</dt><dd className="font-medium">{draft.basePricePaise ? formatInr(BigInt(draft.basePricePaise)) : '—'}</dd></div>
+              <div className="flex justify-between">
+                <dt className="text-slate-500">GST rate (base line)</dt>
+                <dd className={`font-medium ${draft.gstRateId ? '' : 'text-red-600'}`}>
+                  {draft.gstRateId
+                    ? activeGstRates.find((r) => r.id === draft.gstRateId)?.rate + '%'
+                    : 'Not set — booking will be rejected'}
+                </dd>
+              </div>
               {unitPlcs?.map((p) => (
                 <div key={p.id} className="flex justify-between"><dt className="text-slate-500">{p.plcType.name}</dt><dd className="font-medium">{formatInr(BigInt(p.amountPaise))}</dd></div>
               ))}

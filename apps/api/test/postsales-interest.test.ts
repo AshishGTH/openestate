@@ -67,7 +67,7 @@ describeIf('Interest accrual (fixed clock, hand-computed fixtures)', () => {
     const applicantId = await makeApplicant(systemPrisma, fx.companyId);
     const booking = await svc.bookings.createBooking(
       fx.companyId,
-      { unitId, primaryApplicantId: applicantId, coApplicantIds: [], bookingDate: new Date('2026-01-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: amount }] },
+      { unitId, primaryApplicantId: applicantId, coApplicantIds: [], bookingDate: new Date('2026-01-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: amount , gstRateId: fx.defaultGstRateId }] },
       fx.userId,
     );
     await systemPrisma.booking.update({ where: { id: booking.id }, data: { interestRuleId } });

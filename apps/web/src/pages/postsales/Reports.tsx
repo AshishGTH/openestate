@@ -39,6 +39,7 @@ const REPORT_TYPES = [
   { key: 'project-rollup', label: 'Project-wise rollup', csv: true },
   { key: 'company-rollup', label: 'Company-wide rollup', csv: false },
   { key: 'birthday-list', label: 'Birthday list (next 30 days)', csv: true },
+  { key: 'zero-gst-bookings', label: 'Zero-GST bookings (no rate on base line)', csv: true },
 ] as const;
 
 type ReportKey = (typeof REPORT_TYPES)[number]['key'];
@@ -53,6 +54,7 @@ const ENDPOINTS: Record<ReportKey, string> = {
   'project-rollup': '/reports/postsales/project-rollup',
   'company-rollup': '/reports/postsales/company-rollup',
   'birthday-list': '/reports/postsales/birthday-list',
+  'zero-gst-bookings': '/reports/postsales/zero-gst-bookings',
 };
 
 const CSV_FILENAME: Record<ReportKey, string> = {
@@ -65,6 +67,7 @@ const CSV_FILENAME: Record<ReportKey, string> = {
   'project-rollup': 'project-rollup.csv',
   'company-rollup': 'company-rollup.csv',
   'birthday-list': 'birthday-list.csv',
+  'zero-gst-bookings': 'zero-gst-bookings.csv',
 };
 
 export default function ReportsPage() {
@@ -167,6 +170,12 @@ function ReportBody({ reportKey, data }: { reportKey: ReportKey; data: unknown }
   if (reportKey === 'birthday-list') {
     return (
       <SimpleTable headers={['Name', 'Phone', 'Birthday (MM-DD)', 'Days Away']} rows={data as TupleRows} />
+    );
+  }
+
+  if (reportKey === 'zero-gst-bookings') {
+    return (
+      <SimpleTable headers={['Booking #', 'Applicant', 'Unit', 'Booking Date']} rows={data as TupleRows} />
     );
   }
 

@@ -176,7 +176,7 @@ describeIf('Notification triggers (Phase 6 commit 4)', () => {
         primaryApplicantId: applicantId,
         coApplicantIds: [],
         bookingDate: new Date('2026-06-01'),
-        costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: price }],
+        costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: price , gstRateId: fx.defaultGstRateId }],
       },
       fx.userId,
     );
@@ -197,7 +197,7 @@ describeIf('Notification triggers (Phase 6 commit 4)', () => {
         primaryApplicantId: applicantId,
         coApplicantIds: [],
         bookingDate: new Date('2026-06-01'),
-        costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: L(10_00_000) }],
+        costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: L(10_00_000) , gstRateId: fx.defaultGstRateId }],
       },
       fx.userId,
     );
@@ -238,7 +238,7 @@ describeIf('Notification triggers (Phase 6 commit 4)', () => {
         primaryApplicantId: applicantId,
         coApplicantIds: [],
         bookingDate: new Date('2026-06-01'),
-        costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: L(10_00_000) }],
+        costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: L(10_00_000) , gstRateId: fx.defaultGstRateId }],
       },
       fx.userId,
     );

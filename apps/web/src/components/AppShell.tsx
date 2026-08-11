@@ -96,6 +96,35 @@ function GstConfigBanner() {
   );
 }
 
+/**
+ * Bookings created before the base-line GST rate picker existed can have
+ * a BASE cost line with no gstRateId — snapshotted at 0% GST, silently,
+ * on every generated document. `BookingCostLine` is immutable, so these
+ * can't be fixed retroactively; this only tells an admin they exist and
+ * exactly where to find them, mirroring GstConfigBanner's shape.
+ */
+function ZeroGstBookingsBanner() {
+  const { hasPermission } = useAuth();
+  const canRead = hasPermission(PERMISSIONS.REPORTS_SALES_VIEW);
+  const { data } = useQuery<{ count: number }>({
+    queryKey: ['zero-gst-bookings-count'],
+    queryFn: () => api('/reports/postsales/zero-gst-bookings-count'),
+    enabled: canRead,
+  });
+  if (!canRead || !data || data.count === 0) return null;
+
+  return (
+    <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800 lg:px-6">
+      {data.count} booking{data.count === 1 ? '' : 's'} {data.count === 1 ? 'has' : 'have'} no GST rate
+      on its base cost line — printed documents for {data.count === 1 ? 'it' : 'them'} may show ₹0 GST.{' '}
+      <Link to="/postsales/reports" className="font-medium underline hover:text-amber-900">
+        Post-sales → Reports → "Zero-GST bookings"
+      </Link>{' '}
+      lists the affected booking numbers.
+    </div>
+  );
+}
+
 export default function AppShell() {
   const { user, logout, hasPermission } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -189,6 +218,7 @@ export default function AppShell() {
         </header>
 
         <GstConfigBanner />
+        <ZeroGstBookingsBanner />
 
         <main className="flex-1 p-4 lg:p-6">
           <Outlet />

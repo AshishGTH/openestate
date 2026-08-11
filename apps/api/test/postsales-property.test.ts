@@ -135,7 +135,7 @@ describeIf('Ledger property: balance == Σ(ledger) for random sequences', () => 
             primaryApplicantId: applicantId,
             coApplicantIds: [],
             bookingDate: new Date('2026-06-01'),
-            costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: 30_00_000n * 100n }],
+            costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: 30_00_000n * 100n , gstRateId: fx.defaultGstRateId }],
           },
           fx.userId,
         );

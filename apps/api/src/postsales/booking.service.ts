@@ -91,12 +91,12 @@ export class BookingService {
         // charge type's gstRateId (ChargeType.gstRateId, set via Masters),
         // else the booking's own BASE line rate. PLC lines never carry a
         // chargeType (PlcType is unrelated to GstRate) so they always fall
-        // through to the base rate. Deliberately never left to resolve to
-        // an implicit 0%: an unset rate silently understates an invoice,
-        // which costs real money without ever raising an error — the one
-        // case genuinely exempt from GST is a booking whose BASE line
-        // itself has no gstRateId, which is an explicit whole-booking
-        // choice, not a per-line oversight.
+        // through to the base rate. A line that still has no resolvable
+        // rate after all three steps is a hard error, never an implicit
+        // 0% — an unset rate would silently understate an invoice, and
+        // the whole point of this resolution order is that a builder who
+        // sets a base-line rate never has to think about it again for
+        // PLC/OTHER lines that don't carry their own.
         const baseLineGstRateId = dto.costLines.find((l) => l.kind === 'BASE')?.gstRateId ?? null;
 
         for (let i = 0; i < dto.costLines.length; i++) {
@@ -110,8 +110,16 @@ export class BookingService {
           }
           effectiveGstRateId ??= baseLineGstRateId;
 
+          if (!effectiveGstRateId) {
+            throw new BadRequestException(
+              `Cannot determine GST for cost line "${line.label}": select a GST rate for the ` +
+                'base line (fixes every line that falls back to it), or set one for this charge ' +
+                'type in Masters.',
+            );
+          }
+
           let ratePercent = 0;
-          if (effectiveGstRateId) {
+          {
             const gr = await tx.gstRate.findFirst({ where: { id: effectiveGstRateId, companyId } });
             if (!gr) throw new NotFoundException(`GST rate ${effectiveGstRateId} not found`);
             ratePercent = Number(gr.rate);

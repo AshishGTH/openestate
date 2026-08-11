@@ -35,6 +35,41 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dependency; it resolved only by package-manager hoisting. Now
   declared explicitly.
 
+- **Correctness fix: a booking's cost lines could silently price at 0%
+  GST.** A booking's `BASE` cost line had no GST rate picker anywhere in
+  the wizard, and every PLC/charge line without its own rate falls back
+  to the base line's — so with no rate ever set on the base line, an
+  entire booking (base price, PLC, and any charge type without its own
+  configured GST rate) taxed at 0%, with no error and no on-screen
+  signal. Unlike the other gaps found on the same pre-pilot walkthrough,
+  this one produces a printed document — a demand letter, a statement —
+  with the wrong tax amount and nothing to flag it, the same failure
+  shape as the bounced-cheque-still-counted-as-collected bug fixed
+  earlier this project's history. Fixed at the point of resolution, not
+  just in the UI: `BookingService.createBooking` now rejects the whole
+  booking (full rollback, no partial row written) if any cost line's GST
+  rate can't be resolved through the existing own → charge-type →
+  base-line chain, naming the specific line and pointing at the base
+  line first since setting it fixes every line that falls back to it.
+  `BookingWizard.tsx` gained a GST-rate picker on the base line
+  (auto-selected only when exactly one active rate exists — never
+  guessed otherwise) so a real admin hits this before submitting, not
+  after.
+
+  **Bookings created before this fix are not retroactively corrected.**
+  `BookingCostLine` is an immutable snapshot by design (the same
+  invariant behind rate-master edits never touching an existing
+  booking), and there is no way to know after the fact what the correct
+  historical GST rate should have been without a human reviewing each
+  affected booking — the same reasoning already applied to the
+  `CompanyConfig.gstStateCode` correctness fix. A boot-time log
+  (non-fatal, mirrors the existing GST-config-completeness check) and a
+  persistent admin banner now surface a count of affected bookings
+  instead, linking to a new "Zero-GST bookings" report
+  (`Post-sales → Reports`, CSV export included) listing the exact
+  booking numbers — **check any already-issued document for these
+  bookings before relying on it.**
+
 ## [0.2.3]
 
 ### Security

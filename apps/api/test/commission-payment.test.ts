@@ -64,7 +64,7 @@ describeIf('CommissionPaymentService: lifecycle + 194-H TDS', () => {
     const applicantId = await makeApplicant(systemPrisma, fx.companyId);
     const booking = await svc.bookings.createBooking(
       fx.companyId,
-      { unitId, primaryApplicantId: applicantId, coApplicantIds: [], bookingDate: new Date('2026-06-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: price }] },
+      { unitId, primaryApplicantId: applicantId, coApplicantIds: [], bookingDate: new Date('2026-06-01'), costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: price , gstRateId: fx.defaultGstRateId }] },
       fx.userId,
     );
     await systemPrisma.booking.update({ where: { id: booking.id }, data: { brokerId } });
