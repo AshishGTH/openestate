@@ -1,4 +1,16 @@
-# Systematic VM Admin Walkthrough — Final Report
+# Systematic VM Admin Walkthrough — Final Report (v0.1.x-era, superseded)
+
+> **This report is historical, not current.** It captures a walkthrough
+> against a pre-v0.2.0 build — before PLC/unit-charge pricing, layout-plan
+> and construction-photo uploads, custom field values, staff ticket
+> replies, and a dedicated pre-pilot walkthrough (v0.2.3) all landed.
+> Several items this report lists as gaps ("Backend functionality with NO
+> frontend at all") are now built; see each item's own entry in
+> [docs/todo.md](../docs/todo.md) for current status, and CLAUDE.md's
+> Decisions log for the full narrative of everything that's happened
+> since. Kept for its historical record of the original ~20-bug
+> walkthrough that established this project's "verify in a real browser"
+> rule — not as a live status document.
 
 Eleven modules walked start-to-finish in a real browser against the live VM
 (10.10.10.46, native systemd+nginx install, no Docker): Setup/Auth, Company,

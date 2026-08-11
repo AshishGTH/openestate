@@ -113,7 +113,9 @@ collection summaries, applicant ledgers, unit-sold vs available, broker
 commission summaries, and more — every report exports to CSV.
 
 ### 7. Customization — this isn't just for real estate
-- **Custom fields** on any entity, admin-configurable, no code required.
+- **Custom fields** on Applicants, Inquiries, and Projects, admin-configurable,
+  no code required (Unit-level definitions can be created but not yet
+  filled in — see "Known gaps" below).
 - **Terminology overrides** — rename "Unit" to "Product," "Booking" to
   "Order," and the whole app relabels itself. A proof-of-concept
   `generic-sales` plugin ships showing exactly how far this goes.
@@ -127,7 +129,7 @@ commission summaries, and more — every report exports to CSV.
 
 ## What OpenEstate deliberately does not do (yet)
 
-Honesty matters more than a feature list. As of v0.1.0:
+Honesty matters more than a feature list. As of v0.2.3:
 - No native mobile app (the portals are mobile-web, not App Store apps).
 - No built-in accounting/GL beyond the receivables ledger — it's not a
   full accounting system; export to your accountant's tool.
@@ -139,6 +141,36 @@ Honesty matters more than a feature list. As of v0.1.0:
 - The plugin system trusts first-party, in-repo plugins (reviewed code),
   not arbitrary third-party uploads — it is not yet a sandboxed
   marketplace.
+
+## Known gaps before you run a real project on this
+
+Found on a full pre-pilot walkthrough, not from a spec — each is a real
+limitation of the current build, not a bug you'll hit by accident:
+
+- **You cannot edit a project once created.** No screen exists to fix a
+  typo'd RERA number, address, or location after the fact. Get these
+  right at creation, or expect to rebuild the project.
+- **GST on a booking's cost lines defaults to 0% unless every line names
+  its own rate.** There is no UI yet to set a rate on a booking's base
+  price line, and any preferential-location or other charge line without
+  its own GST rate falls back to that base line's rate. Until you assign
+  a GST rate to your charge-type masters (Admin → Masters → Charge
+  Types), or the base-line picker ships, a booking's printed cost
+  breakup can show ₹0 GST — check every generated document before
+  sending it to a customer.
+- **Custom fields on a Unit can be defined but never captured or shown.**
+  Applicant, Inquiry, and Project custom fields work end to end; a
+  Unit-level custom field has no form to fill it in on today.
+- **No staff screen to publish a construction update or photo** to the
+  customer portal's progress section — the capability exists in the API
+  only.
+- **No staff screen to view or reply to a customer's support ticket** —
+  a customer can raise and read replies on their own ticket; a staff
+  member cannot yet do either through the product (email/phone in the
+  meantime).
+
+See [docs/todo.md](https://github.com/AshishGTH/openestate/blob/master/docs/todo.md)
+for the complete, maintained list, including smaller deferred items.
 
 ---
 
