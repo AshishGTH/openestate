@@ -90,7 +90,13 @@ export const createProjectSchema = z
 
 export type CreateProjectDto = z.infer<typeof createProjectSchema>;
 
-export const updateProjectSchema = createProjectSchema.partial().strict();
+// `code` is excluded, not just optional: it's used as an external lookup
+// key (inquiry-import.service.ts matches bulk-import rows by project code),
+// and the DB's @@unique([companyId, code]) has no clean-error handling on
+// this path today — changing it has no real use case for the RERA/address/
+// location typo-fix this endpoint exists for, so it's simplest to make it
+// immutable rather than add P2002 handling for a field nobody needs to edit.
+export const updateProjectSchema = createProjectSchema.omit({ code: true }).partial().strict();
 export type UpdateProjectDto = z.infer<typeof updateProjectSchema>;
 
 // ── Zod Schemas: Tower ──────────────────────────────────────

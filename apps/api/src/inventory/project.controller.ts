@@ -47,6 +47,14 @@ export class ProjectController {
     return this.projectService.findOne(user.companyId, id);
   }
 
+  @Get(':id/booking-count')
+  @RequirePermissions(PERMISSIONS.INVENTORY_PROJECT_READ)
+  @ApiOperation({ summary: 'Count bookings under this project (for edit-form warnings)' })
+  bookingCount(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.projectService.bookingCount(user.companyId, id).then((count) => ({ count }));
+  }
+
   @Post()
   @RequirePermissions(PERMISSIONS.INVENTORY_PROJECT_CREATE)
   @ApiOperation({ summary: 'Create project' })
