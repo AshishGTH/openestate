@@ -3,13 +3,23 @@ import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, downloadFile } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
-import { CustomFieldDisplay, useCustomFieldDefinitions } from '../../components/CustomFieldInputs';
+import CustomFieldInputs, {
+  CustomFieldDisplay,
+  buildCustomFieldPayload,
+  useCustomFieldDefinitions,
+} from '../../components/CustomFieldInputs';
 
 interface Project {
   id: string;
   name: string;
   code: string;
   reraNumber: string | null;
+  projectTypeId: string | null;
+  areaLocationId: string | null;
+  address: string | null;
+  description: string | null;
+  startDate: string | null;
+  expectedEndDate: string | null;
   customFields?: Record<string, unknown> | null;
 }
 
@@ -116,6 +126,19 @@ export default function ProjectDetailPage() {
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaError, setMediaError] = useState('');
 
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editReraNumber, setEditReraNumber] = useState('');
+  const [editProjectTypeId, setEditProjectTypeId] = useState('');
+  const [editAreaLocationId, setEditAreaLocationId] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editStartDate, setEditStartDate] = useState('');
+  const [editExpectedEndDate, setEditExpectedEndDate] = useState('');
+  const [editCustomFieldValues, setEditCustomFieldValues] = useState<Record<string, unknown>>({});
+  const [editError, setEditError] = useState('');
+  const [showAreaChangeConfirm, setShowAreaChangeConfirm] = useState(false);
+
   const { data: project } = useQuery<Project>({
     queryKey: ['project', id],
     queryFn: () => api(`/projects/${id}`),
@@ -172,6 +195,74 @@ export default function ProjectDetailPage() {
     queryFn: () => api(`/projects/${id}/media`),
     enabled: !!id,
   });
+
+  const { data: projectTypes } = useQuery<{ data: MasterOption[] }>({
+    queryKey: ['masters', 'project-types', 'all'],
+    queryFn: () => api('/masters/project-types?limit=100'),
+    enabled: showEditForm,
+  });
+  const { data: areaLocations } = useQuery<{ data: MasterOption[] }>({
+    queryKey: ['masters', 'area-locations', 'all'],
+    queryFn: () => api('/masters/area-locations?limit=100'),
+    enabled: showEditForm,
+  });
+  // Cheap count, fetched only while the edit form is open — drives whether
+  // an areaLocationId change needs the GST-consequence confirmation below.
+  const { data: bookingCountRes } = useQuery<{ count: number }>({
+    queryKey: ['project-booking-count', id],
+    queryFn: () => api(`/projects/${id}/booking-count`),
+    enabled: !!id && showEditForm,
+  });
+
+  const handleOpenEdit = () => {
+    if (!project) return;
+    setEditName(project.name);
+    setEditReraNumber(project.reraNumber ?? '');
+    setEditProjectTypeId(project.projectTypeId ?? '');
+    setEditAreaLocationId(project.areaLocationId ?? '');
+    setEditAddress(project.address ?? '');
+    setEditDescription(project.description ?? '');
+    setEditStartDate(project.startDate ? project.startDate.slice(0, 10) : '');
+    setEditExpectedEndDate(project.expectedEndDate ? project.expectedEndDate.slice(0, 10) : '');
+    setEditCustomFieldValues(project.customFields ?? {});
+    setEditError('');
+    setShowAreaChangeConfirm(false);
+    setShowEditForm(true);
+  };
+
+  const submitEdit = async () => {
+    setEditError('');
+    try {
+      await api(`/projects/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: editName,
+          reraNumber: editReraNumber.trim() === '' ? undefined : editReraNumber.trim(),
+          projectTypeId: editProjectTypeId === '' ? undefined : editProjectTypeId,
+          areaLocationId: editAreaLocationId === '' ? undefined : editAreaLocationId,
+          address: editAddress.trim() === '' ? undefined : editAddress.trim(),
+          description: editDescription.trim() === '' ? undefined : editDescription.trim(),
+          startDate: editStartDate === '' ? undefined : editStartDate,
+          expectedEndDate: editExpectedEndDate === '' ? undefined : editExpectedEndDate,
+          customFields: buildCustomFieldPayload(projectDefs, editCustomFieldValues),
+        }),
+      });
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      setShowEditForm(false);
+      setShowAreaChangeConfirm(false);
+    } catch (err) {
+      setEditError((err as Error).message);
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    const areaChanged = project != null && editAreaLocationId !== (project.areaLocationId ?? '');
+    if (areaChanged && (bookingCountRes?.count ?? 0) > 0 && !showAreaChangeConfirm) {
+      setShowAreaChangeConfirm(true);
+      return;
+    }
+    await submitEdit();
+  };
 
   const addPlcMutation = useApiMutation<UnitPlc, Record<string, unknown>>(
     'POST',
@@ -317,11 +408,113 @@ export default function ProjectDetailPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-slate-900">{project.name}</h1>
-      <p className="text-sm text-slate-500">
-        Code: {project.code} {project.reraNumber && <>· RERA: {project.reraNumber}</>}
-      </p>
-      <CustomFieldDisplay definitions={projectDefs} values={project.customFields} />
+      {!showEditForm ? (
+        <>
+          <div className="flex items-start justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold text-slate-900">{project.name}</h1>
+              <p className="text-sm text-slate-500">
+                Code: {project.code} {project.reraNumber && <>· RERA: {project.reraNumber}</>}
+              </p>
+              {project.address && <p className="text-sm text-slate-500">{project.address}</p>}
+            </div>
+            <button
+              onClick={handleOpenEdit}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Edit Project
+            </button>
+          </div>
+          <CustomFieldDisplay definitions={projectDefs} values={project.customFields} />
+        </>
+      ) : (
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <h2 className="text-lg font-medium text-slate-800">Edit Project</h2>
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Name</label>
+              <input type="text" value={editName} onChange={(e) => setEditName(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Code</label>
+              <input type="text" value={project.code} disabled className="mt-1 block w-full rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500" />
+              <p className="mt-1 text-xs text-slate-500">
+                Cannot be changed — bulk inquiry import matches projects to this code, so changing it would break existing CSV mappings.
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">RERA Number</label>
+              <input type="text" value={editReraNumber} onChange={(e) => setEditReraNumber(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Project Type</label>
+              <select value={editProjectTypeId} onChange={(e) => setEditProjectTypeId(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                <option value="">Select…</option>
+                {projectTypes?.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Area/Location</label>
+              <select value={editAreaLocationId} onChange={(e) => setEditAreaLocationId(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                <option value="">Select…</option>
+                {areaLocations?.data?.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">Drives GST place-of-supply for new bookings only — existing bookings keep their original rate.</p>
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-slate-700">Address</label>
+              <input type="text" value={editAddress} onChange={(e) => setEditAddress(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="block text-sm font-medium text-slate-700">Description</label>
+              <textarea value={editDescription} onChange={(e) => setEditDescription(e.target.value)} rows={3} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Start Date</label>
+              <input type="date" value={editStartDate} onChange={(e) => setEditStartDate(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Expected End Date</label>
+              <input type="date" value={editExpectedEndDate} onChange={(e) => setEditExpectedEndDate(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+          </div>
+          <CustomFieldInputs
+            definitions={projectDefs}
+            values={editCustomFieldValues}
+            onChange={(key, value) => setEditCustomFieldValues((prev) => ({ ...prev, [key]: value }))}
+          />
+
+          {showAreaChangeConfirm && (
+            <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-4">
+              <p className="text-sm text-amber-900">
+                This project has {bookingCountRes?.count} existing booking{bookingCountRes?.count === 1 ? '' : 's'}. Their
+                GST is already locked to the current location and will not change. New bookings after this save will use
+                the new location&apos;s state code for GST. Continue?
+              </p>
+              <div className="mt-3 flex gap-3">
+                <button onClick={submitEdit} className="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700">
+                  Yes, save
+                </button>
+                <button onClick={() => setShowAreaChangeConfirm(false)} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {!showAreaChangeConfirm && (
+            <div className="mt-3 flex gap-3">
+              <button onClick={handleSaveEdit} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">
+                Save
+              </button>
+              <button onClick={() => setShowEditForm(false)} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                Cancel
+              </button>
+            </div>
+          )}
+          {editError && <p className="mt-2 text-sm text-red-600">{editError}</p>}
+        </div>
+      )}
 
       <section className="mt-6">
         <div className="flex items-center justify-between">

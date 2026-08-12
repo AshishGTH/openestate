@@ -7,17 +7,10 @@ they're expected to land. Each entry should say *what*, *why deferred*, and
 ## Must-fix-before-pilot (found on the pre-pilot walkthrough)
 
 Three gaps found walking a realistic project through the real product.
-One has since been fixed; the other two remain deliberately sized here
-rather than fixed inline — each is a real, standalone UI/feature build,
-not a wiring fix:
+Two have since been fixed; the remaining one stays deliberately sized
+here rather than fixed inline — it's a real, standalone UI/feature
+build, not a wiring fix:
 
-- **No project-edit UI at all.** A project holds the RERA number, the
-  address, and — via its `AreaLocation` — the state code that drives GST
-  place-of-supply. Today the only repair path for a typo in any of these
-  is "rebuild the project and all its inventory," which is not a real
-  option once a project has towers/units/bookings. Needs a real edit
-  screen wired to the existing `PATCH /projects/:id` endpoint (the
-  backend already accepts partial updates; only the UI is missing).
 - **No staff UI to publish a construction update or attach a progress
   photo.** `ConstructionUpdateAdminController` is fully built and tested
   (Phase 6, real IDOR tests, real Playwright coverage on the portal
@@ -26,6 +19,16 @@ not a wiring fix:
   if a developer hand-crafts one via the raw API — confirmed by grep,
   not assumption. Needs a list+create+photo-attach screen, comparable in
   size to the Letter Templates admin page built for v0.2's PDF gap.
+
+**Fixed: project edit.** `ProjectDetail.tsx` now has an Edit Project
+form wired to the pre-existing `PATCH /projects/:id` endpoint (the
+backend already accepted partial updates; only the UI was missing).
+`code` is excluded from the update schema — it's used to match projects
+during bulk inquiry CSV import, so it's immutable rather than
+error-handled. Changing `areaLocationId` on a project with existing
+bookings shows a confirmation naming the booking count first (existing
+bookings' GST is a one-time snapshot and is never retroactively
+altered). See CHANGELOG.md's `[Unreleased]` entry.
 
 **Fixed: the base-line GST rate picker.** A booking's cost-line GST
 resolution (`booking.service.ts`) falls back through: the line's own
@@ -40,6 +43,20 @@ the whole booking if any line's rate can't be resolved, and
 CHANGELOG.md's `[Unreleased]` entry for the full writeup, including how
 already-created zero-GST bookings are surfaced (boot-time log + admin
 banner + a "Zero-GST bookings" CSV report) rather than silently altered.
+
+## `Project.isActive` has no enforced meaning anywhere
+
+Found while building the project-edit form: `isActive` is set at
+creation (default `true`), shown as a read-only Yes/No column on the
+Projects list — and never read anywhere else. Grepped the whole API for
+any query filtering on it (booking's available-unit lookup, reports,
+the portal's `getMyProperties`) — zero hits. Deliberately left out of
+the edit form rather than shipping a toggle whose effect is unclear:
+flipping it today would look like it does something and do nothing.
+Before adding it to the edit form, decide and implement what it should
+actually gate — the obvious candidates are hiding an inactive project
+from new-booking unit selection and/or from the portal — and update
+this note once it has a real, tested effect.
 
 ## UNIT custom field values have no frontend capture or display path
 

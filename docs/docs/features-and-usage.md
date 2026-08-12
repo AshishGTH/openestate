@@ -147,9 +147,13 @@ Honesty matters more than a feature list. As of v0.2.3:
 Found on a full pre-pilot walkthrough, not from a spec — each is a real
 limitation of the current build, not a bug you'll hit by accident:
 
-- **You cannot edit a project once created.** No screen exists to fix a
-  typo'd RERA number, address, or location after the fact. Get these
-  right at creation, or expect to rebuild the project.
+- ~~You cannot edit a project once created~~ — **fixed.** ProjectDetail
+  now has an Edit Project form (name, RERA number, address, location,
+  dates, custom fields). The project `code` stays fixed — it's used to
+  match projects during bulk inquiry CSV import — and changing a
+  project's area/location warns about the booking count first if the
+  project already has bookings (existing bookings' GST is unaffected;
+  it's a one-time snapshot).
 - ~~GST on a booking's cost lines defaults to 0% unless every line names
   its own rate~~ — **fixed.** The booking wizard now has a GST-rate
   picker on the base price line, and the booking is rejected outright

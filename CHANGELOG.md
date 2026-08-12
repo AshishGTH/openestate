@@ -5,6 +5,29 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **You can now edit a project after creation.** There was previously no
+  edit screen at all — a typo'd RERA number or address meant rebuilding
+  the project and its entire inventory. `ProjectDetail.tsx` now has an
+  Edit Project form for name, RERA number, project type, area/location,
+  address, description, and start/expected-end dates, reusing the same
+  custom-field inputs as project creation. `PATCH /projects/:id` already
+  existed and was already permission-gated (`INVENTORY_PROJECT_UPDATE`)
+  — this release only adds the missing UI, plus one backend change:
+  `code` is now immutable (dropped from the update schema, shown
+  read-only) since it's used to match projects during bulk inquiry CSV
+  import — changing it would silently break existing CSV mappings.
+
+  Editing a project's area/location changes GST place-of-supply for
+  **new** bookings only — every existing booking's GST is a one-time
+  snapshot taken at booking creation and is never retroactively altered
+  (same immutable-snapshot design as rate-master edits). When the
+  project already has bookings, changing the area/location now shows a
+  confirmation naming the booking count before saving, so the
+  consequence is visible rather than silent; projects with zero bookings
+  save immediately with no extra step.
+
 ### Fixed
 
 - **Upgrading an existing install left the Super Admin role unable to use

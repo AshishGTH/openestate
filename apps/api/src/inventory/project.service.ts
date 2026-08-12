@@ -103,6 +103,19 @@ export class ProjectService {
     );
   }
 
+  // Cheap existence-style count for the frontend's areaLocationId-change
+  // confirmation dialog — Booking has no denormalized projectId, so this
+  // joins unit -> floor -> tower -> project. Only ever called for one
+  // project at a time from the edit form, not a list endpoint.
+  async bookingCount(companyId: string, id: string) {
+    await this.findOne(companyId, id);
+    return runWithTenant({ companyId }, () =>
+      withTenantTx(this.tenantPrisma, companyId, (tx) =>
+        tx.booking.count({ where: { unit: { floor: { tower: { projectId: id } } } } }),
+      ),
+    );
+  }
+
   async remove(companyId: string, id: string) {
     await this.findOne(companyId, id);
     return runWithTenant({ companyId }, () =>

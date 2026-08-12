@@ -3,6 +3,7 @@ import {
   changeRateSchema,
   importUnitRowSchema,
   createProjectSchema,
+  updateProjectSchema,
   bulkGenerateUnitsSchema,
   uploadCategorySchema,
 } from '../src/inventory';
@@ -89,6 +90,24 @@ describe('Inventory zod schemas', () => {
       const result = createProjectSchema.safeParse({
         name: 'Green Valley',
         code: 'GV 001',
+      });
+      expect(result.success).toBe(false);
+    });
+  });
+
+  describe('updateProjectSchema', () => {
+    it('accepts a partial edit with no code field', () => {
+      const result = updateProjectSchema.safeParse({
+        name: 'Green Valley Renamed',
+        reraNumber: 'RERA/2026/001',
+      });
+      expect(result.success).toBe(true);
+    });
+
+    it('rejects a body that includes code — immutable, not just optional', () => {
+      const result = updateProjectSchema.safeParse({
+        name: 'Green Valley Renamed',
+        code: 'GV-002',
       });
       expect(result.success).toBe(false);
     });
