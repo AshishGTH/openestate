@@ -303,7 +303,6 @@ export default function BookingWizard() {
     if (!draft.gstRateId && activeGstRates.length === 1) {
       setDraft((d) => (d.gstRateId ? d : { ...d, gstRateId: activeGstRates[0].id }));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeGstRates.length]);
 
   async function persistDraft(next: DraftData) {
