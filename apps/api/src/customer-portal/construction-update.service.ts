@@ -91,6 +91,20 @@ export class ConstructionUpdateService {
     );
   }
 
+  /**
+   * DB rows only — matches ProjectMediaService.remove()'s existing
+   * precedent of not cleaning up the physical file from disk. Media rows
+   * cascade via the schema's onDelete: Cascade.
+   */
+  async remove(companyId: string, id: string) {
+    return withTenantTx(this.tenantPrisma, companyId, async (tx) => {
+      const update = await tx.constructionUpdate.findFirst({ where: { id } });
+      if (!update) throw new NotFoundException('Construction update not found');
+      await tx.constructionUpdate.delete({ where: { id } });
+      return { id };
+    });
+  }
+
   /** Staff download — direct company-scoped lookup, same shape as DocumentService.getDocumentBytes. */
   async getMediaBytes(companyId: string, mediaId: string): Promise<{ buffer: Buffer; mimeType: string; originalName: string }> {
     const media = await this.systemPrisma.constructionUpdateMedia.findFirst({ where: { id: mediaId, companyId } });

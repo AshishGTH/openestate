@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   HttpStatus,
@@ -56,6 +57,14 @@ export class ConstructionUpdateAdminController {
   listForProject(@Query('projectId') projectId: string, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.updates.listForProject(user.companyId, projectId);
+  }
+
+  @Delete(':id')
+  @RequirePermissions(PERMISSIONS.ADMIN_CONSTRUCTION_UPDATE_MANAGE)
+  @ApiOperation({ summary: 'Delete a construction update (and its photos)' })
+  remove(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.updates.remove(user.companyId, id);
   }
 
   @Get('media/:mediaId/download')
