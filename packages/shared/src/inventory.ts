@@ -77,8 +77,12 @@ export const createProjectSchema = z
     areaLocationId: z.string().uuid().optional(),
     address: z.string().optional(),
     description: z.string().optional(),
-    startDate: z.coerce.date().optional(),
-    expectedEndDate: z.coerce.date().optional(),
+    // .nullable() before .optional(): same null-coercion-to-epoch fix as
+    // master.dto.ts's GstRate/TdsRule effectiveTo — z.coerce.date() alone
+    // turns an explicit `null` into `new Date(null)` (1970-01-01) instead
+    // of clearing the (nullable) column.
+    startDate: z.coerce.date().nullable().optional(),
+    expectedEndDate: z.coerce.date().nullable().optional(),
     isActive: z.boolean().default(true),
     // v0.2.3: admin-defined custom field values. Deliberately untyped
     // here — the real shape is per-company runtime data, so it is

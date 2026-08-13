@@ -27,7 +27,14 @@ export const createGstRateSchema = z
     rate: z.number().min(0).max(100),
     description: z.string().min(1).max(255),
     effectiveFrom: z.coerce.date(),
-    effectiveTo: z.coerce.date().optional(),
+    // .nullable() must come BEFORE .optional() so an explicit `null` short-
+    // circuits ZodNullable and never reaches z.coerce.date()'s `new Date(x)`
+    // coercion — `new Date(null)` is a valid Date (epoch), not an error, so
+    // without .nullable() a caller's explicit "clear this field" (null) was
+    // silently coerced to 1970-01-01 instead of clearing the column. Omitted
+    // (undefined) still means "leave unchanged" on update, "open-ended" on
+    // create — only explicit null now means "clear".
+    effectiveTo: z.coerce.date().nullable().optional(),
     isActive: z.boolean().default(true),
     sortOrder: z.number().int().min(0).default(0),
   })
@@ -44,7 +51,9 @@ export const createTdsRuleSchema = z
     ratePercent: z.number().min(0).max(100),
     thresholdPaise: z.coerce.bigint().min(0n),
     effectiveFrom: z.coerce.date(),
-    effectiveTo: z.coerce.date().optional(),
+    // See createGstRateSchema's effectiveTo comment — same null-vs-undefined
+    // fix, same reason.
+    effectiveTo: z.coerce.date().nullable().optional(),
     description: z.string().max(255).optional(),
     isActive: z.boolean().default(true),
     sortOrder: z.number().int().min(0).default(0),

@@ -388,4 +388,68 @@ describeIf('e2e master/admin-entity creation: real HTTP through the full guard p
       .expect(400);
     expect(conflict.body.message).toContain('Set an end date on it first');
   });
+
+  // Regression for the null-coercion-to-epoch bug: `PATCH .../gst-rates/:id`
+  // with `effectiveTo: null` used to silently become 1970-01-01 instead of
+  // clearing the column, because z.coerce.date() ran `new Date(null)`
+  // (a "valid" epoch Date) before any null-check. Also covers the sibling
+  // fix in TdsRule and the `??`-vs-`'key' in dto` bug in both services'
+  // update() overlap re-validation.
+  it('PATCH .../gst-rates/:id with effectiveTo: null clears the column instead of coercing to epoch', async () => {
+    const { agent, token, csrf } = await loginWithCsrf();
+    const created = await agent
+      .post('/api/v1/masters/gst-rates')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-CSRF-Token', csrf)
+      .send({ rate: 9, description: `Clearable GST rate ${TAG}`, effectiveFrom: '2031-01-01', effectiveTo: '2031-12-31', isActive: true, sortOrder: 4 })
+      .expect(201);
+    expect(created.body.effectiveTo?.slice(0, 10)).toBe('2031-12-31');
+
+    const cleared = await agent
+      .patch(`/api/v1/masters/gst-rates/${created.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-CSRF-Token', csrf)
+      .send({ effectiveTo: null })
+      .expect(200);
+    expect(cleared.body.effectiveTo).toBeNull();
+
+    // Omitting the key entirely (a PATCH that touches only `rate`) must
+    // leave the now-cleared effectiveTo untouched — not re-apply some
+    // stale default via `??`.
+    const untouched = await agent
+      .patch(`/api/v1/masters/gst-rates/${created.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-CSRF-Token', csrf)
+      .send({ rate: 10 })
+      .expect(200);
+    expect(untouched.body.effectiveTo).toBeNull();
+    expect(untouched.body.rate).toBe('10');
+  });
+
+  it('PATCH .../tds-rules/:id with effectiveTo: null clears the column instead of coercing to epoch', async () => {
+    const { agent, token, csrf } = await loginWithCsrf();
+    const created = await agent
+      .post('/api/v1/masters/tds-rules')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-CSRF-Token', csrf)
+      .send({
+        section: `194-${TAG % 1000000}`,
+        ratePercent: 1,
+        thresholdPaise: '5000000',
+        effectiveFrom: '2031-01-01',
+        effectiveTo: '2031-12-31',
+        isActive: true,
+        sortOrder: 4,
+      })
+      .expect(201);
+    expect(created.body.effectiveTo?.slice(0, 10)).toBe('2031-12-31');
+
+    const cleared = await agent
+      .patch(`/api/v1/masters/tds-rules/${created.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-CSRF-Token', csrf)
+      .send({ effectiveTo: null })
+      .expect(200);
+    expect(cleared.body.effectiveTo).toBeNull();
+  });
 });

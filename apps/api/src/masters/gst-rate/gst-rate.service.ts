@@ -88,7 +88,11 @@ export class GstRateService {
     const existing = await this.findOne(companyId, id);
 
     const from = dto.effectiveFrom ?? existing.effectiveFrom;
-    const to = dto.effectiveTo ?? existing.effectiveTo;
+    // `??` would treat an explicit `effectiveTo: null` (clear it) the same
+    // as "not provided" (keep existing) — both are nullish. Check key
+    // presence instead so a clear is validated against the NEW (open-ended)
+    // range, not the stale one.
+    const to = 'effectiveTo' in dto ? dto.effectiveTo : existing.effectiveTo;
     const overlap = await this.findOverlap(this.systemPrisma, companyId, from, to, id);
     if (overlap) this.throwOverlap(overlap);
 
