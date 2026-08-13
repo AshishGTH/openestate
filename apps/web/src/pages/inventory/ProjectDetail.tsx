@@ -77,6 +77,19 @@ interface ProjectMediaItem {
   originalName: string;
 }
 
+interface ConstructionUpdateMediaItem {
+  id: string;
+  originalName: string;
+}
+
+interface ConstructionUpdateItem {
+  id: string;
+  title: string;
+  description: string | null;
+  publishedAt: string;
+  media: ConstructionUpdateMediaItem[];
+}
+
 const rupees = (paise: string | number) => `₹${(Number(paise) / 100).toLocaleString('en-IN')}`;
 
 const MEDIA_CATEGORY_LABELS: Record<string, string> = {
@@ -125,6 +138,12 @@ export default function ProjectDetailPage() {
   const [mediaCategory, setMediaCategory] = useState<'layout_plan' | 'brochure' | 'photo'>('layout_plan');
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaError, setMediaError] = useState('');
+
+  const [newUpdateTitle, setNewUpdateTitle] = useState('');
+  const [newUpdateDescription, setNewUpdateDescription] = useState('');
+  const [newUpdatePublishedAt, setNewUpdatePublishedAt] = useState('');
+  const [updateError, setUpdateError] = useState('');
+  const [updatePhotoFiles, setUpdatePhotoFiles] = useState<Record<string, File | null>>({});
 
   const [showEditForm, setShowEditForm] = useState(false);
   const [editName, setEditName] = useState('');
@@ -193,6 +212,12 @@ export default function ProjectDetailPage() {
   const { data: projectMedia } = useQuery<ProjectMediaItem[]>({
     queryKey: ['project-media', id],
     queryFn: () => api(`/projects/${id}/media`),
+    enabled: !!id,
+  });
+
+  const { data: constructionUpdates } = useQuery<ConstructionUpdateItem[]>({
+    queryKey: ['construction-updates', id],
+    queryFn: () => api(`/admin/construction-updates?projectId=${id}`),
     enabled: !!id,
   });
 
@@ -331,6 +356,51 @@ export default function ProjectDetailPage() {
   const handleDeleteMedia = async (mediaId: string) => {
     await api(`/projects/${id}/media/${mediaId}`, { method: 'DELETE' });
     qc.invalidateQueries({ queryKey: ['project-media', id] });
+  };
+
+  const handleCreateUpdate = async () => {
+    setUpdateError('');
+    if (!newUpdateTitle.trim() || !newUpdatePublishedAt) {
+      setUpdateError('Title and date are required');
+      return;
+    }
+    try {
+      await api('/admin/construction-updates', {
+        method: 'POST',
+        body: JSON.stringify({
+          projectId: id,
+          title: newUpdateTitle.trim(),
+          description: newUpdateDescription.trim() === '' ? undefined : newUpdateDescription.trim(),
+          publishedAt: newUpdatePublishedAt,
+        }),
+      });
+      setNewUpdateTitle('');
+      setNewUpdateDescription('');
+      setNewUpdatePublishedAt('');
+      qc.invalidateQueries({ queryKey: ['construction-updates', id] });
+    } catch (err) {
+      setUpdateError((err as Error).message);
+    }
+  };
+
+  const handleAddUpdatePhoto = async (updateId: string) => {
+    const file = updatePhotoFiles[updateId];
+    if (!file) return;
+    setUpdateError('');
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      await api(`/admin/construction-updates/${updateId}/media`, { method: 'POST', body: formData });
+      setUpdatePhotoFiles((prev) => ({ ...prev, [updateId]: null }));
+      qc.invalidateQueries({ queryKey: ['construction-updates', id] });
+    } catch (err) {
+      setUpdateError((err as Error).message);
+    }
+  };
+
+  const handleDeleteUpdate = async (updateId: string) => {
+    await api(`/admin/construction-updates/${updateId}`, { method: 'DELETE' });
+    qc.invalidateQueries({ queryKey: ['construction-updates', id] });
   };
 
   const createTowerMutation = useApiMutation<Tower, Record<string, unknown>>(
@@ -856,6 +926,96 @@ export default function ProjectDetailPage() {
             </button>
           </div>
           {mediaError && <p className="mt-2 text-sm text-red-600">{mediaError}</p>}
+        </div>
+      </section>
+
+      <section className="mt-6">
+        <h2 className="text-lg font-medium text-slate-800">Construction Updates</h2>
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-4">
+          <ul className="space-y-3 text-sm text-slate-700">
+            {(constructionUpdates ?? []).length === 0 ? (
+              <li className="text-slate-500">No construction updates published yet</li>
+            ) : (
+              constructionUpdates!.map((u) => (
+                <li key={u.id} className="rounded-md border border-slate-100 p-3">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="font-medium text-slate-800">{u.title}</div>
+                      <div className="text-xs text-slate-500">{u.publishedAt.slice(0, 10)}</div>
+                      {u.description && <p className="mt-1 text-slate-600">{u.description}</p>}
+                    </div>
+                    <button onClick={() => handleDeleteUpdate(u.id)} className="text-xs text-red-600 hover:text-red-800">
+                      Delete
+                    </button>
+                  </div>
+                  {u.media.length > 0 && (
+                    <ul className="mt-2 space-y-1">
+                      {u.media.map((m) => (
+                        <li key={m.id}>
+                          <button
+                            onClick={() => downloadFile(`/admin/construction-updates/media/${m.id}/download`, m.originalName)}
+                            className="text-xs text-blue-600 hover:text-blue-800"
+                          >
+                            {m.originalName}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="file"
+                      onChange={(e) =>
+                        setUpdatePhotoFiles((prev) => ({ ...prev, [u.id]: e.target.files?.[0] ?? null }))
+                      }
+                      className="block text-xs"
+                    />
+                    <button
+                      onClick={() => handleAddUpdatePhoto(u.id)}
+                      disabled={!updatePhotoFiles[u.id]}
+                      className="rounded-md bg-blue-600 px-2 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      Add Photo
+                    </button>
+                  </div>
+                </li>
+              ))
+            )}
+          </ul>
+          <div className="mt-4 grid grid-cols-1 gap-2 border-t border-slate-100 pt-3 sm:grid-cols-4 sm:items-end">
+            <div>
+              <label className="block text-xs font-medium text-slate-700">Title</label>
+              <input
+                value={newUpdateTitle}
+                onChange={(e) => setNewUpdateTitle(e.target.value)}
+                className="mt-1 block w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700">Description</label>
+              <input
+                value={newUpdateDescription}
+                onChange={(e) => setNewUpdateDescription(e.target.value)}
+                className="mt-1 block w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-700">Date</label>
+              <input
+                type="date"
+                value={newUpdatePublishedAt}
+                onChange={(e) => setNewUpdatePublishedAt(e.target.value)}
+                className="mt-1 block w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+              />
+            </div>
+            <button
+              onClick={handleCreateUpdate}
+              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+            >
+              Publish Update
+            </button>
+          </div>
+          {updateError && <p className="mt-2 text-sm text-red-600">{updateError}</p>}
         </div>
       </section>
     </div>

@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFixture } from '../fixtures/state';
 import { login, controlAfterLabel } from '../fixtures/actions';
-import { API_URL, PORTAL_URL } from '../playwright.config';
+import { PORTAL_URL } from '../playwright.config';
 
 // v0.2.2: layout plan/brochure/photo uploads, plus a real serving route
 // for the pre-existing construction-progress gallery (it had an upload
@@ -53,36 +53,41 @@ test('staff uploads a layout plan through the real UI; the customer sees and dow
   expect(download.suggestedFilename()).toBe(fileName);
 });
 
-test('a staff-published construction-progress photo renders as a real image in the portal, not just a count', async ({ page, request }) => {
+test('staff publishes a construction update with a photo through the real UI; the customer sees it and the photo renders in the portal', async ({ page }) => {
   const fixture = readFixture('ticketReply');
-
-  // No staff web UI exists for construction updates at all (confirmed by
-  // grep before writing this — CLAUDE.md's PORTALS-phase entry) — the
-  // backend has always been API-only for this. Set up over real HTTP,
-  // same authenticated session shape supertest e2e tests use, then
-  // verify the RENDER through the actual browser, which is the thing
-  // this scenario exists to prove.
-  const loginRes = await request.post(`${API_URL}/api/v1/auth/login`, {
-    data: { email: fixture.adminEmail, password: fixture.adminPassword },
-  });
-  expect(loginRes.ok()).toBeTruthy();
-  const { accessToken } = (await loginRes.json()) as { accessToken: string };
-  const csrf = (await request.storageState()).cookies.find((c) => c.name === 'openestate_csrf')?.value;
-  const authHeaders = { Authorization: `Bearer ${accessToken}`, 'X-CSRF-Token': csrf ?? '' };
-
   const updateTitle = `E2E Construction Update ${Date.now()}`;
-  const createRes = await request.post(`${API_URL}/api/v1/admin/construction-updates`, {
-    headers: authHeaders,
-    data: { projectId: fixture.projectId, title: updateTitle, publishedAt: new Date().toISOString() },
-  });
-  expect(createRes.ok()).toBeTruthy();
-  const update = (await createRes.json()) as { id: string };
 
-  const mediaRes = await request.post(`${API_URL}/api/v1/admin/construction-updates/${update.id}/media`, {
-    headers: authHeaders,
-    multipart: { file: { name: 'progress.png', mimeType: 'image/png', buffer: ONE_PX_PNG } },
+  // The staff UI for this now exists (Construction Updates panel on
+  // ProjectDetail) — drives the real form/upload, not raw HTTP, which is
+  // the whole point of this scenario per CLAUDE.md's "frontend
+  // request-construction changes need a browser click-through" rule: a
+  // request built by hand can never prove the frontend builds it correctly.
+  await login(page, fixture);
+  await page.goto('/inventory/projects');
+  await page.getByRole('link', { name: fixture.projectName }).click();
+
+  await controlAfterLabel(page, 'Title').fill(updateTitle);
+  await controlAfterLabel(page, 'Description').fill('3rd floor slab cast');
+  await controlAfterLabel(page, 'Date').fill(new Date().toISOString().slice(0, 10));
+  const [createResponse] = await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith('/admin/construction-updates') && r.request().method() === 'POST'),
+    page.getByRole('button', { name: 'Publish Update' }).click(),
+  ]);
+  expect(createResponse.ok()).toBe(true);
+  await expect(page.getByText(updateTitle)).toBeVisible();
+
+  const updateRow = page.locator('li', { hasText: updateTitle });
+  await updateRow.locator('input[type="file"]').setInputFiles({
+    name: 'progress.png',
+    mimeType: 'image/png',
+    buffer: ONE_PX_PNG,
   });
-  expect(mediaRes.ok()).toBeTruthy();
+  const [mediaResponse] = await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith('/media') && r.request().method() === 'POST'),
+    updateRow.getByRole('button', { name: 'Add Photo' }).click(),
+  ]);
+  expect(mediaResponse.ok()).toBe(true);
+  await expect(updateRow.getByText('progress.png')).toBeVisible();
 
   await loginPortal(page, fixture.portalIdentifier!, fixture.portalPassword!);
   await page.goto(`${PORTAL_URL}/portal/property`);
