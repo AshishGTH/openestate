@@ -240,6 +240,13 @@ export default function MastersPage() {
           setFormError(`${f.label} is required`);
           return;
         }
+        // An emptied date field means "clear it" — send null explicitly
+        // rather than omitting the key, or a PATCH could never reopen a
+        // rate once effectiveTo was set (the backend's `.partial()` schema
+        // treats an omitted key as "leave unchanged", not "clear").
+        if (f.type === 'date') {
+          body[f.key] = null;
+        }
         continue;
       }
       body[f.key] = f.type === 'number' ? (f.moneyField ? String(Math.round(Number(raw) * 100)) : Number(raw)) : raw;
