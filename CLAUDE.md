@@ -4702,6 +4702,69 @@ real keyboard, or a Playwright run (`apps/e2e`, which drives Chromium
 through CDP and DOES send real key events) — state which one was used
 rather than reporting "verified in a browser" flatly.
 
+### Project edit — last must-fix-before-pilot gap, verified live on the VM
+
+`ProjectDetail.tsx` gained an Edit Project form wired to the pre-existing
+`PATCH /projects/:id` (endpoint and `INVENTORY_PROJECT_UPDATE` permission
+both already existed — only the UI was missing, the same shape as the
+media/ticket gaps earlier in this pass). `code` is dropped from
+`updateProjectSchema` (via `.omit({ code: true })`, not left merely
+optional) rather than left PATCH-able with no P2002 handling — it's used
+to match projects during bulk inquiry CSV import, so changing it has no
+real use case and would silently break existing CSV mappings.
+`isActive` is deliberately left out of the edit form: grepped the whole
+API and found it enforced nowhere (not booking eligibility, not reports,
+not the portal), so shipping a toggle for it now would imply an effect
+it doesn't have — noted in `docs/todo.md` for whoever gives it a real
+meaning later.
+
+Editing `areaLocationId` only changes GST place-of-supply for **new**
+bookings — confirmed by grep, not inference: `Booking.placeOfSupplyStateCode`
+has exactly two writers in the codebase (`booking.service.ts`'s
+`createBooking`, and `transfer.service.ts`'s carry-forward of the OLD
+booking's value), and `ProjectService.update()` never touches `Booking`
+at all. A new `GET /projects/:id/booking-count` endpoint (cheap join:
+`Booking.unit.floor.tower.projectId`) drives a confirmation dialog in
+the UI, shown only when the project already has ≥1 booking — a project
+with zero bookings saves immediately, no extra step, per explicit
+instruction not to warn about a consequence that doesn't exist.
+
+Tests: a direct-service test proves an `areaLocationId` edit leaves an
+existing booking's `placeOfSupplyStateCode` byte-identical; a second
+proves the edit leaves towers/floors/units/rate-revisions untouched
+(the first time a project WITH real inventory has been mutated by a
+test in this suite); a cross-company edit 404s; a schema test proves
+`code` is rejected, not merely ignored. Two new Playwright scenarios
+(persistence after reload; the confirmation dialog + booking
+untouched). Full monorepo suite green (69/69 files, 450/450 tests)
+before deploy.
+
+**Verified live on the VM** (by now relocated to `10.95.204.131`, see
+memory — IPs on this project drift session to session, always confirm
+current), not just locally: `upgrade-native.sh` ran clean (no pending
+migration — this release touched no schema; permissions already
+synced), health endpoint returned `{"status":"ok","db":"ok","redis":"ok","version":"0.2.3"}`.
+Real browser click-through on "QA Towers 723789" (7 real bookings):
+Code field correctly read-only with the CSV-import explanation; changed
+RERA number, address, and `areaLocationId` (Sector 137 Noida → Mumbai);
+Save correctly produced the confirmation dialog naming the exact
+booking count ("This project has 7 existing bookings...") before
+persisting; reload confirmed persistence. Direct DB read after save
+confirmed the project's `area_location_id` genuinely changed to Mumbai
+(`state_code = '27'`) while every one of the 7 bookings'
+`place_of_supply_state_code` was unchanged from before the edit (NULL/
+`09`, matching pre-existing legacy demo data — none flipped to `27`),
+which is the one thing an automated test alone couldn't prove against
+this real, non-test dataset. This click-through required a one-time
+password reset on `admin@demo-realty.com` via `reset-admin-password.sh`
+(no other known login existed) — blocked once by the auto-mode safety
+classifier as a credential mutation, then explicitly approved by the
+user in chat before proceeding. The account's password is now
+`ClickThrough#Verify1`, not its original value, since resetting a
+password by definition means the old hash isn't recoverable — noted
+here so a future session doesn't waste time on a stale credential
+assumption for this specific demo account.
+
 ### Standing rule: an upgrade assertion must assert the OUTCOME, not the mechanism
 
 The `native-upgrade` CI job spent four consecutive releases watching
