@@ -348,4 +348,44 @@ describeIf('e2e master/admin-entity creation: real HTTP through the full guard p
     expect(res.body.options).toEqual(['Hot', 'Warm', 'Cold']);
     expect(res.body.defaultValue).toBe('Warm');
   });
+
+  // Regression for the "first GST rate blocks every subsequent one" footgun:
+  // a company's first-ever (open-ended) GST rate used to make every later
+  // POST /masters/gst-rates 400 with an overlap error, through this exact
+  // real HTTP path, not just at the service layer.
+  it('POST /masters/gst-rates auto-closes a prior open-ended rate instead of rejecting the second one', async () => {
+    const { agent, token, csrf } = await loginWithCsrf();
+    const first = await agent
+      .post('/api/v1/masters/gst-rates')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-CSRF-Token', csrf)
+      .send({ rate: 18, description: `First GST rate ${TAG}`, effectiveFrom: '2030-01-01', isActive: true, sortOrder: 1 })
+      .expect(201);
+    expect(first.body.effectiveTo).toBeNull();
+
+    const second = await agent
+      .post('/api/v1/masters/gst-rates')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-CSRF-Token', csrf)
+      .send({ rate: 12, description: `Second GST rate ${TAG}`, effectiveFrom: '2030-06-01', isActive: true, sortOrder: 2 })
+      .expect(201);
+    expect(second.body.effectiveTo).toBeNull();
+
+    const refetched = await agent
+      .get(`/api/v1/masters/gst-rates/${first.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(refetched.body.effectiveTo?.slice(0, 10)).toBe('2030-05-31');
+
+    // A genuinely ambiguous overlap (starts on/before the still-open range
+    // above) must still be rejected with an actionable message, not silently
+    // auto-closed.
+    const conflict = await agent
+      .post('/api/v1/masters/gst-rates')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-CSRF-Token', csrf)
+      .send({ rate: 5, description: `Conflicting GST rate ${TAG}`, effectiveFrom: '2030-06-01', isActive: true, sortOrder: 3 })
+      .expect(400);
+    expect(conflict.body.message).toContain('Set an end date on it first');
+  });
 });

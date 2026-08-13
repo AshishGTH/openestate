@@ -57,14 +57,30 @@ export class GstRateService {
   }
 
   async create(companyId: string, dto: CreateGstRateDto) {
-    await this.validateNoOverlap(companyId, dto.effectiveFrom, dto.effectiveTo);
-
     return runWithTenant({ companyId }, () =>
-      withTenantTx(this.tenantPrisma, companyId, (tx) =>
-        tx.gstRate.create({
-          data: { ...dto, companyId },
-        }),
-      ),
+      withTenantTx(this.tenantPrisma, companyId, async (tx) => {
+        const overlap = await this.findOverlap(tx, companyId, dto.effectiveFrom, dto.effectiveTo);
+        if (overlap) {
+          // The common first-setup footgun: an admin's first (open-ended) GST
+          // rate blocks every subsequent one. Auto-close the prior range the
+          // day before the new one starts instead of rejecting — safe because
+          // GST is snapshotted per cost line at booking time (see
+          // booking.service.ts's resolution comment); effectiveFrom/effectiveTo
+          // are never used to look up "the rate for a date" anywhere at
+          // runtime, only here, to keep ranges unambiguous. Any other overlap
+          // (a fixed-range rate, or a new range starting on/before the
+          // existing one) is a genuine conflict and still rejected.
+          if (overlap.effectiveTo === null && dto.effectiveFrom > overlap.effectiveFrom) {
+            const closedTo = new Date(dto.effectiveFrom);
+            closedTo.setUTCDate(closedTo.getUTCDate() - 1);
+            await tx.gstRate.update({ where: { id: overlap.id }, data: { effectiveTo: closedTo } });
+          } else {
+            this.throwOverlap(overlap);
+          }
+        }
+
+        return tx.gstRate.create({ data: { ...dto, companyId } });
+      }),
     );
   }
 
@@ -73,7 +89,8 @@ export class GstRateService {
 
     const from = dto.effectiveFrom ?? existing.effectiveFrom;
     const to = dto.effectiveTo ?? existing.effectiveTo;
-    await this.validateNoOverlap(companyId, from, to, id);
+    const overlap = await this.findOverlap(this.systemPrisma, companyId, from, to, id);
+    if (overlap) this.throwOverlap(overlap);
 
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>
@@ -91,7 +108,9 @@ export class GstRateService {
     );
   }
 
-  private async validateNoOverlap(
+  private async findOverlap(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    client: { gstRate: { findFirst: (args: any) => Promise<any> } },
     companyId: string,
     from: Date,
     to: Date | null | undefined,
@@ -112,11 +131,17 @@ export class GstRateService {
       where.id = { not: excludeId };
     }
 
-    const overlap = await this.systemPrisma.gstRate.findFirst({ where });
-    if (overlap) {
-      throw new BadRequestException(
-        `Date range overlaps with existing GST rate "${overlap.description}" (${overlap.effectiveFrom.toISOString().slice(0, 10)} – ${overlap.effectiveTo?.toISOString().slice(0, 10) ?? 'open'})`,
-      );
-    }
+    return client.gstRate.findFirst({ where });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private throwOverlap(overlap: any): never {
+    const isOpenEnded = overlap.effectiveTo === null;
+    throw new BadRequestException(
+      `Date range overlaps with existing GST rate "${overlap.description}" (${overlap.effectiveFrom.toISOString().slice(0, 10)} – ${overlap.effectiveTo?.toISOString().slice(0, 10) ?? 'open'})` +
+        (isOpenEnded
+          ? '. Set an end date on it first, or start this rate\'s range after it.'
+          : ''),
+    );
   }
 }
