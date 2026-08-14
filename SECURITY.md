@@ -39,10 +39,13 @@ deliberately open `CORS_ALLOWLIST`).
 
 ## Supported versions
 
-v0.1.0 is the first tagged release. Until a v0.2.0 or later release exists,
-only `v0.1.0` and the `main` branch are supported — this section will be
-expanded with a real version-support table once there is more than one
-tagged release to choose between.
+Only the latest tagged release and the `master` branch are supported.
+OpenEstate is pre-1.0 and does not yet maintain parallel patch branches
+for older minor releases — see the [releases page](https://github.com/AshishGTH/openestate/releases)
+for the current version and [CHANGELOG.md](CHANGELOG.md) for what changed
+since the one before it. If you're running an older tagged release,
+upgrade to the latest before reporting — we'll ask you to reproduce there
+first unless the report itself explains why that isn't possible.
 
 ## Project security posture
 

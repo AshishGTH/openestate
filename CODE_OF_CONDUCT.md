@@ -37,7 +37,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement at **TODO: add a real contact email/address before publishing this repo publicly** (e.g. conduct@your-domain.tld). All complaints will be reviewed and investigated promptly and fairly.
+Instances of abusive, harassing, or otherwise unacceptable behavior can be reported the same way this project handles security vulnerabilities (see [SECURITY.md](SECURITY.md)): for a report that itself needs to stay private, use this repository's **GitHub Security Advisories** ("Report a vulnerability" under the repo's Security tab) even though the incident isn't a security bug — it's the one channel here that isn't public by default. For anything that doesn't need that level of privacy, open a regular **GitHub Issue**. All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the reporter of any incident.
 
