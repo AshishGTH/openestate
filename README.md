@@ -8,15 +8,16 @@ OpenEstate is AGPL-3.0 licensed. Install it natively on your own server —
 your own PostgreSQL and Redis, a systemd service, standard Linux paths —
 like you would Zabbix or Wazuh, not a stack of containers you don't control.
 
-> **Status: v0.2.3 — the core sales funnel works end to end for a first
+> **Status: v0.3.0 — the core sales funnel works end to end for a first
 > pilot, with a short list of known gaps worth reading before you rely on
 > it.** Auth/RBAC, multi-tenancy, inventory, pre-sales, the post-sales
-> ledger, brokers/commissions, both portals, plugins, webhooks and custom
-> fields are all built and exercised end to end in a real browser against
-> a real install. Before onboarding a real customer, read
+> ledger, brokers/commissions, both portals, plugins, webhooks, custom
+> fields, and staff-published construction updates are all built and
+> exercised end to end in a real browser against a real install. Before
+> onboarding a real customer, read
 > [Known gaps](docs/docs/features-and-usage.md#known-gaps-before-you-run-a-real-project-on-this) —
-> a project can't be edited after creation, and there's no staff screen
-> yet to publish construction updates or respond to support tickets.
+> a Unit-level custom field can be defined but never captured, and
+> `Project.isActive` has no enforced effect anywhere yet.
 > See [CHANGELOG.md](CHANGELOG.md) for what each release added and
 > [docs/todo.md](docs/todo.md) for the full gap list.
 
@@ -182,9 +183,13 @@ India-specific compliance handling, and the plugin boundary.
 
 ## Roadmap
 
+All phases below shipped as of v0.1.0; the project has followed semantic
+versioning (v0.1.0 → v0.3.0 and counting) since. See
+[CHANGELOG.md](CHANGELOG.md) for what each release since v0.1.0 added.
+
 | Phase | Scope |
 | --- | --- |
-| 0 | Scaffold, Docker Compose, CI *(this release)* |
+| 0 | Scaffold, Docker Compose, CI |
 | 1 | Auth, RBAC, multi-tenancy, masters framework, custom fields |
 | 2 | Inventory: projects, towers, floors, units, pricing |
 | 3 | Pre-sales: inquiries, assignment, follow-ups, funnel reports |
