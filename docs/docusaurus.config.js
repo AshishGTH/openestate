@@ -12,7 +12,7 @@ const config = {
   // going public rather than fabricating a placeholder icon.
   url: 'https://openestate.example.com',
   baseUrl: '/',
-  organizationName: 'openestate',
+  organizationName: 'AshishGTH',
   projectName: 'openestate',
   onBrokenLinks: 'throw',
   onBrokenMarkdownLinks: 'warn',
@@ -44,7 +44,7 @@ const config = {
         items: [
           { type: 'doc', docId: 'intro', position: 'left', label: 'Docs' },
           {
-            href: 'https://github.com/openestate/openestate',
+            href: 'https://github.com/AshishGTH/openestate',
             label: 'GitHub',
             position: 'right',
           },
