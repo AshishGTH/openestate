@@ -4803,3 +4803,17 @@ precisely why it is dangerous: it turns green for the same reason the
 bug survives. When adding any future upgrade assertion, write down the
 user-visible symptom the release is supposed to prevent, then assert
 *that*.
+
+### Verification VM IPs moved again — now tracked in docs/handoff.md, not here
+
+Both boxes' addresses changed once more (walkthrough box →
+`192.168.0.117`, fresh-install box → `192.168.0.118`). Per this file's
+own repeated observation that "IPs on this project drift session to
+session, always confirm current" — a living doc is a better home for a
+fact that changes every few sessions than another line buried in an
+append-only log a future session has to grep for. `docs/handoff.md`
+(new) now owns current IPs/credentials/SSH-key/sudo-pty notes; this log
+keeps the *why* (e.g. the sudo-rs nested-sudo-hang investigation
+elsewhere in this file) but no longer tries to be the source of truth
+for *current* addresses. Read `docs/handoff.md` first every session,
+same as this file.
