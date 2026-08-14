@@ -21,6 +21,10 @@ like you would Zabbix or Wazuh, not a stack of containers you don't control.
 > See [CHANGELOG.md](CHANGELOG.md) for what each release added and
 > [docs/todo.md](docs/todo.md) for the full gap list.
 
+**Live demo:** coming soon — not yet hosted publicly. In the meantime, the
+native install below takes about 15 minutes on a spare Ubuntu box (LAN or
+cloud) and seeds a demo company you can click through yourself.
+
 ## Why OpenEstate
 
 - **Self-hostable first.** No mandatory SaaS dependency. Optional integrations
