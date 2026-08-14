@@ -27,7 +27,7 @@ import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
 import * as argon2 from '@node-rs/argon2';
-import { ALL_PERMISSIONS, PERMISSIONS } from '@openestate/shared';
+import { ALL_PERMISSIONS, PERMISSIONS, SEED_GST_RATES, SEED_TDS_RULES } from '@openestate/shared';
 import { makeClients, seedCompany, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
@@ -451,5 +451,96 @@ describeIf('e2e master/admin-entity creation: real HTTP through the full guard p
       .send({ effectiveTo: null })
       .expect(200);
     expect(cleared.body.effectiveTo).toBeNull();
+  });
+
+  // Regression for "the seed ships master data the API's own validation
+  // rejects": packages/db/prisma/seed.ts inserts SEED_GST_RATES/
+  // SEED_TDS_RULES directly via Prisma, bypassing GstRateService/
+  // TdsRuleService entirely — so nothing before this test ever proved a
+  // FRESH INSTALL's seeded rows could survive a real admin touching them
+  // through the validated endpoint. Posts the exact same shared data
+  // (packages/shared/src/seed-data.ts, the one seed.ts itself reads) in
+  // the exact order seed.ts inserts it, through the real HTTP pipeline —
+  // if this ever 400s, a fresh install starts with invalid master data.
+  it('seeded GST/TDS rate data round-trips through the real create validation, in seed order', async () => {
+    // Deliberately its OWN company, not this file's shared `fx` — an
+    // open-ended GstRate (SEED_GST_RATES' current-rate entry) collides
+    // with the overlap check against ANY other active rate the company
+    // already has, regardless of that rate's own dates (open-ended means
+    // "extends indefinitely"), and `fx` accumulates GST rates from every
+    // other test case/describe block in this file. A real fresh install
+    // has none of that baggage — this test's isolation is what makes it
+    // an honest proxy for one.
+    const rtCompany = await seedCompany(systemPrisma);
+    const rtRole = await systemPrisma.role.create({
+      data: { companyId: rtCompany.companyId, name: 'RT Admin', slug: `rt-admin-${TAG}`, isSystem: true },
+    });
+    const allPerms = await systemPrisma.permission.findMany();
+    const permByKey = new Map(allPerms.map((p: { key: string; id: string }) => [p.key, p.id]));
+    await systemPrisma.rolePermission.createMany({
+      data: ALL_PERMISSIONS.map((key) => ({ roleId: rtRole.id, permissionId: permByKey.get(key) })),
+    });
+    const rtEmail = `rt-admin-${TAG}@test.com`;
+    await systemPrisma.user.create({
+      data: {
+        companyId: rtCompany.companyId,
+        email: rtEmail,
+        passwordHash: await argon2.hash(STAFF_PASSWORD, { algorithm: argon2.Algorithm.Argon2id }),
+        name: 'RT Admin',
+        roleId: rtRole.id,
+        forcePasswordChange: false,
+      },
+    });
+
+    const agent = request.agent(app.getHttpServer());
+    const loginRes = await agent.post('/api/v1/auth/login').send({ email: rtEmail, password: STAFF_PASSWORD }).expect(200);
+    const token = loginRes.body.accessToken;
+    const csrf = extractCookie(loginRes.headers['set-cookie'], 'openestate_csrf');
+
+    // rtCompany's own default GST rate (seedCompany's fixed 2019-04-01–
+    // 2019-04-02 test-default row) is open-ended-adjacent enough to
+    // collide with SEED_GST_RATES' 2019-04-01-onward entry — same
+    // reasoning as above, deactivate it since nothing else uses this
+    // isolated company.
+    await agent
+      .patch(`/api/v1/masters/gst-rates/${rtCompany.defaultGstRateId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-CSRF-Token', csrf)
+      .send({ isActive: false })
+      .expect(200);
+
+    for (const rate of SEED_GST_RATES) {
+      const res = await agent
+        .post('/api/v1/masters/gst-rates')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-CSRF-Token', csrf)
+        .send({
+          rate: rate.rate,
+          description: rate.description,
+          effectiveFrom: rate.effectiveFrom.toISOString().slice(0, 10),
+          ...(rate.effectiveTo ? { effectiveTo: rate.effectiveTo.toISOString().slice(0, 10) } : {}),
+          sortOrder: rate.sortOrder,
+        });
+      expect(res.status, `POST gst-rates failed for "${rate.description}": ${JSON.stringify(res.body)}`).toBe(201);
+    }
+
+    for (const rule of SEED_TDS_RULES) {
+      const res = await agent
+        .post('/api/v1/masters/tds-rules')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-CSRF-Token', csrf)
+        .send({
+          section: rule.section,
+          ratePercent: rule.ratePercent,
+          thresholdPaise: rule.thresholdPaise.toString(),
+          effectiveFrom: rule.effectiveFrom.toISOString().slice(0, 10),
+          ...(rule.effectiveTo ? { effectiveTo: rule.effectiveTo.toISOString().slice(0, 10) } : {}),
+          description: rule.description,
+          sortOrder: rule.sortOrder,
+        });
+      expect(res.status, `POST tds-rules failed for "${rule.section}": ${JSON.stringify(res.body)}`).toBe(201);
+    }
+
+    await cleanupCompany(systemPrisma, rtCompany.companyId);
   });
 });

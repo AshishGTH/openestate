@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
-import { SYSTEM_ROLES, ROLE_PERMISSIONS, ROLE_DISPLAY_NAMES } from '@openestate/shared';
+import { SYSTEM_ROLES, ROLE_PERMISSIONS, ROLE_DISPLAY_NAMES, SEED_GST_RATES, SEED_TDS_RULES } from '@openestate/shared';
 import * as argon2 from '@node-rs/argon2';
 import { syncPermissions } from './sync-permissions';
 
@@ -214,48 +214,18 @@ async function main() {
   });
 
   console.log('Seeding GST rates...');
-  await prisma.gstRate.create({
-    data: {
-      companyId: company.id,
-      rate: 5,
-      description: 'GST 5% (Affordable Housing, HSN 9972)',
-      effectiveFrom: new Date('2019-04-01'),
-      sortOrder: 0,
-    },
-  });
-  await prisma.gstRate.create({
-    data: {
-      companyId: company.id,
-      rate: 12,
-      description: 'GST 12% (Non-Affordable, HSN 9972)',
-      effectiveFrom: new Date('2019-04-01'),
-      sortOrder: 1,
-    },
-  });
+  // Data lives in seed-gst-tds-rates.ts (shared with its own round-trip
+  // validation test) — see that file for why the dates are what they
+  // are. Insertion order matters: GstRateService.create()'s overlap
+  // check runs per row against whatever's already inserted.
+  for (const rate of SEED_GST_RATES) {
+    await prisma.gstRate.create({ data: { companyId: company.id, ...rate } });
+  }
 
   console.log('Seeding TDS rules...');
-  await prisma.tdsRule.create({
-    data: {
-      companyId: company.id,
-      section: '194-IA',
-      ratePercent: 1,
-      thresholdPaise: BigInt(50_00_000_00),
-      effectiveFrom: new Date('2019-09-01'),
-      description: 'TDS on transfer of immovable property',
-      sortOrder: 0,
-    },
-  });
-  await prisma.tdsRule.create({
-    data: {
-      companyId: company.id,
-      section: '194-H',
-      ratePercent: 5,
-      thresholdPaise: BigInt(15_000_00),
-      effectiveFrom: new Date('2019-09-01'),
-      description: 'TDS on commission or brokerage (Phase 5)',
-      sortOrder: 1,
-    },
-  });
+  for (const rule of SEED_TDS_RULES) {
+    await prisma.tdsRule.create({ data: { companyId: company.id, ...rule } });
+  }
 
   console.log('Seeding Phase 4 financial config...');
   // Supplier GST identity + cheque bounce charge on the company config.
