@@ -19,6 +19,18 @@ SRC_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=lib.sh
 source "${SCRIPT_DIR}/lib.sh"
 
+# The README's own documented clone (`sudo git clone ... /opt/openestate-src`)
+# leaves the checkout root-owned — Git 2.35.2+'s CVE-2022-24765 mitigation
+# then refuses every `git` command any NON-root admin runs against it
+# afterward ("dubious ownership"), including the routine `git pull` the
+# upgrade docs assume before every `upgrade-native.sh` run. `--system`
+# (not `--global`) so the exception applies for whichever admin account
+# actually SSHes in to run it, not just whoever happened to invoke this
+# installer. Found on a genuinely fresh clone-and-install pass, not by
+# review — a stranger following the README literally hits this the first
+# time they touch the checkout as themselves.
+git config --system --add safe.directory "$SRC_DIR" 2>/dev/null || true
+
 APP_USER="openestate"
 APP_GROUP="openestate"
 OPT_DIR="/opt/openestate"

@@ -12,6 +12,13 @@ SRC_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=lib.sh
 source "${SCRIPT_DIR}/lib.sh"
 
+# See install-native.sh's identical line for why: a root-owned checkout
+# (from the README's own `sudo git clone`) makes every `git` command a
+# non-root admin runs here (including the `git pull` this script's own
+# docs assume happens right before it) fail with "dubious ownership"
+# without this.
+git config --system --add safe.directory "$SRC_DIR" 2>/dev/null || true
+
 APP_USER="openestate"
 APP_GROUP="openestate"
 OPT_DIR="/opt/openestate"
