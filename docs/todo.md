@@ -7,12 +7,18 @@ they're expected to land. Each entry should say *what*, *why deferred*, and
 ## Must-fix-before-pilot (found on the pre-pilot walkthrough)
 
 Three gaps found walking a realistic project through the real product.
-Two have since been fixed; the remaining one stays deliberately sized
-here rather than fixed inline — it's a real, standalone UI/feature
-build, not a wiring fix:
+All three have since been fixed.
 
-- **No staff UI to publish a construction update or attach a progress
-  photo.** `ConstructionUpdateAdminController` is fully built and tested
+**Fixed: staff construction-update UI.** `ProjectDetail.tsx` now has a
+Construction Updates panel (create with title/description/date, attach
+photos, list, delete) wired to `ConstructionUpdateAdminController`,
+which was already fully built and tested (Phase 6, real IDOR tests,
+real Playwright coverage on the portal render side) but had zero
+caller anywhere in `apps/web`. See CHANGELOG.md's `[0.3.0]` entry.
+
+<!-- Original finding, kept for context on what "fixed" resolved: -->
+- ~~No staff UI to publish a construction update or attach a progress
+  photo.~~ `ConstructionUpdateAdminController` is fully built and tested
   (Phase 6, real IDOR tests, real Playwright coverage on the portal
   render side) but has zero caller anywhere in `apps/web`. A customer's
   portal "construction progress" section will only ever show something

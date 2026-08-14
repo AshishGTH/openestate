@@ -129,7 +129,7 @@ commission summaries, and more — every report exports to CSV.
 
 ## What OpenEstate deliberately does not do (yet)
 
-Honesty matters more than a feature list. As of v0.2.3:
+Honesty matters more than a feature list. As of v0.3.0:
 - No native mobile app (the portals are mobile-web, not App Store apps).
 - No built-in accounting/GL beyond the receivables ledger — it's not a
   full accounting system; export to your accountant's tool.
@@ -161,16 +161,22 @@ limitation of the current build, not a bug you'll hit by accident:
   Bookings created before this fix are unaffected (rates are
   immutable snapshots) — check Post-sales → Reports → "Zero-GST
   bookings" for any that need a manually-corrected document.
+- ~~No staff screen to publish a construction update or photo~~ —
+  **fixed.** `ProjectDetail.tsx` now has a Construction Updates panel:
+  create (title/description/date), attach photos, list, delete.
+- ~~No staff screen to view or reply to a customer's support ticket~~ —
+  **fixed.** Support → Tickets lists open tickets; the detail screen
+  replies and changes status.
 - **Custom fields on a Unit can be defined but never captured or shown.**
   Applicant, Inquiry, and Project custom fields work end to end; a
-  Unit-level custom field has no form to fill it in on today.
-- **No staff screen to publish a construction update or photo** to the
-  customer portal's progress section — the capability exists in the API
-  only.
-- **No staff screen to view or reply to a customer's support ticket** —
-  a customer can raise and read replies on their own ticket; a staff
-  member cannot yet do either through the product (email/phone in the
-  meantime).
+  Unit-level custom field has no form to fill it in on today — there's
+  no single-unit edit screen to hang one on yet (units are created via
+  Bulk-Generate or CSV import, not one at a time).
+- **`Project.isActive` has no enforced effect anywhere.** It's shown as
+  a read-only column and set at creation, but nothing — not
+  available-unit lookups, not reports, not the portal — reads it.
+  Deliberately left out of the project-edit form rather than shipping a
+  toggle that looks like it does something and doesn't.
 
 See [docs/todo.md](https://github.com/AshishGTH/openestate/blob/master/docs/todo.md)
 for the complete, maintained list, including smaller deferred items.
