@@ -4817,3 +4817,94 @@ keeps the *why* (e.g. the sudo-rs nested-sudo-hang investigation
 elsewhere in this file) but no longer tries to be the source of truth
 for *current* addresses. Read `docs/handoff.md` first every session,
 same as this file.
+
+### Pre-v0.3.0 fresh-install pass on the clean box — one real bug, one real environment gap
+
+Genuinely clean fresh-install verification (not an upgrade, not a reused
+checkout): the clean-install box had a prior session's install on it, so
+`uninstall.sh --purge` ran first (needs its confirmation word piped
+separately from the sudo password — feeding both as one stream of lines
+answers the WRONG prompt with the wrong line and silently no-ops the
+purge, first attempt did exactly this), then the database/roles were
+dropped and `/opt/openestate-src` removed by hand (purge doesn't touch
+Postgres or the old checkout, by design — see its own printed note).
+Confirmed genuinely clean (`/opt` empty, no `openestate` OS user, no
+nginx site, no systemd unit) before cloning fresh from the public GitHub
+URL and running `install-native.sh` exactly per the README.
+
+**Real bug: `git config --system --add safe.directory` was missing.**
+The README's own `sudo git clone .../opt/openestate-src` leaves the
+checkout root-owned; the very first `git log` run afterward as the
+non-root admin (something the upgrade docs assume happens routinely,
+right before every `upgrade-native.sh`) fails with "dubious ownership"
+(Git's CVE-2022-24765 mitigation). Invisible on the existing walkthrough
+box because that checkout predates this discipline and is user-owned by
+accident, not by design. Fixed in both `install-native.sh` and
+`upgrade-native.sh`.
+
+**Install itself completed cleanly, first try, prerequisites already
+present.** Could not re-verify the "prerequisite check reports all
+misses in one pass, with the Ubuntu-25.10-correct `postgresql` package
+name not `postgresql-16`" behavior live this session — that requires
+purging git/curl/node/postgresql/redis/nginx/build-essential/python3
+from the box, and a broad `apt-get purge` sweep including `python3*`
+risks breaking the VM's own tooling badly enough to need a reimage, so
+the safety classifier correctly blocked it. Verified by hand instead:
+the box's real `/etc/os-release` reports `ubuntu`/`25.10`, and
+`install-native.sh`'s own version-detection logic
+(`OS_MAJOR -lt 25`) evaluates false for 25.10, correctly selecting the
+`postgresql`/`postgresql-client` package names — matching the fix's own
+code comment, which already claims to have been VM-verified in a prior
+session. Not independently re-confirmed live; treat as inference from
+code + real OS values, not a screenshot, same honesty standard as the
+REPORTS-phase `is_reversed` backfill entry above.
+
+**Environment gap, not a code problem: browser automation (both
+`Claude_Browser__*` and `claude-in-chrome`) could not route to
+192.168.0.0/24 this session, though it reached the public internet
+fine** (confirmed: `https://example.com` loaded correctly in the same
+tab that got `chrome-error://chromewebdata/` for both VMs' IPs,
+repeatedly, across tool restarts). This same browser tooling DID reach
+the *previous* IP range (`10.95.204.x`) earlier in the project's
+history — so this looks like a real LAN-segment reachability change
+tied to the IP reassignment, not a stale-session artifact. Local
+`curl`/`node fetch` from the same machine reached both VMs fine the
+whole time, which is what made a functional fallback possible at all.
+**This means no session-2 functional check in this pass is backed by an
+actual browser** — every one of login/forced-password-change/booking/
+portal-invite-consume below was proven via direct HTTP (`node fetch`
+against `localhost` on the VM over SSH), not a real browser. This is
+explicitly a lesser proof than this file's own primary lesson demands
+(a `fetch`-based check cannot catch a Secure-cookie-over-HTTP class of
+bug — see the systematic-walkthrough issue #2 entry above, found
+specifically because curl/wget verification couldn't see it). The
+mitigating fact: `apps/e2e`'s `auth-2fa.spec.ts` already covers exactly
+that bug class with a REAL browser (Playwright/Chromium) against
+`NODE_ENV=production` over plain HTTP, and passed (14/14, this
+session, same commit) — so the one bug class most likely to hide from
+a fetch-based check specifically is independently covered elsewhere.
+Whoever picks this up next should still do one real-browser
+click-through on this box once browser-tooling network access to it is
+restored, rather than treating this session's fetch-based pass as
+equivalent.
+
+**Functional verification, all via direct HTTP against the box's own
+`localhost` (SSH), 12/12 checks green**: login with the seeded
+one-time password; `force-change-password` (confirmed for real by a
+second, independent login with the new password — the first pass's own
+success/failure report for this specific step was internally
+inconsistent, most likely a transient Node `fetch` client issue on the
+VM rather than a server bug, not chased further once the outcome was
+independently confirmed correct); a complete booking (project → tower →
+bulk-generated unit → applicant → booking, using the fixed seed's now-
+open-ended GST 5% rate → a custom payment plan); a portal invite
+created, consumed (sets a password), and logged into. Every wrong-shaped
+request hit along the way (inventory routes nest under
+`/projects/:id/...`, not a flat `/inventory/...`; `costLines` wants
+`label`/`baseAmountPaise` not `amountPaise`; portal-invite `channel` is
+`EMAIL`/`SMS` not freeform; a booking's place-of-supply must be set
+explicitly or via the project's Area Location, never guessed — the
+fail-loud check from the "Seed-only-reachable-data audit" entry doing
+exactly its job) was this session's own script guessing wrong, not a
+product bug — corrected against the real DTOs before treating anything
+as a finding.
