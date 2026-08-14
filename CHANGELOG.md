@@ -3,9 +3,21 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.3.0]
 
 ### Added
+
+- **Staff can now publish construction updates and photos to the customer
+  portal.** Backend and portal rendering have been complete since v0.2.2
+  — nothing in the staff app ever called the endpoint, so a builder
+  could never post an update through the product and the portal's
+  "Construction progress" section only ever showed something if a
+  developer hand-crafted one via the raw API. `ProjectDetail.tsx` gained
+  a Construction Updates panel (mirrors the existing Media panel):
+  create an update (title, description, date), attach photos (reusing
+  the existing upload module and per-project storage cap), list
+  existing updates, delete one. Publishing already fires the existing
+  portal-notification trigger — no wiring needed there.
 
 - **You can now edit a project after creation.** There was previously no
   edit screen at all — a typo'd RERA number or address meant rebuilding
@@ -92,6 +104,42 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`Post-sales → Reports`, CSV export included) listing the exact
   booking numbers — **check any already-issued document for these
   bookings before relying on it.**
+
+- **A company's first-ever, open-ended GST rate blocked creating a
+  second one.** The overlap check correctly refused two ambiguous,
+  simultaneously-active date ranges — but the only way out was for the
+  admin to notice the confusing error and manually set an end date on
+  the first rate before trying again. Creating a rate that would
+  overlap an existing open-ended range now auto-closes the prior range
+  the day before the new one starts, instead of rejecting — safe
+  because GST is snapshotted per cost line at booking time, never
+  looked up by date range at runtime. A genuinely ambiguous overlap (a
+  fixed-range rate, or a new range starting on/before an existing one)
+  is still rejected, now naming the conflicting rate.
+
+  **The seed itself shipped exactly this invalid state** — GST 5% and
+  GST 12% both open-ended from the same date — so every fresh install
+  started with master data the product's own validation would reject
+  if resubmitted. Fixed with real, verifiable dates: GST 12% now models
+  the pre-April-2019 scheme (closed), GST 5% the current one
+  (open-ended).
+
+- **A GST/TDS rate's end date could be set once and never cleared
+  again.** `PATCH` with an explicit `effectiveTo: null` silently
+  coerced to `1970-01-01` instead of clearing the column (the
+  underlying date-coercion library treats `null` as a valid date, epoch,
+  not as "no value" — an easy trap without an explicit guard).
+  `Masters.tsx` also never sent `null` for an emptied date field, so
+  even the fixed backend was unreachable from the UI. Both fixed; same
+  class of bug audited across every other optional date field in the
+  schema (Project's start/expected-end dates included).
+
+- Native installs: a fresh `sudo git clone` (as documented) leaves the
+  checkout root-owned, and Git's dubious-ownership protection then
+  refused every `git` command a non-root admin ran against it
+  afterward — including the routine `git pull` before every upgrade.
+  `install-native.sh`/`upgrade-native.sh` now add the necessary
+  exception automatically.
 
 ## [0.2.3]
 
