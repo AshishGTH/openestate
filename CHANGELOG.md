@@ -3,6 +3,60 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.1]
+
+First real pilot-user feedback, triaged and fixed. Three critical bugs
+(hit hourly by a working sales team), two "check before building" items
+that turned out to be backend-complete, and two security leaks found
+along the way.
+
+### Fixed
+
+- **A rep's own inquiry could silently reassign to admin.** `InquiryService.create()`
+  ran round-robin unconditionally whenever a project was set, with no
+  notion of who created the inquiry — `Inquiry` had no `createdById`
+  column at all. New default policy: an interactively-created inquiry is
+  assigned straight to its creator; round-robin only runs for
+  machine-driven intake (inbound lead API, bulk import), which has no
+  human creator to retain ownership for. Configurable via
+  `CompanyConfig.presalesCreatorRetainsLead` (default on).
+- **Editing a user, for any field, always failed.** `UserForm.tsx`'s
+  edit-mode submit sent a create-shaped payload (including `email`) to a
+  `.strict()` update endpoint that never declared it — every save 400'd.
+  A deeper client-side bug sat in front of it: the form's validation
+  resolver was always `createUserSchema`, which requires `password` —
+  edit mode never renders that field, so submission failed silently at
+  the validation layer before a request was ever sent. Both fixed; a new
+  shared `pickForSchema()` helper (projects onto an update schema's own
+  declared keys, rather than subtracting fields off a create-shaped
+  object) closes the class of bug, applied at all three known sites
+  (this one, Masters, Broker commission payment) plus a regression test
+  covering every create/update schema pair this package exports.
+- **Direct URL access to an admin page rendered the full page shell for
+  any authenticated user**, regardless of permission — the backend
+  correctly 403'd the underlying data fetch, but nothing distinguished
+  "no data yet" from "not allowed here." Every protected route now
+  renders an access-denied screen instead when the user lacks the
+  permission that gates it.
+- **Security: `assignedTo`/`createdBy` leaked full `User` rows —
+  `passwordHash`/`totpSecret`/`recoveryCodes` included — over the wire**,
+  found while wiring follow-up attribution display. A bare Prisma
+  `include: { relation: true }` returns every scalar column on the
+  related model; both call sites (`InquiryService.findAll`/`findOne`,
+  `FollowUpService.findAllForInquiry`) now use scoped `select`s.
+
+### Added
+
+- **Bulk Excel inquiry import now has a staff UI.** The backend
+  (row-level validation, applicant dedup, `ExcelJS`-based parsing) has
+  existed since Phase 3 with no caller in `apps/web` — upload UI, a
+  downloadable XLSX template (`GET /inquiries/import-template`, single
+  source of truth shared with the parser's own header map), and
+  per-row error reporting added to the Inquiries page.
+- **Follow-up log now shows who logged it.** `FollowUp.createdById` has
+  been captured since Phase 3 and was already being fetched — just never
+  rendered.
+
 ## [0.3.0]
 
 ### Added

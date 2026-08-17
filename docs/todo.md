@@ -4,6 +4,67 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## Approved, not yet built — lead ownership, manager hierarchy, global search (v0.3.1 triage)
+
+Design approved; implementation is separate follow-up work, not part of
+v0.3.1. See CLAUDE.md's "v0.3.1 — first real pilot-user feedback" entry
+for why this was split out.
+
+- **`User.managerId`** — nullable self-referencing FK, not a Team model.
+  Every stated requirement is single-manager; a Team/TeamMember join
+  would be real, unrequested flexibility (matrix orgs, multi-team
+  membership) this codebase has consistently avoided building ahead of
+  need elsewhere. Cycle-checked at the service layer on write (a bounded
+  walk up the candidate manager's own chain before allowing the change)
+  — Postgres has no native cycle prevention for adjacency lists.
+- **`TeamScopeService.getVisibleUserIds(companyId, userId, roleSlug)`** —
+  a recursive CTE (`WITH RECURSIVE`) returning the caller plus their
+  full subtree (not just direct reports — a direct-reports-only version
+  would silently hide a senior manager's sub-subordinates' leads, a
+  worse failure than showing "too much"). Service-layer, not RLS —
+  matches the existing precedent for `sales_exec` report-scoping
+  (Phase 4-UI decisions): this is a business-rule visibility question
+  about staff, not a tenant-isolation question, and every staff actor is
+  presumed benign-if-mistaken (Phase 6 decisions), unlike the portal
+  actors RLS exists to defend against as a primary control there.
+  Deliberately NOT an ambient/`AsyncLocalStorage`-injected filter —
+  that exact mechanism already produced two real IDOR bugs in Phase 6;
+  a plain function called explicitly at the top of each handler is
+  boring and correct.
+- **One-time audit + a durable guard against "forgotten on a new
+  endpoint."** Replace every existing ad hoc `assignedToId`/
+  `scopeToUserId` filter (today: `InquiryController.scopeFor()`) with
+  `TeamScopeService`, once, for every current team/lead-touching
+  endpoint. Then add a CI test (grep-based, mirroring this project's own
+  "audit every X pattern" precedent) that fails if a NEW literal
+  `assignedToId:`/`scopeToUserId` filter appears anywhere in
+  `apps/api/src` outside `TeamScopeService` itself — this is the part
+  that makes it durable rather than a one-time fix that quietly rots.
+- **Global search** — doesn't exist yet (confirmed by grep, not
+  assumed). Must be built with `TeamScopeService` wired in from the
+  first commit, not retrofitted after — building it search-first would
+  recreate exactly the "forgotten on a new endpoint" risk the guard
+  above exists to prevent.
+- **Phone as identifier, without a DB uniqueness constraint.** A hard
+  `@@unique` on `primaryPhoneNormalized` is incompatible with real,
+  legitimate cases the report named (family members sharing a number,
+  brokers on one office line) and would either reject them outright or
+  falsely merge a telco-reassigned number onto the wrong historical
+  person. Instead: a persisted per-pair "confirmed distinct" decision
+  (e.g. `ApplicantDistinctPair(companyId, applicantAId, applicantBId,
+  decidedById, decidedAt)`) so a human's "these are different people"
+  call, once made, stops the same warning resurfacing for that exact
+  pair — composes with the existing `ApplicantMerge` machinery for the
+  opposite decision. Automated paths (inbound lead API, bulk import)
+  keep auto-link-on-match as the default (unchanged, deliberate Phase 7
+  reasoning — no human is present to ask), gaining a per-company
+  `CompanyConfig` toggle to always-create-and-flag instead, for a
+  company that knows its market has heavy phone-sharing. No
+  telco-reassignment detection — this project's own phone-normalization
+  precedent (Phase 3) already rejected guessing here: a false "these are
+  different people" costs a re-ask later, a wrong auto-merge costs a
+  business potentially servicing the wrong person's booking.
+
 ## Must-fix-before-pilot (found on the pre-pilot walkthrough)
 
 Three gaps found walking a realistic project through the real product.

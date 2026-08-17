@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { formatInr, COMMISSION_TYPE } from '@openestate/shared';
+import { formatInr, COMMISSION_TYPE, payCommissionPaymentSchema, pickForSchema } from '@openestate/shared';
 import { api, downloadFile } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 import { useAuth } from '../../lib/auth';
@@ -189,6 +189,10 @@ export default function BrokerDetail() {
   // .strict() (payCommissionPaymentSchema) and must NOT include the payment
   // id (that's a URL param), whereas useApiMutation's generic body-becomes-
   // JSON-payload shape has no way to exclude a field used only for the URL.
+  // pickForSchema projects onto payCommissionPaymentSchema's own declared
+  // keys rather than hand-listing them, so this stays correct automatically
+  // if the schema ever grows a field — the same helper used for the
+  // UserForm/Masters update-payload bugs, applied here for consistency.
 
   async function handleRequest(e?: React.FormEvent) {
     e?.preventDefault();
@@ -216,7 +220,7 @@ export default function BrokerDetail() {
     try {
       await api(`/commission-payments/${id}/pay`, {
         method: 'POST',
-        body: JSON.stringify({ mode: payMode, paymentDate: payDate }),
+        body: JSON.stringify(pickForSchema(payCommissionPaymentSchema, { mode: payMode, paymentDate: payDate })),
       });
       setPayingId(null);
       refetchPayments();

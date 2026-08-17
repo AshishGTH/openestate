@@ -70,7 +70,7 @@ export class InquiryController {
   @ApiOperation({ summary: 'Create inquiry (dedup-checks/links applicant, auto-assigns if project pool configured)' })
   create(@Body() dto: CreateInquiryDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.inquiryService.create(user.companyId, dto);
+    return this.inquiryService.create(user.companyId, dto, user.sub);
   }
 
   @Patch(':id')

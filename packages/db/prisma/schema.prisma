@@ -158,6 +158,7 @@ model User {
   consentsRecorded         ApplicantConsent[]      @relation("consentActor")
   applicantMergesActed     ApplicantMerge[]        @relation("applicantMergeActor")
   inquiriesAssigned        Inquiry[]               @relation("inquiryAssignee")
+  inquiriesCreated         Inquiry[]               @relation("inquiryCreator")
   assignmentsFrom          InquiryAssignment[]     @relation("assignmentFrom")
   assignmentsTo            InquiryAssignment[]     @relation("assignmentTo")
   assignmentsActed         InquiryAssignment[]     @relation("assignmentActor")
@@ -332,6 +333,12 @@ model CompanyConfig {
   // Configurable, sensible defaults (50 files / 500MB per project).
   projectMediaMaxFiles     Int      @default(50) @map("project_media_max_files")
   projectMediaMaxBytes     Int      @default(524288000) @map("project_media_max_bytes")
+  // A rep's own inquiry must never silently move to someone else via
+  // round-robin. When true (default), InquiryService.create() assigns an
+  // interactively-created inquiry straight to its creator; round-robin only
+  // ever runs for machine-driven intake (inbound lead API, bulk import),
+  // which has no human creator to retain ownership for.
+  presalesCreatorRetainsLead Boolean @default(true) @map("presales_creator_retains_lead")
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
 
@@ -970,6 +977,11 @@ model Inquiry {
   preferredUnitTypeId String?       @map("preferred_unit_type_id") @db.Uuid
   temperatureId       String?       @map("temperature_id") @db.Uuid
   assignedToId        String?       @map("assigned_to_id") @db.Uuid
+  // Who created this inquiry, when a human did (interactive create()).
+  // Null for machine-driven intake (inbound lead API, bulk import) — there
+  // is no human creator to attribute those to. Drives the creator-retains
+  // assignment policy in InquiryService.create(); never mutated after.
+  createdById         String?       @map("created_by_id") @db.Uuid
   status              InquiryStatus @default(OPEN)
   nextFollowupAt      DateTime?     @map("next_followup_at")
   lastEscalatedAt     DateTime?     @map("last_escalated_at")
@@ -985,6 +997,7 @@ model Inquiry {
   preferredUnitType UnitType?           @relation(fields: [preferredUnitTypeId], references: [id])
   temperature       InquiryTemperature? @relation(fields: [temperatureId], references: [id])
   assignedTo        User?               @relation("inquiryAssignee", fields: [assignedToId], references: [id])
+  createdBy         User?               @relation("inquiryCreator", fields: [createdById], references: [id])
   followUps         FollowUp[]
   assignments       InquiryAssignment[]
   communicationLogs CommunicationLog[]
@@ -2259,6 +2272,7 @@ model ConstructionUpdate {
   createdAt   DateTime @default(now()) @map("created_at")
 
   company Company                   @relation(fields: [companyId], references: [id])
+  project Project                   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   media   ConstructionUpdateMedia[]
 
   @@index([companyId, projectId])
@@ -2284,10 +2298,22 @@ model ConstructionUpdateMedia {
 
 /// v0.2.2: layout plan / brochure / photo uploads for a project.
 /// UploadService has supported these categories since Phase 2; this is
-/// the first table that actually stores rows for them. No Prisma
-/// relation to Project — same scalar-FK-only shape as ConstructionUpdate
-/// (Phase 4 "Relation policy" decision), consistent with the one
-/// existing precedent for project-adjacent media.
+/// the first table that actually stores rows for them.
+/// projectId DOES carry a real Prisma relation, unlike the Phase 4
+/// scalar-FK-only pattern (chargeTypeId/createdById/etc. on
+/// high-fan-out transactional tables) — Project isn't a shared master
+/// referenced by dozens of tables the way User/GstRate/ChargeType are,
+/// so the "avoid relation bloat" rationale doesn't apply here. This is
+/// deliberate, not incidental: a scalar-only projectId with a DB-level
+/// FK but no Prisma relation is invisible to `prisma migrate dev`'s
+/// schema diff (it only derives expected FKs from declared relations),
+/// so an unrelated future migration silently proposes DROPping it as
+/// "drift" — which is exactly what happened to
+/// ConstructionUpdate.projectId's FK (see its own `project` relation
+/// field, added for the same reason) in the 2026-08-01
+/// `add_password_reset` migration, and to this table's own FK in this
+/// session before being caught. See ConstructionUpdate.project's field
+/// comment.
 model ProjectMedia {
   id           String   @id @default(uuid()) @db.Uuid
   companyId    String   @map("company_id") @db.Uuid
@@ -2301,6 +2327,7 @@ model ProjectMedia {
   createdAt    DateTime @default(now()) @map("created_at")
 
   company Company @relation(fields: [companyId], references: [id])
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([companyId, projectId])
   @@map("project_media")

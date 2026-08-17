@@ -26,9 +26,16 @@ import { ReportsService } from './reports.service';
   imports: [QueuesModule, CustomFieldsModule],
   controllers: [
     ApplicantController,
+    // Must be registered BEFORE InquiryController: both mount under
+    // /inquiries, and InquiryController's GET /inquiries/:id would
+    // otherwise swallow a request for the literal path
+    // GET /inquiries/import-template as id="import-template" — Nest
+    // registers routes with Express in controller-array order, and
+    // Express's router matches the first pattern that fits, param routes
+    // included.
+    InquiryImportController,
     InquiryController,
     AssignmentPoolController,
-    InquiryImportController,
     FollowUpController,
     CommunicationController,
     ReportsController,

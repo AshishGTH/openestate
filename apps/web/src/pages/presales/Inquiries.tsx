@@ -19,6 +19,21 @@ interface Inquiry {
   createdAt: string;
 }
 
+interface ImportRowError {
+  row: number;
+  field: string;
+  message: string;
+}
+
+interface ImportResult {
+  success: boolean;
+  createdCount: number;
+  linkedCount: number;
+  errorCount: number;
+  errors: ImportRowError[];
+  linked: Array<{ row: number; applicantName: string; applicantId: string }>;
+}
+
 interface MasterOption {
   id: string;
   name: string;
@@ -41,6 +56,12 @@ export default function InquiriesPage() {
   const [temperatureId, setTemperatureId] = useState('');
   const [inquiryCf, setInquiryCf] = useState<Record<string, unknown>>({});
   const [applicantCf, setApplicantCf] = useState<Record<string, unknown>>({});
+
+  const [showImport, setShowImport] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [importError, setImportError] = useState('');
+  const [importing, setImporting] = useState(false);
 
   const { definitions: inquiryDefs } = useCustomFieldDefinitions('INQUIRY');
   const { definitions: applicantDefs } = useCustomFieldDefinitions('APPLICANT');
@@ -97,6 +118,27 @@ export default function InquiriesPage() {
     }
   };
 
+  const handleImport = async () => {
+    if (!importFile) return;
+    setImportError('');
+    setImportResult(null);
+    setImporting(true);
+    try {
+      const form = new FormData();
+      form.append('file', importFile);
+      const res = await api<ImportResult>('/inquiries/import', { method: 'POST', body: form });
+      setImportResult(res);
+      if (res.success) {
+        setImportFile(null);
+        qc.invalidateQueries({ queryKey: ['inquiries'] });
+      }
+    } catch (err) {
+      setImportError((err as Error).message);
+    } finally {
+      setImporting(false);
+    }
+  };
+
   const columns: Column<Inquiry>[] = [
     { key: 'applicant', header: 'Applicant', render: (i) => <Link to={`/presales/inquiries/${i.id}`} className="text-blue-600 hover:underline">{i.applicant.name}</Link> },
     { key: 'phone', header: 'Phone', render: (i) => i.applicant.primaryPhone },
@@ -116,11 +158,77 @@ export default function InquiriesPage() {
           >
             Export CSV
           </button>
+          <button
+            onClick={() => setShowImport((v) => !v)}
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+          >
+            Bulk Import
+          </button>
           <button onClick={() => setShowForm(true)} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700">
             Add Inquiry
           </button>
         </div>
       </div>
+
+      {showImport && (
+        <div className="mt-4 rounded-lg border border-slate-200 bg-white p-4">
+          <p className="text-sm text-slate-600">
+            Upload an XLSX file to create inquiries in bulk — applicant
+            phone/email is deduplicated against existing applicants the
+            same way it is for a single inquiry.{' '}
+            <button
+              onClick={() => downloadFile('/inquiries/import-template', 'inquiry-import-template.xlsx')}
+              className="font-medium text-blue-600 hover:underline"
+            >
+              Download template
+            </button>
+          </p>
+          <div className="mt-3 flex items-center gap-3">
+            <input
+              type="file"
+              accept=".xlsx"
+              onChange={(e) => {
+                setImportFile(e.target.files?.[0] ?? null);
+                setImportResult(null);
+                setImportError('');
+              }}
+              className="block text-sm text-slate-700"
+            />
+            <button
+              onClick={handleImport}
+              disabled={!importFile || importing}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {importing ? 'Uploading…' : 'Upload'}
+            </button>
+          </div>
+          {importError && <p className="mt-2 text-sm text-red-600">{importError}</p>}
+          {importResult && (
+            <div className="mt-3 text-sm">
+              {importResult.success ? (
+                <p className="text-emerald-700">
+                  Created {importResult.createdCount}, linked to an existing applicant{' '}
+                  {importResult.linkedCount}.
+                </p>
+              ) : (
+                <>
+                  <p className="font-medium text-red-700">
+                    {importResult.errorCount} row error{importResult.errorCount === 1 ? '' : 's'} — nothing was
+                    imported. Fix and re-upload.
+                  </p>
+                  <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto rounded-md bg-red-50 p-2 text-xs text-red-700">
+                    {importResult.errors.map((e, idx) => (
+                      <li key={idx}>
+                        Row {e.row}, {e.field}: {e.message}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {duplicateWarning.length > 0 && (
         <div className="mt-4 rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">

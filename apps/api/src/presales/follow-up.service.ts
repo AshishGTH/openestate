@@ -16,7 +16,13 @@ export class FollowUpService {
   async findAllForInquiry(companyId: string, inquiryId: string) {
     return this.systemPrisma.followUp.findMany({
       where: { companyId, inquiryId },
-      include: { type: true, createdBy: true },
+      include: {
+        type: true,
+        // A bare `createdBy: true` returns every scalar column on User —
+        // passwordHash/totpSecret/recoveryCodes included — over the wire.
+        // Scoped to exactly what the follow-up log needs to display.
+        createdBy: { select: { id: true, name: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
