@@ -4908,3 +4908,163 @@ fail-loud check from the "Seed-only-reachable-data audit" entry doing
 exactly its job) was this session's own script guessing wrong, not a
 product bug — corrected against the real DTOs before treating anything
 as a finding.
+
+### v0.3.1 — first real pilot-user feedback, triaged and fixed
+
+Five items, triaged by reading source first, then fixed with the usual
+bar (through-the-wire supertests, Playwright where UI is touched, full
+pipeline green). Two more (bulk import UI, follow-up attribution) were
+"check before building" items that turned out to be backend-complete —
+confirmed by reading the code, not assumed.
+
+- **Creator-retains-lead assignment policy.** `InquiryService.create()`
+  ran round-robin unconditionally whenever `dto.projectId` was set, with
+  zero notion of who created the inquiry — `Inquiry` had no
+  `createdById` column, and `InquiryController.create()` never passed
+  the caller through to the service at all. Combined with `scopeFor()`
+  hard-filtering a `sales_executive`'s list to `assignedToId ===
+  user.sub`, this meant a rep's own newly-created lead could silently
+  land on whoever the pool's round-robin picked next (often admin, in a
+  small/demo pool) and vanish from the rep's own queue on the very first
+  inquiry — trust-destroying, per the report. Fixed with a default-on
+  policy: `createdById` is now captured on every interactively-created
+  inquiry, and when `CompanyConfig.presalesCreatorRetainsLead` is true
+  (default), the creator is assigned directly — round-robin never runs
+  for a human-created inquiry at all. Machine-driven intake
+  (`createFromLead`, used by both the inbound lead API and — matching
+  "website forms" in the report — the same endpoint real websites
+  integrate through) keeps round-robin unchanged, since there's no human
+  creator to retain ownership for. Bulk import previously ran NO
+  assignment logic at all (a silent gap, not a deliberate choice) —
+  given the same "no human creator" reasoning applies, it now gets
+  round-robin too, closing that gap in the same pass.
+- **Shared update-payload helper, root-cause fix for a bug class, not
+  just the third instance.** Three separate sites have now hit the same
+  bug: a frontend sends a create-shaped payload (built for a broader
+  `useForm<CreateXDto>` or similar) to a `.strict()` update endpoint
+  that declares fewer fields, and the extra keys 400 the whole request.
+  Previously patched ad hoc at each site (`BrokerDetail.tsx`'s `pay()`,
+  Masters.tsx's PATCH `id`-leak); this time, `UserForm.tsx`'s edit save
+  hit it a third time (see below for a deeper bug in front of it).
+  `pickForSchema()` (`packages/shared/src/dto-utils.ts`) is the actual
+  fix: it derives a payload by projecting ONTO an update schema's own
+  declared keys, picked from whatever superset object is on hand — the
+  correct direction (project TO the update shape) instead of the
+  fragile one (subtract FROM the create shape, which silently breaks
+  again the next time the create schema grows a field the update schema
+  never wanted). Applied at all three known sites, including
+  `BrokerDetail.tsx`'s already-correct hand-built body — a provably
+  behavior-preserving refactor (covered by its own test asserting
+  byte-identical output), done for consistency of mechanism, not because
+  it was broken. `packages/shared/test/update-schema-strictness.test.ts`
+  dynamically discovers every exported `create*Schema`/`update*Schema`
+  pair in the package and asserts the update schema rejects any field
+  unique to its create sibling — a regression guard for the *class*,
+  not just the four instances found so far, so a fifth site reintroducing
+  the same mistake fails a test immediately rather than shipping.
+- **Real bug found only by actually running the fixed edit form, not by
+  reading the code: `UserForm.tsx`'s edit-mode submit could never
+  reach the network at all.** The form's `zodResolver` was always
+  `createUserSchema`, edit mode included — `createUserSchema` requires
+  `password`, which the edit-mode JSX never renders/registers, so
+  react-hook-form's client-side validation failed on every single edit
+  attempt and `handleSubmit(onSubmit)` never even ran. This is a layer
+  earlier than the email-leak 400 the original source-level triage
+  found — the reported symptom ("role cannot be changed") was real, but
+  the actual root cause blocked the *entire* form, silently, with no
+  visible error. Root-caused via a live Playwright run (this project's
+  own primary lesson proving itself again: reading source estimated the
+  right *class* of bug but missed the deeper one hiding in front of it).
+  Fixed by picking the resolver by `isEdit`
+  (`zodResolver(isEdit ? updateUserSchema : createUserSchema)`), and by
+  no longer registering `email` as an editable field at all in edit mode
+  (`updateUserSchema` has no `email` field — it can't be changed via
+  this endpoint; shown as plain read-only text instead, matching
+  `RoleForm.tsx`'s existing pattern of disabling a system role's name
+  input). A second, independent bug surfaced by the same test run:
+  the role `<select>`'s `reset()`-driven value raced `GET /roles` — a
+  native `<select>`'s value assignment silently no-ops if no matching
+  `<option>` exists yet, and does not retroactively apply once the
+  options do render. Fixed by gating the `reset()` effect on both
+  `existingUser` AND `roles` having loaded.
+- **`RequirePermission` route wrapper.** Confirmed both halves of the
+  report separately rather than assuming both were the same bug. (b)
+  was real: `App.tsx` had zero per-route permission gating — any
+  authenticated user navigating directly to an admin URL got the full
+  page shell (buttons, forms, layout), with only the underlying data
+  fetch 403ing in the background. Fixed with a `RequirePermission`
+  wrapper on every protected route, gated by whatever permission
+  actually guards that route's primary data fetch on the backend (not
+  guessed from the nav label). (a) — "users see nav items for
+  permissions they don't hold" — was **not** independently reproducible
+  in `AppShell.tsx`'s nav-filtering code, which was already correct
+  (`hasPermission()` reads straight off the JWT's `permissions` array,
+  itself freshly recomputed from the role's current grants on every
+  login and token refresh, never stale). Most likely explanation: since
+  role edits have been silently 400ing (the bug above), any attempt to
+  *narrow* a user's role/permissions had never actually succeeded either
+  — from the admin's side, that looks identical to "nav still shows
+  what I tried to take away." Verified via the same Playwright spec that
+  covers (b): a narrow-permission user's nav correctly hides links, and
+  the same permission gates the route directly.
+- **Bulk Excel inquiry import: backend already existed, only needed a
+  caller.** `InquiryImportService` (row-level `zod` validation via
+  `importInquiryRowSchema`, magic-byte file-type check, applicant
+  dedup-and-link matching the interactive-create path, project/source/
+  inquiry-type name resolution) has existed since Phase 3 with zero
+  frontend caller — confirmed by grep before writing anything, per this
+  file's own established discipline for "check before building" items.
+  Added: an upload UI on the Inquiries page (file picker → the existing
+  endpoint → per-row error/success reporting) and a
+  `GET /inquiries/import-template` endpoint streaming an XLSX header
+  row generated from the SAME `HEADER_MAP` the parser reads, so the
+  template can never drift from what a real upload requires. Found and
+  fixed a real routing hazard while wiring the new endpoint:
+  `InquiryController`'s `GET /inquiries/:id` was registered before
+  `InquiryImportController` in `presales.module.ts`'s controllers array
+  — Nest registers routes with Express in that order, and Express's
+  router matches the first pattern that fits, so a request for the
+  literal path `/inquiries/import-template` would have been swallowed
+  as `id="import-template"` and 404'd, never reaching the real handler.
+  `POST /inquiries/import` was never affected (no other `POST
+  /inquiries/:x`-shaped route exists to collide with) — only the new
+  `GET` route introduced the conflict. Fixed by reordering the
+  controllers array, with a comment explaining why the order is load-
+  bearing so a future cleanup doesn't silently reintroduce it.
+- **Follow-up attribution: captured and fetched since Phase 3, never
+  displayed.** `FollowUp.createdById` was already written on every
+  create and already included in `FollowUpService.findAllForInquiry`'s
+  query — `InquiryDetail.tsx` just never read it. One field added to
+  the local `FollowUp` interface, one line added to the render.
+- **Security, found while wiring the display above, not looked for
+  deliberately: `assignedTo: true` (`InquiryService.findAll`/`findOne`)
+  and `createdBy: true` (`FollowUpService.findAllForInquiry`) were
+  bare Prisma `include`s, which return every scalar column on the
+  related model — `User.passwordHash`/`totpSecret`/`recoveryCodes`
+  included — over the wire on `GET /inquiries`, `GET /inquiries/:id`,
+  and `GET /inquiries/:id/follow-ups`.** The same class this codebase's
+  `panCiphertext` sweep (Phase 8) and `PORTAL_APPLICANT_OMIT` (v0.2.3)
+  both closed elsewhere, found again in a spot neither pass reached.
+  Fixed with scoped `select`s (`{id, name, email}` /
+  `{id, name}`) at both call sites; regression-tested through the real
+  HTTP pipeline (`e2e-inquiry-assignment.test.ts`), asserting the
+  absence of the sensitive fields directly rather than just the
+  presence of the safe ones.
+- **Full pipeline, both suites, real evidence.** Full monorepo
+  `pnpm test`: shared 90/90, web 3/3, db 59/59, portal 3/3, api
+  462/462, zero failures. Full `apps/e2e` Playwright suite: 18/18,
+  including the four new specs this release added
+  (`user-role-edit`, `access-denied-route-guard`, `bulk-import`,
+  `follow-up-attribution`).
+
+**Not fixed this release, deliberately — approved as separate,
+larger work to follow:** lead ownership and manager hierarchy
+(`User.managerId`, a `TeamScopeService` with a recursive-CTE
+subtree query, consistently applied across lists/reports/dashboard/a
+new global search, with a CI-enforced guard against a future ad hoc
+scope filter reintroducing the same "forgotten on a new endpoint" risk
+this triage was explicitly trying to design around), and phone-as-
+identifier handling (a persisted per-pair "confirmed distinct"
+decision instead of a DB uniqueness constraint, plus a per-company
+toggle for automated-path dedup strictness). Both are planned, not
+built yet — see `docs/todo.md` for the approved design of each.

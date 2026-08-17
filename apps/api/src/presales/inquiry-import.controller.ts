@@ -1,14 +1,16 @@
 import {
   BadRequestException,
   Controller,
+  Get,
   Post,
   Req,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBody, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { PERMISSIONS } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
@@ -18,6 +20,19 @@ import { InquiryImportService } from './inquiry-import.service';
 @Controller('inquiries')
 export class InquiryImportController {
   constructor(private readonly importService: InquiryImportService) {}
+
+  @Get('import-template')
+  @RequirePermissions(PERMISSIONS.PRESALES_INQUIRY_IMPORT)
+  @ApiOperation({ summary: 'Download the XLSX header template for bulk inquiry import' })
+  async importTemplate(@Res() res: Response) {
+    const buffer = await this.importService.buildImportTemplate();
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="inquiry-import-template.xlsx"',
+      'Content-Length': buffer.length,
+    });
+    res.send(buffer);
+  }
 
   @Post('import')
   @RequirePermissions(PERMISSIONS.PRESALES_INQUIRY_IMPORT)

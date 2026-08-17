@@ -45,6 +45,9 @@ export const updateCompanyConfigSchema = z
     // ConstructionUpdateMedia) — configurable, sensible defaults.
     projectMediaMaxFiles: z.number().int().min(1).max(10000).optional(),
     projectMediaMaxBytes: z.number().int().min(1024 * 1024).max(2147483647).optional(),
+    // A rep's own inquiry must never silently move via round-robin — see
+    // CompanyConfig.presalesCreatorRetainsLead's schema comment.
+    presalesCreatorRetainsLead: z.boolean().optional(),
   })
   .strict();
 

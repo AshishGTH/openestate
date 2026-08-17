@@ -70,7 +70,16 @@ export class InquiryService {
         skip,
         take: limit,
         orderBy: sortBy ? { [sortBy]: sortOrder } : { createdAt: 'desc' },
-        include: { applicant: { omit: { panCiphertext: true, panKeyVersion: true } }, project: true, temperature: true, assignedTo: true },
+        include: {
+          applicant: { omit: { panCiphertext: true, panKeyVersion: true } },
+          project: true,
+          temperature: true,
+          // Real leak, found while wiring follow-up attribution display:
+          // a bare `assignedTo: true` returns every scalar column on
+          // User, passwordHash/totpSecret/recoveryCodes included, over
+          // the wire on every inquiry list response.
+          assignedTo: { select: { id: true, name: true, email: true } },
+        },
       }),
       this.systemPrisma.inquiry.count({ where }),
     ]);
@@ -95,7 +104,7 @@ export class InquiryService {
         inquiryType: true,
         preferredUnitType: true,
         temperature: true,
-        assignedTo: true,
+        assignedTo: { select: { id: true, name: true, email: true } },
         followUps: { orderBy: { createdAt: 'desc' } },
         assignments: { orderBy: { createdAt: 'desc' } },
       },
@@ -122,7 +131,14 @@ export class InquiryService {
     });
   }
 
-  async create(companyId: string, dto: CreateInquiryDto) {
+  /**
+   * `createdById` is the interactively-authenticated caller (always set —
+   * InquiryController.create() is behind JwtAuthGuard). Machine-driven
+   * intake (createFromLead, bulk import) has no human creator and never
+   * passes one, which is exactly the signal the creator-retains policy
+   * below keys off.
+   */
+  async create(companyId: string, dto: CreateInquiryDto, createdById: string) {
     // Resolved BEFORE the transaction opens: validation reads the
     // definitions table, and there's no reason to hold a pooled
     // connection open across those reads.
@@ -200,33 +216,49 @@ export class InquiryService {
             preferredUnitTypeId: dto.preferredUnitTypeId,
             temperatureId: dto.temperatureId,
             nextFollowupAt: dto.nextFollowupAt,
+            createdById,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             customFields: inquiryCustomFields as any,
           },
         });
 
+        // Creator-retains-lead policy (default on): a rep's own inquiry
+        // must never silently move to someone else via round-robin.
+        // Round-robin only ever runs for machine-driven intake — this
+        // method always has a human createdById, so when the toggle is on
+        // the creator simply keeps it, full stop, regardless of project
+        // pool membership.
+        const config = await tx.companyConfig.findFirst({ where: { companyId } });
+        const creatorRetains = config?.presalesCreatorRetainsLead ?? true;
+
         let assignedToId: string | null = null;
-        if (dto.projectId) {
+        let assignmentType: 'creator' | 'auto' | null = null;
+        if (creatorRetains) {
+          assignedToId = createdById;
+          assignmentType = 'creator';
+        } else if (dto.projectId) {
           assignedToId = await this.assignmentService.autoAssign(
             tx,
             companyId,
             dto.projectId,
           );
-          if (assignedToId) {
-            await tx.inquiry.update({
-              where: { id: inquiry.id },
-              data: { assignedToId },
-            });
-            await tx.inquiryAssignment.create({
-              data: {
-                companyId,
-                inquiryId: inquiry.id,
-                toUserId: assignedToId,
-                assignmentType: 'auto',
-                actorId: null,
-              },
-            });
-          }
+          assignmentType = 'auto';
+        }
+
+        if (assignedToId) {
+          await tx.inquiry.update({
+            where: { id: inquiry.id },
+            data: { assignedToId },
+          });
+          await tx.inquiryAssignment.create({
+            data: {
+              companyId,
+              inquiryId: inquiry.id,
+              toUserId: assignedToId,
+              assignmentType: assignmentType as string,
+              actorId: assignmentType === 'creator' ? createdById : null,
+            },
+          });
         }
 
         return { ...inquiry, assignedToId, possibleDuplicateApplicantIds };

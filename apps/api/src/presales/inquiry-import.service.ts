@@ -3,6 +3,7 @@ import { withTenantTx, runWithTenant } from '@openestate/db';
 import { TENANT_PRISMA } from '../database/database.module';
 import { importInquiryRowSchema, normalizePhone, normalizeEmail } from '@openestate/shared';
 import * as ExcelJS from 'exceljs';
+import { AssignmentService } from './assignment.service';
 
 export interface ImportRowError {
   row: number;
@@ -37,7 +38,21 @@ export class InquiryImportService {
     @Inject(TENANT_PRISMA)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private readonly tenantPrisma: any,
+    private readonly assignmentService: AssignmentService,
   ) {}
+
+  /**
+   * Header row only, no data — HEADER_MAP is the single source of truth
+   * for what importInquiries() actually parses, so the downloadable
+   * template can never drift from what a real upload requires.
+   */
+  async buildImportTemplate(): Promise<Buffer> {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet('Inquiries');
+    sheet.columns = Object.keys(HEADER_MAP).map((header) => ({ header, width: 22 }));
+    const buffer = await workbook.xlsx.writeBuffer();
+    return Buffer.from(buffer);
+  }
 
   async importInquiries(companyId: string, buffer: Buffer): Promise<InquiryImportResult> {
     const header = buffer.subarray(0, 4);
@@ -157,7 +172,7 @@ export class InquiryImportService {
             inquiryTypeId = inquiryTypeCache.get(data.inquiryTypeName);
           }
 
-          await tx.inquiry.create({
+          const importedInquiry = await tx.inquiry.create({
             data: {
               companyId,
               applicantId,
@@ -167,8 +182,28 @@ export class InquiryImportService {
               budgetMinPaise: data.budgetMinPaise != null ? BigInt(data.budgetMinPaise) : null,
               budgetMaxPaise: data.budgetMaxPaise != null ? BigInt(data.budgetMaxPaise) : null,
               customFields: data.notes ? { importNotes: data.notes } : undefined,
+              // No human creator for a batch-imported row — no creator to
+              // retain ownership for, so this always goes through
+              // round-robin, same as inbound-lead intake.
             },
           });
+
+          if (projectId) {
+            const assignedToId = await this.assignmentService.autoAssign(tx, companyId, projectId);
+            if (assignedToId) {
+              await tx.inquiry.update({ where: { id: importedInquiry.id }, data: { assignedToId } });
+              await tx.inquiryAssignment.create({
+                data: {
+                  companyId,
+                  inquiryId: importedInquiry.id,
+                  toUserId: assignedToId,
+                  assignmentType: 'auto',
+                  actorId: null,
+                },
+              });
+            }
+          }
+
           createdCount++;
         }
 

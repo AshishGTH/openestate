@@ -29,6 +29,7 @@ interface FollowUp {
   venue: string | null;
   createdAt: string;
   type: { name: string } | null;
+  createdBy: { id: string; name: string } | null;
 }
 
 interface MasterOption {
@@ -224,7 +225,10 @@ export default function InquiryDetailPage() {
           ) : (
             followUps!.map((f) => (
               <li key={f.id} className="rounded-md border border-slate-200 bg-white p-3 text-sm">
-                <div className="font-medium text-slate-800">{f.type?.name ?? 'Follow-up'} — {new Date(f.createdAt).toLocaleString()}</div>
+                <div className="font-medium text-slate-800">
+                  {f.type?.name ?? 'Follow-up'} — {new Date(f.createdAt).toLocaleString()}
+                  {f.createdBy && <span className="font-normal text-slate-500"> by {f.createdBy.name}</span>}
+                </div>
                 {f.scheduledAt && <div className="text-slate-600">Scheduled: {new Date(f.scheduledAt).toLocaleString()} {f.venue && `at ${f.venue}`}</div>}
                 {f.notes && <div className="text-slate-600">{f.notes}</div>}
               </li>

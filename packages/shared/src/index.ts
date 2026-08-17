@@ -17,3 +17,4 @@ export * from './portal-auth.dto';
 export * from './portal';
 export * from './webhooks';
 export * from './seed-data';
+export * from './dto-utils';

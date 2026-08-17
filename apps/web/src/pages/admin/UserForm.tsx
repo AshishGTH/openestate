@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
+import { useForm, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery } from '@tanstack/react-query';
-import { createUserSchema, type CreateUserDto } from '@openestate/shared';
+import { createUserSchema, updateUserSchema, pickForSchema, type CreateUserDto, type UpdateUserDto } from '@openestate/shared';
 import { api } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 
@@ -38,20 +38,50 @@ export default function UserForm() {
     reset,
     formState: { errors, isSubmitting },
   } = useForm<CreateUserDto>({
-    resolver: zodResolver(createUserSchema),
+    // Real bug, caught by a Playwright run of this exact flow, not by
+    // review: this resolver was ALWAYS createUserSchema, edit mode
+    // included — createUserSchema requires `password`, which edit mode
+    // never renders/registers at all, so react-hook-form's client-side
+    // validation failed silently on every single edit attempt and
+    // handleSubmit(onSubmit) never even ran. This is a layer earlier
+    // than the email-leak 400 the update endpoint itself would 400 on —
+    // the form couldn't reach the network at all. Picking the resolver by
+    // isEdit fixes the actual observed symptom ("nothing happens on
+    // Update User"); pickForSchema below still strips email defensively.
+    resolver: (isEdit
+      ? zodResolver(updateUserSchema)
+      : zodResolver(createUserSchema)) as Resolver<CreateUserDto>,
   });
 
   useEffect(() => {
-    if (existingUser) {
+    // Real bug, caught by the same Playwright run: gating this only on
+    // existingUser races GET /roles — a native <select>'s value assignment
+    // silently no-ops if no matching <option> exists yet, and won't
+    // retroactively apply once the options DO render. Gating on both
+    // queries means reset() only runs once the role dropdown actually has
+    // something for roleId to match against.
+    if (existingUser && roles) {
+      // Real bug, caught by a Playwright run of this exact flow: reset()
+      // seeds react-hook-form's internal values for EVERY key passed to
+      // it, regardless of whether that field is currently rendered as an
+      // input — disabling the email <input> via register()'s `disabled`
+      // option does NOT retroactively strip a value reset() already put
+      // there. zodResolver(updateUserSchema) then validated the FULL
+      // reset payload (email + password included) against a .strict()
+      // schema that declares neither, and rejected every single edit
+      // submission with "Unrecognized key(s): 'email', 'password'" before
+      // onSubmit ever ran. email/password simply don't belong in this
+      // reset call at all — updateUserSchema can't change either one
+      // (email has no update path; password goes through the separate
+      // force-reset flow below), so only the fields that ARE part of an
+      // update belong here.
       reset({
-        email: existingUser.email as string,
         name: existingUser.name as string,
         phone: (existingUser.phone as string) ?? undefined,
         roleId: (existingUser.role as Role)?.id,
-        password: '',
       });
     }
-  }, [existingUser, reset]);
+  }, [existingUser, roles, reset]);
 
   const createMutation = useApiMutation<unknown, CreateUserDto>(
     'POST',
@@ -59,7 +89,7 @@ export default function UserForm() {
     [['users']],
   );
 
-  const updateMutation = useApiMutation<unknown, Partial<CreateUserDto>>(
+  const updateMutation = useApiMutation<unknown, UpdateUserDto>(
     'PATCH',
     `/users/${id}`,
     [['users'], ['user', id!]],
@@ -72,9 +102,7 @@ export default function UserForm() {
     setError('');
     try {
       if (isEdit) {
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { password: _password, ...updateData } = data;
-        await updateMutation.mutateAsync(updateData);
+        await updateMutation.mutateAsync(pickForSchema(updateUserSchema, data));
       } else {
         await createMutation.mutateAsync(data);
       }
@@ -109,11 +137,26 @@ export default function UserForm() {
 
         <div>
           <label className="block text-sm font-medium text-slate-700">Email</label>
-          <input
-            type="email"
-            {...register('email')}
-            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          />
+          {isEdit ? (
+            // updateUserSchema has no `email` field — it can't be changed
+            // via this endpoint. Plain text, not a registered input: a
+            // registered-but-disabled input still needed a value from
+            // somewhere (reset() or otherwise), and any value present in
+            // react-hook-form's internal state gets validated regardless
+            // of whether the input rendering it is disabled — that's what
+            // broke every edit submission (see the reset() comment above).
+            // Not registering it at all is the only way it can never
+            // reach the resolver or the submitted payload.
+            <p className="mt-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+              {existingUser?.email as string}
+            </p>
+          ) : (
+            <input
+              type="email"
+              {...register('email')}
+              className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          )}
           {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email.message}</p>}
         </div>
 
