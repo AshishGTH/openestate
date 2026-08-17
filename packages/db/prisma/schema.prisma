@@ -713,6 +713,8 @@ model Project {
   towers          Tower[]
   inquiries       Inquiry[]
   assignmentPools ProjectAssignmentPool[]
+  constructionUpdates ConstructionUpdate[]
+  media           ProjectMedia[]
 
   @@unique([companyId, code])
   @@map("projects")
