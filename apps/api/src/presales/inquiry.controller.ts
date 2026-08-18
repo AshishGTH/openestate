@@ -17,36 +17,40 @@ import {
   assignInquirySchema,
   paginationQuerySchema,
   PERMISSIONS,
-  SYSTEM_ROLES,
 } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
-import { InquiryService } from './inquiry.service';
+import { InquiryService, type InquiryScope } from './inquiry.service';
+import { TeamScopeService } from '../team-scope/team-scope.service';
 
 class CreateInquiryDto extends createZodDto(createInquirySchema) {}
 class UpdateInquiryDto extends createZodDto(updateInquirySchema) {}
 class AssignInquiryDto extends createZodDto(assignInquirySchema) {}
 class PaginationQueryDto extends createZodDto(paginationQuerySchema) {}
 
-/** Sales executives see only their own queue; managers/admins see everything. */
-function scopeFor(user: JwtPayload) {
-  if (user.roleSlug === SYSTEM_ROLES.SALES_EXECUTIVE) {
-    return { scopeToUserId: user.sub };
-  }
-  return {};
-}
-
 @ApiTags('Inquiries')
 @Controller('inquiries')
 export class InquiryController {
-  constructor(private readonly inquiryService: InquiryService) {}
+  constructor(
+    private readonly inquiryService: InquiryService,
+    private readonly teamScope: TeamScopeService,
+  ) {}
+
+  private async scopeFor(user: JwtPayload): Promise<InquiryScope> {
+    const visibleUserIds = await this.teamScope.getVisibleUserIds(
+      user.companyId,
+      user.sub,
+      user.roleSlug,
+    );
+    return { visibleUserIds };
+  }
 
   @Get()
   @RequirePermissions(PERMISSIONS.PRESALES_INQUIRY_READ)
-  @ApiOperation({ summary: 'List inquiries (scoped to own queue for sales executives)' })
-  findAll(@Query() query: PaginationQueryDto, @Req() req: Request) {
+  @ApiOperation({ summary: "List inquiries (scoped to the caller's reporting subtree)" })
+  async findAll(@Query() query: PaginationQueryDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.inquiryService.findAll(user.companyId, query, scopeFor(user));
+    return this.inquiryService.findAll(user.companyId, query, await this.scopeFor(user));
   }
 
   @Get('my-day')
@@ -60,9 +64,9 @@ export class InquiryController {
   @Get(':id')
   @RequirePermissions(PERMISSIONS.PRESALES_INQUIRY_READ)
   @ApiOperation({ summary: 'Get inquiry by ID' })
-  findOne(@Param('id') id: string, @Req() req: Request) {
+  async findOne(@Param('id') id: string, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.inquiryService.findOne(user.companyId, id, scopeFor(user));
+    return this.inquiryService.findOne(user.companyId, id, await this.scopeFor(user));
   }
 
   @Post()
@@ -76,16 +80,23 @@ export class InquiryController {
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.PRESALES_INQUIRY_UPDATE)
   @ApiOperation({ summary: 'Update inquiry' })
-  update(@Param('id') id: string, @Body() dto: UpdateInquiryDto, @Req() req: Request) {
+  async update(@Param('id') id: string, @Body() dto: UpdateInquiryDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.inquiryService.update(user.companyId, id, dto, scopeFor(user));
+    return this.inquiryService.update(user.companyId, id, dto, await this.scopeFor(user));
   }
 
   @Patch(':id/assign')
   @RequirePermissions(PERMISSIONS.PRESALES_INQUIRY_ASSIGN)
-  @ApiOperation({ summary: 'Manually reassign an inquiry' })
-  assign(@Param('id') id: string, @Body() dto: AssignInquiryDto, @Req() req: Request) {
+  @ApiOperation({ summary: 'Manually reassign an inquiry (both the inquiry and the target user must be in the caller\'s visible set)' })
+  async assign(@Param('id') id: string, @Body() dto: AssignInquiryDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.inquiryService.assign(user.companyId, id, dto.toUserId, user.sub, dto.reason);
+    return this.inquiryService.assign(
+      user.companyId,
+      id,
+      dto.toUserId,
+      user.sub,
+      dto.reason,
+      await this.scopeFor(user),
+    );
   }
 }

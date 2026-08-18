@@ -5099,3 +5099,122 @@ Two changes, going forward:
   broken CI push and two follow-up fix commits to recover from; a
   30-second `git diff` before the original commit would have caught
   the missing back-relation immediately.
+
+### v0.4 — lead ownership and manager hierarchy
+
+The second half of the v0.3.1 triage's "the big one" — deferred out of
+that release deliberately (see its own Decisions entry) because 1-5 were
+things a pilot user hits hourly and this needed its own design pass.
+
+- **`User.managerId` is a scalar FK with a DB-level constraint, not a
+  Prisma `@relation`** — same "no back-relation bloat on `User`" policy
+  every other `User`-linked FK in this codebase already follows (Phase 4
+  decisions: `createdById`/`approvedById`/etc. are all scalars). A
+  manager's display name is resolved by a small second lookup in
+  `UsersService.findAll`/`findOne`, not an `include`. Cycle prevention
+  (`UsersService.assertValidManager`) is a bounded ~20-hop walk up the
+  CANDIDATE manager's own chain on every write — defense-in-depth only,
+  since every write goes through this function, a stored cycle should
+  never exist; Postgres itself has no native cycle prevention for
+  adjacency lists, and `TeamScopeService`'s recursive CTE assumes an
+  acyclic graph.
+- **`TeamScopeService.getVisibleUserIds(companyId, userId, roleSlug)`
+  returns `string[] | null`, computed fresh from the database on every
+  call, never cached.** `null` means "no restriction" — reserved for
+  `company_admin`/`super_admin`, the only two roles exempted from the org
+  chart entirely (an admin with no reports would otherwise be scoped down
+  to just themselves, a severe regression). Every other role gets a real
+  visible set via `WITH RECURSIVE`: the caller plus their FULL subtree,
+  not just direct reports — a direct-reports-only version would silently
+  hide a senior manager's sub-subordinates' leads, a worse failure mode
+  than showing "too much." Because nothing is cached, a manager
+  reassignment takes effect on the very next request the affected users
+  make — no session refresh, no cache invalidation, no extra plumbing
+  needed.
+- **The pre-existing scoping bug this replaces, found during the audit,
+  not assumed:** before this release, exactly ONE role
+  (`sales_executive`) was restricted to their own queue; every OTHER
+  role — `sales_manager` included — saw the ENTIRE company's inquiries
+  and reports, via three independently hand-rolled
+  `if (roleSlug === SALES_EXECUTIVE) ... else {}` functions
+  (`InquiryController`, presales `ReportsController`, postsales
+  `ReportsController`). A `sales_manager` today could already see every
+  other manager's team's leads — not a hierarchy, a company-wide view
+  with one narrow carve-out. All three replaced with
+  `TeamScopeService.getVisibleUserIds()`.
+- **Security fix, found during the audit, not introduced by this
+  release: `FollowUpController` checked only `companyId`, never whether
+  the caller could see the PARENT inquiry.** A `sales_executive` could
+  already list, create, and update follow-ups on ANY colleague's inquiry
+  by id, completely bypassing `Inquiry`'s own scoping — a live bug
+  shipping in every prior release, not something this feature
+  introduced. Fixed by having every `FollowUpService` method confirm the
+  parent inquiry is in the caller's visible set first
+  (`InquiryService.assertInScope`, a lightweight existence+scope check
+  reusing the exact same `where` shape `findOne` uses), before touching
+  anything else.
+- **`PATCH /inquiries/:id/assign` is now scoped on BOTH ends** — the
+  inquiry being reassigned and the target user must each be in the
+  caller's visible set (admins unrestricted, same as everywhere else). A
+  manager can move a lead within their own subtree; they can't pull one
+  in from outside it or hand one to someone outside it. Incidentally
+  closes a second pre-existing gap found in the same method: `toUserId`
+  was never checked to belong to the same company at all before this.
+- **Deliberately NOT scoped, decided during the audit, not by default:**
+  - **`Applicant`.** Stays completely unscoped — any staff user with
+    `PRESALES_APPLICANT_READ` still sees every applicant company-wide.
+    This is a deliberate decision, not an oversight: an applicant can be
+    linked to inquiries owned by DIFFERENT reps over time (dedup,
+    merge — Phase 3's `ApplicantMerge` machinery), so "who owns this
+    applicant" is genuinely ambiguous in a way inquiry ownership isn't.
+    Scoping it by, say, "any inquiry currently assigned within my
+    visible set" would need its own design pass (what about an
+    applicant with inquiries split across two different reps' subtrees
+    after a reassignment? after a merge?) — not a mechanical extension
+    of the Inquiry scoping logic. **Do not "fix" this by bolting
+    `TeamScopeService` onto `ApplicantService` using the same pattern as
+    `Inquiry` without first working through the merge/multi-inquiry
+    case** — it looks like the same problem and isn't.
+  - **`Booking` core CRUD.** Stays unscoped, matching the existing
+    Phase 4-UI precedent that only the Reports module scopes postsales
+    data by owner. See `docs/todo.md` — flagged as a likely real pilot
+    request once a company has enough reps for this to matter, not
+    designed for preemptively.
+  - **`managerWiseInteractions()`** (presales reports) — its own Phase 3
+    doc comment already anticipated being upgraded to a team roll-up
+    once a hierarchy field existed. It exists now; the upgrade itself is
+    a separate, small follow-up (see `docs/todo.md`), not bundled into
+    this release.
+  - **Dashboard scoping semantics, not a new screen.** "Own work vs. a
+    manager's full visible set" was interpreted as the scoping RULE
+    `myDay()` (hardcoded to the caller's own id, unchanged) and the list
+    endpoints (now `TeamScopeService`-scoped) already express — not a
+    mandate to build the literal `Dashboard.tsx` page, which remains the
+    static placeholder it was before this release. No new UI was built
+    for it.
+- **CI guard: two independent regex checks, not one, in
+  `team-scope-guard.test.ts`.** The first (`SYSTEM_ROLES.SALES_EXECUTIVE`
+  must not appear outside `TeamScopeService`) catches a copy-pasted
+  role-branch. The second (a BARE `where.assignedToId =` / `where.
+  createdById =` scalar assignment — deliberately excluding the correct
+  `= { in: visibleUserIds }` shape via a negative lookahead) catches a
+  fresh ad hoc filter that doesn't reuse the role-check pattern at all.
+  Both were verified empirically against the real codebase (before AND
+  after the fix) to have zero false positives before being trusted — the
+  first regex draft of the second check had a lookahead bug
+  (`=\s*(?!\{)` lets `\s*` backtrack to zero-width, so the lookahead
+  ends up checking a whitespace character instead of the brace and
+  passes when it shouldn't) that was caught by running the guard against
+  its own fixed codebase and getting a false failure, not by inspection.
+- **Behavioral change for existing installs, called out explicitly in
+  CHANGELOG.md, not just fixed silently:** upgrading changes what
+  non-admin roles can see. Before: every role but `sales_executive` saw
+  the whole company. After: everyone (aside from `company_admin`/
+  `super_admin`) sees only their own subtree — themselves plus whoever
+  reports to them, computed from `User.managerId`. A user with no
+  `managerId` set sees only their own leads. This is the CORRECT
+  behavior, but it is not silent: an admin upgrading needs to configure
+  the org chart (set `managerId` on their `sales_manager`/
+  `sales_executive` users) or their managers will suddenly see far less
+  than they did on the previous version, with no error, just a smaller
+  list.

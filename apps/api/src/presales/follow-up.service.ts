@@ -2,6 +2,7 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import type { CreateFollowUpDto, UpdateFollowUpDto } from '@openestate/shared';
+import { InquiryService, type InquiryScope } from './inquiry.service';
 
 @Injectable()
 export class FollowUpService {
@@ -11,9 +12,19 @@ export class FollowUpService {
     private readonly tenantPrisma: any,
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
+    private readonly inquiryService: InquiryService,
   ) {}
 
-  async findAllForInquiry(companyId: string, inquiryId: string) {
+  /**
+   * Security fix: this class used to check only `companyId` — a
+   * sales_executive could list/create/update follow-ups on ANY colleague's
+   * inquiry by id, completely bypassing Inquiry's own scoping. Every
+   * method now confirms the parent inquiry is in the caller's visible set
+   * FIRST, via the same check `InquiryService.findOne` uses, before doing
+   * anything else.
+   */
+  async findAllForInquiry(companyId: string, inquiryId: string, scope: InquiryScope) {
+    await this.inquiryService.assertInScope(companyId, inquiryId, scope);
     return this.systemPrisma.followUp.findMany({
       where: { companyId, inquiryId },
       include: {
@@ -32,10 +43,14 @@ export class FollowUpService {
     inquiryId: string,
     dto: CreateFollowUpDto,
     createdById: string | null,
+    scope: InquiryScope,
   ) {
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
-        const inquiry = await tx.inquiry.findFirst({ where: { id: inquiryId, companyId } });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const inquiryWhere: any = { id: inquiryId, companyId };
+        if (scope.visibleUserIds) inquiryWhere.assignedToId = { in: scope.visibleUserIds };
+        const inquiry = await tx.inquiry.findFirst({ where: inquiryWhere });
         if (!inquiry) throw new NotFoundException('Inquiry not found');
 
         const followUp = await tx.followUp.create({
@@ -70,9 +85,13 @@ export class FollowUpService {
     );
   }
 
-  async update(companyId: string, id: string, dto: UpdateFollowUpDto) {
-    const existing = await this.systemPrisma.followUp.findFirst({ where: { id, companyId } });
+  async update(companyId: string, id: string, dto: UpdateFollowUpDto, scope: InquiryScope) {
+    const existing = await this.systemPrisma.followUp.findFirst({
+      where: { id, companyId },
+      select: { id: true, inquiryId: true },
+    });
     if (!existing) throw new NotFoundException('Follow-up not found');
+    await this.inquiryService.assertInScope(companyId, existing.inquiryId, scope);
 
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>

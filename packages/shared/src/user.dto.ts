@@ -7,6 +7,7 @@ export const createUserSchema = z
     password: z.string().min(8).max(128),
     roleId: z.string().uuid(),
     phone: z.string().max(20).optional(),
+    managerId: z.string().uuid().nullable().optional(),
   })
   .strict();
 
@@ -17,6 +18,7 @@ export const updateUserSchema = z
     name: z.string().min(1).max(255).optional(),
     roleId: z.string().uuid().optional(),
     phone: z.string().max(20).optional(),
+    managerId: z.string().uuid().nullable().optional(),
   })
   .strict();
 

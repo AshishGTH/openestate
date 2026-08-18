@@ -3,6 +3,7 @@ import { ClockProvider, CLOCK } from '../common/clock.provider';
 import { PanEncryptionService } from '../common/pan-encryption.service';
 import { QueuesModule } from '../queues/queues.module';
 import { CustomFieldsModule } from '../custom-fields/custom-fields.module';
+import { TeamScopeModule } from '../team-scope/team-scope.module';
 import { CommunicationProcessor } from '../queues/communication.processor';
 import { ApplicantController } from './applicant.controller';
 import { ApplicantService } from './applicant.service';
@@ -23,7 +24,7 @@ import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';
 
 @Module({
-  imports: [QueuesModule, CustomFieldsModule],
+  imports: [QueuesModule, CustomFieldsModule, TeamScopeModule],
   controllers: [
     ApplicantController,
     // Must be registered BEFORE InquiryController: both mount under

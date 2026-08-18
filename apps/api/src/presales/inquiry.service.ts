@@ -23,8 +23,15 @@ import { ApplicantService } from './applicant.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 
 export interface InquiryScope {
-  /** When set, results are restricted to inquiries assigned to this user (sales_executive). */
-  scopeToUserId?: string;
+  /**
+   * `null` = no restriction (admin-tier caller, sees the whole company).
+   * A finite array = restrict to inquiries assigned to one of these user
+   * ids — the caller's own id plus their full reporting subtree, from
+   * `TeamScopeService.getVisibleUserIds`. Never construct this by hand;
+   * every non-TeamScopeService assignment here is caught by
+   * team-scope-guard.test.ts.
+   */
+  visibleUserIds: string[] | null;
 }
 
 export interface LeadInput {
@@ -62,7 +69,7 @@ export class InquiryService {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = { companyId };
-    if (scope.scopeToUserId) where.assignedToId = scope.scopeToUserId;
+    if (scope.visibleUserIds) where.assignedToId = { in: scope.visibleUserIds };
 
     const [data, total] = await Promise.all([
       this.systemPrisma.inquiry.findMany({
@@ -93,7 +100,7 @@ export class InquiryService {
   async findOne(companyId: string, id: string, scope: InquiryScope) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = { id, companyId };
-    if (scope.scopeToUserId) where.assignedToId = scope.scopeToUserId;
+    if (scope.visibleUserIds) where.assignedToId = { in: scope.visibleUserIds };
 
     const item = await this.systemPrisma.inquiry.findFirst({
       where,
@@ -111,6 +118,21 @@ export class InquiryService {
     });
     if (!item) throw new NotFoundException('Inquiry not found');
     return item;
+  }
+
+  /**
+   * Lightweight existence+scope check, no `include`s — for callers (like
+   * `FollowUpService`) that only need to know "is this inquiry visible to
+   * this caller," not the full inquiry payload. Throws the same
+   * `NotFoundException` `findOne` does when the inquiry exists but is out
+   * of scope, for the same IDOR-hiding reason.
+   */
+  async assertInScope(companyId: string, id: string, scope: InquiryScope): Promise<void> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: any = { id, companyId };
+    if (scope.visibleUserIds) where.assignedToId = { in: scope.visibleUserIds };
+    const exists = await this.systemPrisma.inquiry.findFirst({ where, select: { id: true } });
+    if (!exists) throw new NotFoundException('Inquiry not found');
   }
 
   /** Assigned to me, still open, and today's-or-overdue next follow-up. */
@@ -349,19 +371,34 @@ export class InquiryService {
     );
   }
 
+  /**
+   * Both the inquiry being reassigned and the target user must be in the
+   * caller's visible set — a manager can only move a lead within their
+   * own subtree, never in from or out to someone they can't see. Admins
+   * (`scope.visibleUserIds === null`) are unrestricted, same as every
+   * other TeamScopeService-gated endpoint.
+   */
   async assign(
     companyId: string,
     inquiryId: string,
     toUserId: string,
     actorId: string,
     reason: string | undefined,
+    scope: InquiryScope,
   ) {
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
-        const inquiry = await tx.inquiry.findFirst({
-          where: { id: inquiryId, companyId },
-        });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const inquiryWhere: any = { id: inquiryId, companyId };
+        if (scope.visibleUserIds) inquiryWhere.assignedToId = { in: scope.visibleUserIds };
+        const inquiry = await tx.inquiry.findFirst({ where: inquiryWhere });
         if (!inquiry) throw new NotFoundException('Inquiry not found');
+
+        if (scope.visibleUserIds && !scope.visibleUserIds.includes(toUserId)) {
+          throw new NotFoundException('Target user not found');
+        }
+        const targetUser = await tx.user.findFirst({ where: { id: toUserId, companyId } });
+        if (!targetUser) throw new NotFoundException('Target user not found');
 
         const fromUserId = inquiry.assignedToId;
         await tx.inquiry.update({

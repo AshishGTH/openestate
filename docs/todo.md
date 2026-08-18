@@ -4,47 +4,39 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
-## Approved, not yet built — lead ownership, manager hierarchy, global search (v0.3.1 triage)
+## Built: lead ownership & manager hierarchy (v0.4) — what's still open from that work
 
-Design approved; implementation is separate follow-up work, not part of
-v0.3.1. See CLAUDE.md's "v0.3.1 — first real pilot-user feedback" entry
-for why this was split out.
+`User.managerId` + `TeamScopeService` + the CI guard landed in v0.4 (see
+CLAUDE.md's "v0.4 — lead ownership and manager hierarchy" decisions entry
+for the full writeup). Three things that entry deliberately left open:
 
-- **`User.managerId`** — nullable self-referencing FK, not a Team model.
-  Every stated requirement is single-manager; a Team/TeamMember join
-  would be real, unrequested flexibility (matrix orgs, multi-team
-  membership) this codebase has consistently avoided building ahead of
-  need elsewhere. Cycle-checked at the service layer on write (a bounded
-  walk up the candidate manager's own chain before allowing the change)
-  — Postgres has no native cycle prevention for adjacency lists.
-- **`TeamScopeService.getVisibleUserIds(companyId, userId, roleSlug)`** —
-  a recursive CTE (`WITH RECURSIVE`) returning the caller plus their
-  full subtree (not just direct reports — a direct-reports-only version
-  would silently hide a senior manager's sub-subordinates' leads, a
-  worse failure than showing "too much"). Service-layer, not RLS —
-  matches the existing precedent for `sales_exec` report-scoping
-  (Phase 4-UI decisions): this is a business-rule visibility question
-  about staff, not a tenant-isolation question, and every staff actor is
-  presumed benign-if-mistaken (Phase 6 decisions), unlike the portal
-  actors RLS exists to defend against as a primary control there.
-  Deliberately NOT an ambient/`AsyncLocalStorage`-injected filter —
-  that exact mechanism already produced two real IDOR bugs in Phase 6;
-  a plain function called explicitly at the top of each handler is
-  boring and correct.
-- **One-time audit + a durable guard against "forgotten on a new
-  endpoint."** Replace every existing ad hoc `assignedToId`/
-  `scopeToUserId` filter (today: `InquiryController.scopeFor()`) with
-  `TeamScopeService`, once, for every current team/lead-touching
-  endpoint. Then add a CI test (grep-based, mirroring this project's own
-  "audit every X pattern" precedent) that fails if a NEW literal
-  `assignedToId:`/`scopeToUserId` filter appears anywhere in
-  `apps/api/src` outside `TeamScopeService` itself — this is the part
-  that makes it durable rather than a one-time fix that quietly rots.
+- **`managerWiseInteractions()` (`presales/reports.service.ts`) is now
+  unblocked.** It's reported every active sales_manager's own
+  directly-logged interactions, not a team roll-up, since Phase 3 —
+  explicitly because no manager hierarchy field existed. It exists now.
+  Upgrading this to a real team roll-up (each manager's count including
+  their subtree, via `TeamScopeService.getVisibleUserIds`) is a natural
+  next step, but wasn't part of v0.4's asked-for scope — left as its own
+  small follow-up rather than built unprompted.
+- **`Booking` core CRUD (`booking.controller.ts`) stays unscoped.** Only
+  the Reports module scopes postsales data by owner (Phase 4-UI
+  precedent); the booking list/detail endpoints themselves show every
+  booking in the company to any staff user with the permission,
+  regardless of who created it. v0.4 deliberately didn't touch this —
+  Booking wasn't part of the "lead ownership" report's own scope, only
+  Inquiry/Applicant/FollowUp/Booking-*reports* were. Likely to come up
+  as a real pilot request once a company has enough sales reps that
+  "every rep can see every other rep's bookings" starts to matter —
+  worth designing for explicitly when it does, not scoped preemptively
+  now.
 - **Global search** — doesn't exist yet (confirmed by grep, not
   assumed). Must be built with `TeamScopeService` wired in from the
   first commit, not retrofitted after — building it search-first would
-  recreate exactly the "forgotten on a new endpoint" risk the guard
-  above exists to prevent.
+  recreate exactly the "forgotten on a new endpoint" risk
+  `team-scope-guard.test.ts` exists to prevent.
+
+## Phone as identifier — still approved, not yet built
+
 - **Phone as identifier, without a DB uniqueness constraint.** A hard
   `@@unique` on `primaryPhoneNormalized` is incompatible with real,
   legitimate cases the report named (family members sharing a number,

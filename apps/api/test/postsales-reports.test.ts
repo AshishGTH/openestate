@@ -100,7 +100,7 @@ describeIf('Postsales reports: reconciliation and role-scoping', () => {
     );
 
     const serviceBalance = await svc.ledger.balance(fx.companyId, booking.id);
-    const report = await reports.applicantLedger(fx.companyId, booking.id, {});
+    const report = await reports.applicantLedger(fx.companyId, booking.id, { visibleUserIds: null });
 
     expect(report.balancePaise).toBe(serviceBalance.toString());
     expect(BigInt(report.balancePaise)).toBe(L(20_00_000)); // 30L charge - 10L receipted
@@ -130,12 +130,12 @@ describeIf('Postsales reports: reconciliation and role-scoping', () => {
     // caused by this bounce, not an absolute total.
     const parsePaise = (formatted: string) => BigInt(formatted.replace(/[₹,]/g, '').replace(/\.\d\d$/, '')) * 100n;
 
-    const before = await reports.collectionSummary(fx.companyId, {});
+    const before = await reports.collectionSummary(fx.companyId, { visibleUserIds: null });
     const beforePaise = parsePaise(before.totalCollectedFormatted);
 
     await svc.receipts.recordChequeEvent(fx.companyId, chequeReceipt.id, { status: 'BOUNCED', eventDate: new Date('2026-06-22') }, execAId);
 
-    const after = await reports.collectionSummary(fx.companyId, {});
+    const after = await reports.collectionSummary(fx.companyId, { visibleUserIds: null });
     const afterPaise = parsePaise(after.totalCollectedFormatted);
     expect(beforePaise - afterPaise).toBe(L(6_00_000)); // bounced cheque excluded
 
@@ -147,13 +147,13 @@ describeIf('Postsales reports: reconciliation and role-scoping', () => {
     const { booking } = await bookedByExec(L(10_00_000), execAId);
 
     const asExecA: string[] = [];
-    for await (const row of reports.installmentDues(fx.companyId, { scopeToCreatedById: execAId })) {
+    for await (const row of reports.installmentDues(fx.companyId, { visibleUserIds: [execAId] })) {
       asExecA.push(row[0] as string); // booking number column
     }
     expect(asExecA).toContain(booking.bookingNumber);
 
     const asExecB: string[] = [];
-    for await (const row of reports.installmentDues(fx.companyId, { scopeToCreatedById: execBId })) {
+    for await (const row of reports.installmentDues(fx.companyId, { visibleUserIds: [execBId] })) {
       asExecB.push(row[0] as string);
     }
     expect(asExecB).not.toContain(booking.bookingNumber);
@@ -161,10 +161,10 @@ describeIf('Postsales reports: reconciliation and role-scoping', () => {
     // Service-level check backs this up beyond the list view: a direct
     // applicant-ledger fetch by booking id 404s outside the exec's scope.
     await expect(
-      reports.applicantLedger(fx.companyId, booking.id, { scopeToCreatedById: execBId }),
+      reports.applicantLedger(fx.companyId, booking.id, { visibleUserIds: [execBId] }),
     ).rejects.toBeInstanceOf(NotFoundException);
 
-    const ownReport = await reports.applicantLedger(fx.companyId, booking.id, { scopeToCreatedById: execAId });
+    const ownReport = await reports.applicantLedger(fx.companyId, booking.id, { visibleUserIds: [execAId] });
     expect(ownReport.bookingId).toBe(booking.id);
   });
 });

@@ -2,19 +2,15 @@ import { Controller, Get, Param, Query, Req, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { createZodDto } from 'nestjs-zod';
-import { reportDateRangeSchema, PERMISSIONS, SYSTEM_ROLES } from '@openestate/shared';
+import { reportDateRangeSchema, PERMISSIONS } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
 import { PostsalesReportsService, type ReportScope } from './postsales-reports.service';
+import { TeamScopeService } from '../team-scope/team-scope.service';
 import { streamCsv } from './csv-stream.util';
 import { toCsv } from '../presales/csv.util';
 
 class ReportQueryDto extends createZodDto(reportDateRangeSchema) {}
-
-function scopeFor(user: JwtPayload): ReportScope {
-  if (user.roleSlug === SYSTEM_ROLES.SALES_EXECUTIVE) return { scopeToCreatedById: user.sub };
-  return {};
-}
 
 async function collect<T>(iter: AsyncIterable<T>): Promise<T[]> {
   const out: T[] = [];
@@ -25,7 +21,19 @@ async function collect<T>(iter: AsyncIterable<T>): Promise<T[]> {
 @ApiTags('Postsales Reports')
 @Controller('reports/postsales')
 export class PostsalesReportsController {
-  constructor(private readonly reports: PostsalesReportsService) {}
+  constructor(
+    private readonly reports: PostsalesReportsService,
+    private readonly teamScope: TeamScopeService,
+  ) {}
+
+  private async scopeFor(user: JwtPayload): Promise<ReportScope> {
+    const visibleUserIds = await this.teamScope.getVisibleUserIds(
+      user.companyId,
+      user.sub,
+      user.roleSlug,
+    );
+    return { visibleUserIds };
+  }
 
   @Get('installment-dues')
   @RequirePermissions(PERMISSIONS.REPORTS_OUTSTANDING_VIEW)
@@ -33,7 +41,7 @@ export class PostsalesReportsController {
   async installmentDues(@Query() q: ReportQueryDto, @Req() req: Request, @Res() res: Response) {
     const u = req.user as JwtPayload;
     const headers = ['Booking No.', 'Applicant', 'Installment', 'Due Date', 'Outstanding', 'Overdue Days'];
-    const gen = this.reports.installmentDues(u.companyId, scopeFor(u), q.projectId, false);
+    const gen = this.reports.installmentDues(u.companyId, await this.scopeFor(u), q.projectId, false);
     if (q.format === 'csv') return streamCsv(res, 'installment-dues.csv', headers, gen);
     res.json(await collect(gen));
   }
@@ -44,7 +52,7 @@ export class PostsalesReportsController {
   async installmentDuesWithInterest(@Query() q: ReportQueryDto, @Req() req: Request, @Res() res: Response) {
     const u = req.user as JwtPayload;
     const headers = ['Booking No.', 'Applicant', 'Installment', 'Due Date', 'Outstanding', 'Overdue Days', 'Accrued Interest'];
-    const gen = this.reports.installmentDues(u.companyId, scopeFor(u), q.projectId, true);
+    const gen = this.reports.installmentDues(u.companyId, await this.scopeFor(u), q.projectId, true);
     if (q.format === 'csv') return streamCsv(res, 'installment-dues-interest.csv', headers, gen);
     res.json(await collect(gen));
   }
@@ -54,7 +62,7 @@ export class PostsalesReportsController {
   @ApiOperation({ summary: 'Overdue-installment ageing buckets (0-7/8-30/31-90/90+)' })
   async duesAgeing(@Query() q: ReportQueryDto, @Req() req: Request) {
     const u = req.user as JwtPayload;
-    return this.reports.duesAgeing(u.companyId, scopeFor(u), q.projectId);
+    return this.reports.duesAgeing(u.companyId, await this.scopeFor(u), q.projectId);
   }
 
   @Get('collection/detail')
@@ -63,7 +71,7 @@ export class PostsalesReportsController {
   async collectionDetail(@Query() q: ReportQueryDto, @Req() req: Request, @Res() res: Response) {
     const u = req.user as JwtPayload;
     const headers = ['Receipt No.', 'Date', 'Booking No.', 'Applicant', 'Mode', 'Amount'];
-    const gen = this.reports.collectionDetail(u.companyId, scopeFor(u), q.from, q.to, q.projectId);
+    const gen = this.reports.collectionDetail(u.companyId, await this.scopeFor(u), q.from, q.to, q.projectId);
     if (q.format === 'csv') return streamCsv(res, 'collection-detail.csv', headers, gen);
     res.json(await collect(gen));
   }
@@ -73,7 +81,7 @@ export class PostsalesReportsController {
   @ApiOperation({ summary: 'Collection summary (count + total)' })
   async collectionSummary(@Query() q: ReportQueryDto, @Req() req: Request) {
     const u = req.user as JwtPayload;
-    return this.reports.collectionSummary(u.companyId, scopeFor(u), q.from, q.to, q.projectId);
+    return this.reports.collectionSummary(u.companyId, await this.scopeFor(u), q.from, q.to, q.projectId);
   }
 
   @Get('collection/daily')
@@ -82,7 +90,7 @@ export class PostsalesReportsController {
   async collectionDaily(@Query() q: ReportQueryDto, @Req() req: Request, @Res() res: Response) {
     const u = req.user as JwtPayload;
     const headers = ['Date', 'Total'];
-    const gen = this.reports.collectionByPeriod(u.companyId, scopeFor(u), 'daily', q.from, q.to, q.projectId);
+    const gen = this.reports.collectionByPeriod(u.companyId, await this.scopeFor(u), 'daily', q.from, q.to, q.projectId);
     if (q.format === 'csv') return streamCsv(res, 'collection-daily.csv', headers, gen);
     res.json(await collect(gen));
   }
@@ -93,7 +101,7 @@ export class PostsalesReportsController {
   async collectionMonthly(@Query() q: ReportQueryDto, @Req() req: Request, @Res() res: Response) {
     const u = req.user as JwtPayload;
     const headers = ['Month', 'Total'];
-    const gen = this.reports.collectionByPeriod(u.companyId, scopeFor(u), 'monthly', q.from, q.to, q.projectId);
+    const gen = this.reports.collectionByPeriod(u.companyId, await this.scopeFor(u), 'monthly', q.from, q.to, q.projectId);
     if (q.format === 'csv') return streamCsv(res, 'collection-monthly.csv', headers, gen);
     res.json(await collect(gen));
   }
@@ -108,7 +116,7 @@ export class PostsalesReportsController {
     @Res() res: Response,
   ) {
     const u = req.user as JwtPayload;
-    const result = await this.reports.applicantLedger(u.companyId, bookingId, scopeFor(u));
+    const result = await this.reports.applicantLedger(u.companyId, bookingId, await this.scopeFor(u));
     if (q.format === 'csv') {
       const headers = ['Date', 'Type', 'Reason', 'Signed Amount (paise)', 'Running Balance (paise)'];
       async function* rows(): AsyncGenerator<unknown[]> {

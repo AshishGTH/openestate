@@ -58,14 +58,31 @@ export class UsersService {
           totpEnabled: true,
           lastLoginAt: true,
           createdAt: true,
+          managerId: true,
           role: { select: { id: true, name: true, slug: true } },
         },
       }),
       this.systemPrisma.user.count({ where }),
     ]);
 
+    // managerId has no Prisma relation (User relation-bloat policy) — the
+    // manager's display name is resolved with a second, small lookup
+    // rather than an `include`, same trade-off as every other User-linked
+    // scalar FK in this codebase.
+    const managerIds = [...new Set(data.map((u: { managerId: string | null }) => u.managerId).filter((id: string | null): id is string => id !== null))];
+    const managers = managerIds.length
+      ? await this.systemPrisma.user.findMany({
+          where: { id: { in: managerIds }, companyId },
+          select: { id: true, name: true },
+        })
+      : [];
+    const managerNameById = new Map(managers.map((m: { id: string; name: string }) => [m.id, m.name]));
+
     return {
-      data,
+      data: data.map((u: { managerId: string | null }) => ({
+        ...u,
+        managerName: u.managerId ? (managerNameById.get(u.managerId) ?? null) : null,
+      })),
       meta: {
         page,
         limit,
@@ -89,6 +106,7 @@ export class UsersService {
         lastLoginAt: true,
         createdAt: true,
         updatedAt: true,
+        managerId: true,
         role: { select: { id: true, name: true, slug: true } },
       },
     });
@@ -103,6 +121,9 @@ export class UsersService {
     if (existing) {
       throw new BadRequestException('Email already in use');
     }
+    if (dto.managerId !== undefined) {
+      await this.assertValidManager(companyId, null, dto.managerId);
+    }
 
     const hash = await argon2.hash(dto.password, { algorithm: argon2.Algorithm.Argon2id });
 
@@ -116,6 +137,7 @@ export class UsersService {
             passwordHash: hash,
             roleId: dto.roleId,
             phone: dto.phone,
+            managerId: dto.managerId ?? null,
             forcePasswordChange: true,
           },
           select: {
@@ -123,6 +145,7 @@ export class UsersService {
             email: true,
             name: true,
             phone: true,
+            managerId: true,
             createdAt: true,
           },
         }),
@@ -132,6 +155,9 @@ export class UsersService {
 
   async update(companyId: string, userId: string, dto: UpdateUserDto) {
     await this.findOne(companyId, userId);
+    if (dto.managerId !== undefined) {
+      await this.assertValidManager(companyId, userId, dto.managerId);
+    }
 
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>
@@ -143,12 +169,59 @@ export class UsersService {
             email: true,
             name: true,
             phone: true,
+            managerId: true,
             updatedAt: true,
             role: { select: { id: true, name: true, slug: true } },
           },
         }),
       ),
     );
+  }
+
+  /**
+   * Validates a candidate managerId before it's written: must exist in the
+   * same company, can't be the user's own id, and can't create a cycle.
+   *
+   * Cycle check is a bounded walk (cap 20 hops — deep enough for any real
+   * org chart) up the CANDIDATE's own manager chain: if it reaches back to
+   * `userId`, assigning this manager would close a loop. This is
+   * defense-in-depth, not the only thing preventing cycles — every write
+   * goes through this function, so a cycle should never exist in stored
+   * data in the first place. Postgres has no native cycle prevention for
+   * adjacency lists, and TeamScopeService's recursive CTE assumes an
+   * acyclic graph (an actual cycle there would loop until Postgres's own
+   * recursion-depth safety net kills the query) — this check is what keeps
+   * that assumption true.
+   */
+  private async assertValidManager(
+    companyId: string,
+    userId: string | null,
+    candidateManagerId: string | null,
+  ): Promise<void> {
+    if (candidateManagerId === null) return;
+    if (userId !== null && candidateManagerId === userId) {
+      throw new BadRequestException('A user cannot be their own manager');
+    }
+    const candidate = await this.systemPrisma.user.findFirst({
+      where: { id: candidateManagerId, companyId },
+      select: { managerId: true },
+    });
+    if (!candidate) {
+      throw new BadRequestException('Manager not found in this company');
+    }
+    if (userId === null) return; // creating a new user — no cycle possible yet
+
+    let current: string | null = candidate.managerId;
+    for (let hop = 0; hop < 20 && current; hop++) {
+      if (current === userId) {
+        throw new BadRequestException('This manager assignment would create a management cycle');
+      }
+      const row: { managerId: string | null } | null = await this.systemPrisma.user.findFirst({
+        where: { id: current, companyId },
+        select: { managerId: true },
+      });
+      current = row?.managerId ?? null;
+    }
   }
 
   async deactivate(companyId: string, userId: string) {

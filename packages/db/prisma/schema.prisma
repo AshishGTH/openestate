@@ -126,6 +126,13 @@ model User {
   roleId              String  @map("role_id") @db.Uuid
   isActive            Boolean @default(true) @map("is_active")
   forcePasswordChange Boolean @default(true) @map("force_password_change")
+  // Manager hierarchy (v0.4): scalar FK + DB-level constraint, not a Prisma
+  // relation — same "no back-relation bloat on User" policy as every other
+  // User-linked FK (Phase 4 decisions). Cycle-checked at the service layer
+  // on write (TeamScopeService's recursive CTE has no cycle protection of
+  // its own — see UsersService.assertValidManager). Manager name for
+  // display is resolved by a separate lookup, not an `include`.
+  managerId           String? @map("manager_id") @db.Uuid
 
   totpSecret    String?  @map("totp_secret") @db.VarChar(255)
   totpEnabled   Boolean  @default(false) @map("totp_enabled")
@@ -168,6 +175,7 @@ model User {
 
   @@unique([companyId, email])
   @@index([companyId, phone])
+  @@index([companyId, managerId])
   @@map("users")
 }
 

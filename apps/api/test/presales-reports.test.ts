@@ -72,7 +72,7 @@ describeIf('Presales reports: ageing buckets + funnel reconciliation', () => {
         await systemPrisma.$executeRaw`UPDATE inquiries SET created_at = ${daysAgo(fixtures[i].days)} WHERE id = ${created[i].id}::uuid`;
       }
 
-      const buckets = await reportsService.ageingBuckets(companyId, {});
+      const buckets = await reportsService.ageingBuckets(companyId, { visibleUserIds: null });
       const byBucket = new Map(buckets.map((b: { bucket: string; count: number }) => [b.bucket, b.count]));
 
       expect(byBucket.get('0-7')).toBe(2);
@@ -120,7 +120,7 @@ describeIf('Presales reports: ageing buckets + funnel reconciliation', () => {
     });
 
     it('funnel counts reconcile exactly against raw per-status counts', async () => {
-      const funnel = await reportsService.funnelByStatus(funnelCompanyId, {});
+      const funnel = await reportsService.funnelByStatus(funnelCompanyId, { visibleUserIds: null });
       const funnelTotal = funnel.reduce((sum: number, r: { count: number }) => sum + r.count, 0);
 
       const rawTotal = await systemPrisma.inquiry.count({ where: { companyId: funnelCompanyId } });

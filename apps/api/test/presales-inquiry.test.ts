@@ -86,7 +86,7 @@ describeIf('Inquiry role scoping and import', () => {
     const resultForA = await inquiryService.findAll(
       companyId,
       { page: 1, limit: 50, sortOrder: 'asc' },
-      { scopeToUserId: execAId },
+      { visibleUserIds: [execAId] },
     );
     expect(resultForA.data.every((i: { id: string }) => i.id !== inqB.id)).toBe(true);
     expect(resultForA.data.some((i: { id: string }) => i.id === inqA.id)).toBe(true);
@@ -94,7 +94,7 @@ describeIf('Inquiry role scoping and import', () => {
     const resultForManager = await inquiryService.findAll(
       companyId,
       { page: 1, limit: 50, sortOrder: 'asc' },
-      {},
+      { visibleUserIds: null },
     );
     const ids = resultForManager.data.map((i: { id: string }) => i.id);
     expect(ids).toContain(inqA.id);
@@ -108,7 +108,7 @@ describeIf('Inquiry role scoping and import', () => {
     await systemPrisma.inquiry.update({ where: { id: inq.id }, data: { assignedToId: execBId } });
 
     await expect(
-      inquiryService.findOne(companyId, inq.id, { scopeToUserId: execAId }),
+      inquiryService.findOne(companyId, inq.id, { visibleUserIds: [execAId] }),
     ).rejects.toThrow();
   });
 
