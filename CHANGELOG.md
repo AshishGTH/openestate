@@ -25,6 +25,23 @@ existing scoping, and changes what non-admin roles can see.
   shouldn't see each other's pipelines, upgrade — this was open on every
   prior version.
 
+### Changed — behavioral change for existing installs, read this before upgrading
+
+- **Before this release, every role except `sales_executive` — including
+  `sales_manager` — saw the ENTIRE company's inquiries and reports.**
+  Only `sales_executive` was restricted to their own queue; every other
+  role had no real scoping at all, just a blanket "see everything."
+  After this release, every role other than `company_admin`/
+  `super_admin` sees only their own reporting subtree, computed from
+  `User.managerId`. This is the correct behavior — it's the entire point
+  of this release — but it is a real, visible change: **a user with no
+  `managerId` set will see only their own leads after upgrading, even if
+  they used to see the whole company.** Configure your org chart (set
+  each manager's reports' `managerId`) after upgrading, before your
+  managers ask where their team's leads went — otherwise this will look
+  like the release lost their data, not like a permissions model working
+  as intended.
+
 ### Added
 
 - **`User.managerId`** — set a user's manager from the Add/Edit User
@@ -38,21 +55,11 @@ existing scoping, and changes what non-admin roles can see.
   pre-sales and post-sales report modules, are now scoped by this
   hierarchy** via a new `TeamScopeService`, replacing three separate
   hand-rolled scoping checks with one.
-
-### Changed — behavior change for existing installs, read this before upgrading
-
-- **Before this release, every role except `sales_executive` — including
-  `sales_manager` — saw the ENTIRE company's inquiries and reports.**
-  Only `sales_executive` was restricted to their own queue; every other
-  role had no real scoping at all, just a blanket "see everything."
-  After this release, every role other than `company_admin`/
-  `super_admin` sees only their own reporting subtree, computed from
-  `User.managerId`. This is the correct behavior — it's the entire point
-  of this release — but it is a real, visible change: **a user with no
-  `managerId` set will see only their own leads after upgrading, even if
-  they used to see the whole company.** Configure your org chart (set
-  each manager's reports' `managerId`) after upgrading, before your
-  managers ask where their team's leads went.
+- **Manager-level users with zero reports configured now see an inline
+  hint on the Inquiries list** ("Your team has no reports configured
+  yet...") pointing at Admin → Users, instead of a silent "No data
+  found" that's indistinguishable from actually having no leads. Closes
+  the exact confusion the behavioral change above would otherwise cause.
 
 ## [0.3.1]
 
