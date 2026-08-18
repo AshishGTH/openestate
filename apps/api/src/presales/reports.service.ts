@@ -5,8 +5,13 @@ import { computeAgeingBucket, AGEING_BUCKETS, type Clock } from '@openestate/sha
 import { CLOCK } from '../common/clock.provider';
 
 export interface ReportScope {
-  /** sales_executive: restrict every report to this user's own numbers. */
-  scopeToUserId?: string;
+  /**
+   * `null` = admin-tier caller, no restriction. A finite array restricts
+   * every report to inquiries assigned to one of these user ids — the
+   * caller's own id plus their full reporting subtree
+   * (`TeamScopeService.getVisibleUserIds`).
+   */
+  visibleUserIds: string[] | null;
 }
 
 const BUDGET_BANDS: Array<{ label: string; minPaise: bigint; maxPaise: bigint | null }> = [
@@ -27,8 +32,8 @@ export class ReportsService {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private scopedWhere(companyId: string, scope: ReportScope): any {
-    return scope.scopeToUserId
-      ? { companyId, assignedToId: scope.scopeToUserId }
+    return scope.visibleUserIds
+      ? { companyId, assignedToId: { in: scope.visibleUserIds } }
       : { companyId };
   }
 

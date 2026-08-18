@@ -13,6 +13,11 @@ interface Role {
   slug: string;
 }
 
+interface UserOption {
+  id: string;
+  name: string;
+}
+
 export default function UserForm() {
   const { id } = useParams<{ id: string }>();
   const isEdit = id && id !== 'new';
@@ -25,6 +30,15 @@ export default function UserForm() {
     queryKey: ['roles-all'],
     queryFn: () => api('/roles'),
   });
+
+  // GET /users IS paginated ({data, meta}) — 100 is paginationQuerySchema's
+  // own max limit, the most this endpoint will ever return in one page
+  // without building a search-as-you-type control.
+  const { data: usersPage } = useQuery({
+    queryKey: ['users-all-for-manager-picker'],
+    queryFn: () => api<{ data: UserOption[] }>('/users?limit=100'),
+  });
+  const managerOptions = (usersPage?.data ?? []).filter((u) => u.id !== id);
 
   const { data: existingUser } = useQuery({
     queryKey: ['user', id],
@@ -60,7 +74,7 @@ export default function UserForm() {
     // retroactively apply once the options DO render. Gating on both
     // queries means reset() only runs once the role dropdown actually has
     // something for roleId to match against.
-    if (existingUser && roles) {
+    if (existingUser && roles && usersPage) {
       // Real bug, caught by a Playwright run of this exact flow: reset()
       // seeds react-hook-form's internal values for EVERY key passed to
       // it, regardless of whether that field is currently rendered as an
@@ -79,9 +93,10 @@ export default function UserForm() {
         name: existingUser.name as string,
         phone: (existingUser.phone as string) ?? undefined,
         roleId: (existingUser.role as Role)?.id,
+        managerId: (existingUser.managerId as string | null) ?? null,
       });
     }
-  }, [existingUser, roles, reset]);
+  }, [existingUser, roles, usersPage, reset]);
 
   const createMutation = useApiMutation<unknown, CreateUserDto>(
     'POST',
@@ -199,6 +214,32 @@ export default function UserForm() {
             ))}
           </select>
           {errors.roleId && <p className="mt-1 text-xs text-red-600">{errors.roleId.message}</p>}
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-slate-700">Manager</label>
+          <select
+            {...register('managerId', {
+              // Native <select>s only ever produce strings — zod's
+              // `.nullable()` expects a real null for "no manager", not
+              // the empty string an unset select gives back.
+              setValueAs: (v) => (v === '' ? null : v),
+            })}
+            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          >
+            <option value="">No manager</option>
+            {managerOptions.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+              </option>
+            ))}
+          </select>
+          {errors.managerId && (
+            <p className="mt-1 text-xs text-red-600">{errors.managerId.message}</p>
+          )}
+          <p className="mt-1 text-xs text-slate-500">
+            Determines what this user's manager can see in their leads/reports lists.
+          </p>
         </div>
 
         <div className="flex gap-3 pt-2">

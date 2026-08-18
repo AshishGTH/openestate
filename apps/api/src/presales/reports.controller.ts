@@ -1,16 +1,12 @@
 import { Controller, Get, Query, Req, Res } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
-import { PERMISSIONS, SYSTEM_ROLES } from '@openestate/shared';
+import { PERMISSIONS } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
 import { ReportsService, type ReportScope } from './reports.service';
+import { TeamScopeService } from '../team-scope/team-scope.service';
 import { toCsv } from './csv.util';
-
-function scopeFor(user: JwtPayload): ReportScope {
-  if (user.roleSlug === SYSTEM_ROLES.SALES_EXECUTIVE) return { scopeToUserId: user.sub };
-  return {};
-}
 
 function respond(res: Response, format: string | undefined, filename: string, rows: unknown[]) {
   if (format === 'csv') {
@@ -27,7 +23,19 @@ function respond(res: Response, format: string | undefined, filename: string, ro
 @ApiTags('Presales Reports')
 @Controller('reports/presales')
 export class ReportsController {
-  constructor(private readonly reportsService: ReportsService) {}
+  constructor(
+    private readonly reportsService: ReportsService,
+    private readonly teamScope: TeamScopeService,
+  ) {}
+
+  private async scopeFor(user: JwtPayload): Promise<ReportScope> {
+    const visibleUserIds = await this.teamScope.getVisibleUserIds(
+      user.companyId,
+      user.sub,
+      user.roleSlug,
+    );
+    return { visibleUserIds };
+  }
 
   @Get('daily-inquiries')
   @RequirePermissions(PERMISSIONS.PRESALES_REPORT_VIEW)
@@ -42,7 +50,7 @@ export class ReportsController {
     const rows = await this.reportsService.dailyInquiriesStaffWise(
       user.companyId,
       date ? new Date(date) : new Date(),
-      scopeFor(user),
+      await this.scopeFor(user),
     );
     respond(res, format, 'daily-inquiries', rows);
   }
@@ -58,7 +66,7 @@ export class ReportsController {
     @Res() res: Response,
   ) {
     const user = req.user as JwtPayload;
-    const rows = await this.reportsService.inquiriesExport(user.companyId, scopeFor(user));
+    const rows = await this.reportsService.inquiriesExport(user.companyId, await this.scopeFor(user));
     respond(res, format, 'inquiries-export', rows);
   }
 
@@ -71,7 +79,7 @@ export class ReportsController {
     @Res() res: Response,
   ) {
     const user = req.user as JwtPayload;
-    const rows = await this.reportsService.funnelByStatus(user.companyId, scopeFor(user));
+    const rows = await this.reportsService.funnelByStatus(user.companyId, await this.scopeFor(user));
     respond(res, format, 'funnel', rows);
   }
 
@@ -84,7 +92,7 @@ export class ReportsController {
     @Res() res: Response,
   ) {
     const user = req.user as JwtPayload;
-    const rows = await this.reportsService.sourceWiseConversion(user.companyId, scopeFor(user));
+    const rows = await this.reportsService.sourceWiseConversion(user.companyId, await this.scopeFor(user));
     respond(res, format, 'source-wise', rows);
   }
 
@@ -97,7 +105,7 @@ export class ReportsController {
     @Res() res: Response,
   ) {
     const user = req.user as JwtPayload;
-    const rows = await this.reportsService.budgetBandAnalysis(user.companyId, scopeFor(user));
+    const rows = await this.reportsService.budgetBandAnalysis(user.companyId, await this.scopeFor(user));
     respond(res, format, 'budget-band', rows);
   }
 
@@ -110,7 +118,7 @@ export class ReportsController {
     @Res() res: Response,
   ) {
     const user = req.user as JwtPayload;
-    const rows = await this.reportsService.ageingBuckets(user.companyId, scopeFor(user));
+    const rows = await this.reportsService.ageingBuckets(user.companyId, await this.scopeFor(user));
     respond(res, format, 'ageing', rows);
   }
 
@@ -123,7 +131,7 @@ export class ReportsController {
     @Res() res: Response,
   ) {
     const user = req.user as JwtPayload;
-    const rows = await this.reportsService.staffPerformance(user.companyId, scopeFor(user));
+    const rows = await this.reportsService.staffPerformance(user.companyId, await this.scopeFor(user));
     respond(res, format, 'staff-performance', rows);
   }
 

@@ -6,8 +6,13 @@ import { CLOCK } from '../common/clock.provider';
 import { LedgerService } from '../postsales/ledger.service';
 
 export interface ReportScope {
-  /** sales_executive: restrict to bookings THEY created. */
-  scopeToCreatedById?: string;
+  /**
+   * `null` = admin-tier caller, no restriction. A finite array restricts
+   * to bookings created by one of these user ids — the caller's own id
+   * plus their full reporting subtree
+   * (`TeamScopeService.getVisibleUserIds`).
+   */
+  visibleUserIds: string[] | null;
 }
 
 @Injectable()
@@ -24,7 +29,7 @@ export class PostsalesReportsService {
   private bookingWhere(companyId: string, scope: ReportScope, projectId?: string): any {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = { companyId };
-    if (scope.scopeToCreatedById) where.createdById = scope.scopeToCreatedById;
+    if (scope.visibleUserIds) where.createdById = { in: scope.visibleUserIds };
     if (projectId) where.unit = { floor: { tower: { projectId } } };
     return where;
   }

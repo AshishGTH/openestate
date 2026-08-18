@@ -193,11 +193,19 @@ describeIf('e2e /inquiries/import-template and /inquiries/import', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.createdCount).toBe(1);
 
-    const listRes = await agent
-      .get('/api/v1/inquiries')
-      .set('Authorization', `Bearer ${token}`)
-      .expect(200);
-    const names = (listRes.body.data as Array<{ applicant: { name: string } }>).map((i) => i.applicant.name);
-    expect(names).toContain(`E2E Import Applicant ${TAG}`);
+    // Not via GET /inquiries as this same importer: v0.4's TeamScopeService
+    // now scopes that list to the caller's own assignedToId, and a bulk
+    // import with no configured pool leaves the row unassigned
+    // (AssignmentService.autoAssign returns null for an empty pool) — an
+    // unassigned inquiry is invisible to any non-admin-tier scoped caller
+    // by design (the same was already true of the old sales_executive-only
+    // scoping; it just applies more broadly now). Confirming the row was
+    // actually created is a direct DB read; inquiry VISIBILITY is
+    // e2e-team-scope.test.ts's concern, not this file's.
+    const created = await systemPrisma.inquiry.findFirst({
+      where: { companyId: fx.companyId, applicant: { name: `E2E Import Applicant ${TAG}` } },
+      include: { applicant: true },
+    });
+    expect(created?.applicant.name).toBe(`E2E Import Applicant ${TAG}`);
   });
 });

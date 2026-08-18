@@ -3,6 +3,57 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0]
+
+Lead ownership and manager hierarchy — the second half of the v0.3.1
+pilot-user triage's "big one," deferred out of that release for its own
+design pass. Adds `User.managerId` and a proper reporting-subtree
+visibility model, fixes a real security bug found while auditing the
+existing scoping, and changes what non-admin roles can see.
+
+### Security
+
+- **A sales executive could read, create, and update follow-ups on any
+  colleague's inquiry, just by knowing its id — bypassing the
+  inquiry-level scoping entirely.** `FollowUpController` only ever
+  checked `companyId`, never whether the caller could actually see the
+  parent inquiry. This is a live bug that has been shipping since
+  follow-ups were built, not something introduced by this release — it
+  surfaced during the audit for the manager-hierarchy work below. Fixed:
+  every follow-up read/create/update now confirms the parent inquiry is
+  in the caller's visible set first. If you have sales executives who
+  shouldn't see each other's pipelines, upgrade — this was open on every
+  prior version.
+
+### Added
+
+- **`User.managerId`** — set a user's manager from the Add/Edit User
+  form. Drives who can see whose leads, applicants' inquiries, and
+  reports: a manager sees their own work plus their FULL reporting
+  subtree (not just direct reports), computed live on every request — no
+  caching, so a manager change takes effect immediately for whoever it
+  affects, no re-login needed. Cycle-safe: the form (and the API) reject
+  a manager assignment that would create a loop.
+- **Every inquiry list/detail/update/assign endpoint, and both the
+  pre-sales and post-sales report modules, are now scoped by this
+  hierarchy** via a new `TeamScopeService`, replacing three separate
+  hand-rolled scoping checks with one.
+
+### Changed — behavior change for existing installs, read this before upgrading
+
+- **Before this release, every role except `sales_executive` — including
+  `sales_manager` — saw the ENTIRE company's inquiries and reports.**
+  Only `sales_executive` was restricted to their own queue; every other
+  role had no real scoping at all, just a blanket "see everything."
+  After this release, every role other than `company_admin`/
+  `super_admin` sees only their own reporting subtree, computed from
+  `User.managerId`. This is the correct behavior — it's the entire point
+  of this release — but it is a real, visible change: **a user with no
+  `managerId` set will see only their own leads after upgrading, even if
+  they used to see the whole company.** Configure your org chart (set
+  each manager's reports' `managerId`) after upgrading, before your
+  managers ask where their team's leads went.
+
 ## [0.3.1]
 
 First real pilot-user feedback, triaged and fixed. Three critical bugs

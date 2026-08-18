@@ -28,7 +28,6 @@ describeIf('Follow-ups: timeline, site visit, my day', () => {
   beforeAll(async () => {
     tenantPrisma = createTenantPrismaClient(APP_URL!);
     systemPrisma = createSystemPrismaClient(SYSTEM_URL!);
-    followUpService = new FollowUpService(tenantPrisma, systemPrisma);
     const assignmentService = new AssignmentService(tenantPrisma);
     inquiryService = new InquiryService(
       tenantPrisma,
@@ -41,6 +40,7 @@ describeIf('Follow-ups: timeline, site visit, my day', () => {
       undefined as never,
       new CustomFieldsService(tenantPrisma, systemPrisma),
     );
+    followUpService = new FollowUpService(tenantPrisma, systemPrisma, inquiryService);
 
     const company = await systemPrisma.company.create({
       data: { name: 'FollowUp Test Co', slug: `followup-test-${Date.now()}` },
@@ -87,12 +87,13 @@ describeIf('Follow-ups: timeline, site visit, my day', () => {
         venue: 'Sample Flat, Tower A',
       },
       userId,
+      { visibleUserIds: null },
     );
 
     expect(followUp.venue).toBe('Sample Flat, Tower A');
     expect(followUp.scheduledAt).not.toBeNull();
 
-    const timeline = await followUpService.findAllForInquiry(companyId, inquiry.id);
+    const timeline = await followUpService.findAllForInquiry(companyId, inquiry.id, { visibleUserIds: null });
     expect(timeline).toHaveLength(1);
     expect(timeline[0].type.name).toBe('Site Visit');
   });
