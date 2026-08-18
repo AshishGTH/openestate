@@ -7,8 +7,30 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 First real pilot-user feedback, triaged and fixed. Three critical bugs
 (hit hourly by a working sales team), two "check before building" items
-that turned out to be backend-complete, and two security leaks found
-along the way.
+that turned out to be backend-complete, and a security leak found along
+the way.
+
+### Security
+
+- **Credential leak, fixed: staff-facing inquiry and follow-up
+  endpoints returned password hashes, TOTP secrets, and recovery codes
+  to any authenticated staff user.** `GET /inquiries`, `GET
+  /inquiries/:id`, and `GET /inquiries/:id/follow-ups` embedded the
+  full `User` row for `assignedTo`/`createdBy` — including
+  `passwordHash`, `totpSecret`, and `recoveryCodes` — because a bare
+  Prisma `include: { relation: true }` returns every scalar column on
+  the related model, not just the ones the UI displays. Any staff user
+  with read access to inquiries (not just admins) could see this data
+  in their browser's network tab on every list/detail/follow-up load.
+  Fixed by scoping both call sites (`InquiryService.findAll`/
+  `findOne`, `FollowUpService.findAllForInquiry`) to explicit `select`s
+  (`{id, name, email}` / `{id, name}`), verified absent both in a
+  through-the-wire regression test and by inspecting raw response JSON
+  on a live deployed instance. **If you are running v0.3.0 or earlier,
+  upgrade to v0.3.1 and rotate any staff password or TOTP secret you
+  consider exposed** — anyone who had inquiry-read access and inspected
+  network traffic (or logs, if any client/proxy captured response
+  bodies) during that window could have captured these values.
 
 ### Fixed
 
@@ -38,12 +60,6 @@ along the way.
   "no data yet" from "not allowed here." Every protected route now
   renders an access-denied screen instead when the user lacks the
   permission that gates it.
-- **Security: `assignedTo`/`createdBy` leaked full `User` rows —
-  `passwordHash`/`totpSecret`/`recoveryCodes` included — over the wire**,
-  found while wiring follow-up attribution display. A bare Prisma
-  `include: { relation: true }` returns every scalar column on the
-  related model; both call sites (`InquiryService.findAll`/`findOne`,
-  `FollowUpService.findAllForInquiry`) now use scoped `select`s.
 
 ### Added
 

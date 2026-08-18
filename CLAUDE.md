@@ -5068,3 +5068,34 @@ identifier handling (a persisted per-pair "confirmed distinct"
 decision instead of a DB uniqueness constraint, plus a per-company
 toggle for automated-path dedup strictness). Both are planned, not
 built yet — see `docs/todo.md` for the approved design of each.
+
+### Standing rule: never run concurrent Claude Code sessions against the same working directory
+
+This release is why. A background session was spawned mid-session to
+fix a flagged gap (`project_media`'s FK invisible to `prisma migrate
+dev` — see the "v0.3.1" entry above and the entry two above it for the
+original finding). It edited `schema.prisma` directly in the SAME
+checkout this session was actively working in — not an isolated
+worktree — adding a `project` relation on `ConstructionUpdate` and
+`ProjectMedia` without their required opposite side on `Project`
+(Prisma requires both). This session's own `git add -A` picked up
+that half-finished edit along with its own changes, because `git
+status --short` showing "just the expected files" was read as
+sufficient review — it wasn't; the file *list* matched, the file
+*content* didn't. The result shipped straight to `master` and broke
+CI's very first step on the next push.
+
+Two changes, going forward:
+- **Don't run a background/concurrent session against a working
+  directory another session is actively committing from.** If a
+  flagged follow-up needs to happen in parallel, it needs an isolated
+  worktree (or a directive to hold until the active session is
+  between commits) — not the same checkout.
+- **`git status --short` proves file identity, not correctness.**
+  Before any commit, when there's ANY reason to suspect a file was
+  touched by something other than your own edits this session (a
+  concurrent process, a stale editor, anything) — diff the actual
+  content (`git diff <file>`), not just the file list. This cost a
+  broken CI push and two follow-up fix commits to recover from; a
+  30-second `git diff` before the original commit would have caught
+  the missing back-relation immediately.
