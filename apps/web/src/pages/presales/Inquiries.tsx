@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { PERMISSIONS, SYSTEM_ROLES } from '@openestate/shared';
 import { usePaginatedQuery } from '../../lib/hooks';
+import { useAuth } from '../../lib/auth';
 import { api, downloadFile } from '../../lib/api';
 import DataTable, { type Column } from '../../components/DataTable';
 import Pagination from '../../components/Pagination';
@@ -67,7 +69,26 @@ export default function InquiriesPage() {
   const { definitions: applicantDefs } = useCustomFieldDefinitions('APPLICANT');
 
   const qc = useQueryClient();
+  const { user, hasPermission } = useAuth();
   const { data, isLoading } = usePaginatedQuery<Inquiry>(['inquiries'], '/inquiries', { page, limit: 20 });
+
+  // v0.4: an empty list here is ambiguous — genuinely no leads, or a
+  // manager-tier user whose team just isn't configured yet (TeamScopeService
+  // scopes them to their own subtree, which is empty with zero reports).
+  // PRESALES_INQUIRY_ASSIGN is a cheap, already-loaded proxy for
+  // "manager-tier" (sales_manager+ hold it, sales_executive doesn't) — no
+  // extra request unless the list is actually empty for that role.
+  const isManagerTier =
+    hasPermission(PERMISSIONS.PRESALES_INQUIRY_ASSIGN) &&
+    user?.roleSlug !== SYSTEM_ROLES.COMPANY_ADMIN &&
+    user?.roleSlug !== SYSTEM_ROLES.SUPER_ADMIN;
+  const listIsEmpty = !isLoading && (data?.data.length ?? 0) === 0;
+  const { data: reportsCheck } = useQuery({
+    queryKey: ['has-reports-check', user?.sub],
+    queryFn: () => api<{ data: Array<{ managerId: string | null }> }>('/users?limit=100'),
+    enabled: listIsEmpty && isManagerTier,
+  });
+  const noReportsConfigured = !!reportsCheck && !reportsCheck.data.some((u) => u.managerId === user?.sub);
 
   const { data: projects } = useQuery<{ data: Project[] }>({
     queryKey: ['projects', 'all'],
@@ -297,6 +318,16 @@ export default function InquiriesPage() {
             <button onClick={() => setShowForm(false)} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
           </div>
           {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+        </div>
+      )}
+
+      {listIsEmpty && isManagerTier && noReportsConfigured && (
+        <div className="mt-4 rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+          Your team has no reports configured yet, so you only see your own leads.{' '}
+          <Link to="/admin/users" className="font-medium underline">
+            Go to Admin → Users
+          </Link>{' '}
+          and set this user as each report's manager.
         </div>
       )}
 
