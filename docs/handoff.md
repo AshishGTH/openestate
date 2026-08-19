@@ -9,11 +9,22 @@ a decision was made, see CLAUDE.md's Decisions log — this file is only
 ## Verification VMs
 
 IPs on this project drift session to session — always confirm current
-before trusting this table, but as of 2026-08-18:
+before trusting this table, but as of 2026-08-19:
 
-| Box | IP | User | Password | Role |
-|---|---|---|---|---|
-| Upgraded / walkthrough | 192.168.1.21 | `newopen` | `open@123` | Long-lived, carries real demo data + upgrade history — currently on v0.3.1 |
+| Box | IP | User | Role |
+|---|---|---|---|
+| Upgraded / walkthrough | 192.168.1.21 | `newopen` | Long-lived, carries real demo data + upgrade history |
+
+**VM credentials (SSH login password, demo-admin app password) are kept
+outside this repo — ask a maintainer for the current values rather than
+expecting them here.** This table used to carry a plaintext SSH password
+and a later section carried a plaintext demo-admin password; both were
+already public (this repo is public) by the time that was noticed. Both
+have since been rotated and removed from this file. Do not reintroduce a
+real credential value into this file, or any other tracked file, going
+forward — a placeholder like `<password>` (already used in the plink
+example below) is correct; a real value is not, even for a low-stakes
+demo/test box.
 
 Only one box is currently known-reachable — the previous two-box table
 (192.168.0.117/118) went fully unreachable (not just those hosts —
@@ -42,7 +53,7 @@ every nested `sudo -u postgres` call `run_as_superuser()` makes (2 in
 `upgrade-native.sh`, so pipe the password ~4-5 times to be safe) — e.g.:
 
 ```bash
-printf 'open@123\nopen@123\nopen@123\nopen@123\nopen@123\n' | ssh -tt -i ~/.ssh/openestate_vm newopen@192.168.1.21 "cd /opt/openestate-src/deploy/native && sudo ./upgrade-native.sh"
+printf '<password>\n<password>\n<password>\n<password>\n<password>\n' | ssh -tt -i ~/.ssh/openestate_vm newopen@192.168.1.21 "cd /opt/openestate-src/deploy/native && sudo ./upgrade-native.sh"
 ```
 
 Without `-tt`, the nested `sudo -u postgres` call hangs indefinitely
@@ -82,7 +93,9 @@ these boxes don't have curl installed either).
 - Latest tagged release: check `git tag --sort=-v:refname | head -1`
   before assuming — this file is not guaranteed current on version
   number, only on infra facts above.
-- Demo admin on the walkthrough box (192.168.1.21):
-  `admin@demo-realty.com` / `ClickThrough#Verify1` (password was reset
-  during a prior session's verification pass — the original generated
-  password is not recoverable).
+- Demo admin on the walkthrough box (192.168.1.21): `admin@demo-realty.com`,
+  password kept outside this repo (see the credentials note above) — it
+  has been reset twice now (once mid-item-7, once during this cleanup)
+  because the previously-documented value kept ending up in git history.
+  If it's ever lost, `deploy/native/reset-admin-password.sh` recovers it
+  without needing the old value.
