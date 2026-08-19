@@ -22,6 +22,7 @@ import {
 import type { JwtPayload } from '@openestate/shared';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
 import { UsersService } from './users.service';
+import { TeamScopeService } from '../team-scope/team-scope.service';
 
 class CreateUserDto extends createZodDto(createUserSchema) {}
 class UpdateUserDto extends createZodDto(updateUserSchema) {}
@@ -30,7 +31,10 @@ class PaginationQueryDto extends createZodDto(paginationQuerySchema) {}
 @ApiTags('Users')
 @Controller('users')
 export class UsersController {
-  constructor(private readonly usersService: UsersService) {}
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly teamScope: TeamScopeService,
+  ) {}
 
   @Get()
   @RequirePermissions(PERMISSIONS.ADMIN_USER_READ)
@@ -38,6 +42,30 @@ export class UsersController {
   findAll(@Query() query: PaginationQueryDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.usersService.findAll(user.companyId, query);
+  }
+
+  /**
+   * MUST stay declared ABOVE `@Get(':id')`. Nest registers a controller's
+   * routes with Express in method-declaration order and Express matches
+   * the first pattern that fits, so with the order reversed a request for
+   * the literal path `/users/hierarchy` is swallowed as `id="hierarchy"`
+   * and 404s. This is the exact hazard that bit `/inquiries/import-template`
+   * (see CLAUDE.md v0.3.1) — the ordering here is load-bearing, not
+   * cosmetic.
+   */
+  @Get('hierarchy')
+  @RequirePermissions(PERMISSIONS.ADMIN_USER_READ)
+  @ApiOperation({
+    summary: "Read-only org tree, scoped to the caller's visible subtree (admins see the whole company)",
+  })
+  async hierarchy(@Req() req: Request) {
+    const user = req.user as JwtPayload;
+    const visibleUserIds = await this.teamScope.getVisibleUserIds(
+      user.companyId,
+      user.sub,
+      user.roleSlug,
+    );
+    return this.usersService.getHierarchy(user.companyId, visibleUserIds);
   }
 
   @Get(':id')
