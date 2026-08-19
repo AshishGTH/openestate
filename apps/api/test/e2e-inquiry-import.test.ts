@@ -36,6 +36,17 @@ const describeIf = APP_URL && SYSTEM_URL ? describe : describe.skip;
 const STAFF_PASSWORD = 'StaffPass123';
 const TAG = Date.now();
 
+// main.ts patches BigInt.prototype.toJSON so money fields (this file hits
+// it via CompanyConfig.chequeBounceChargePaise on PATCH /company/config,
+// exercised for the first time by the presalesPhoneDedupAutoLink toggle
+// tests below) serialize instead of crashing JSON.stringify — but every
+// e2e-*.test.ts file bootstraps AppModule directly, never main.ts's own
+// bootstrap(). See e2e-inquiry-assignment.test.ts for the same pattern.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(BigInt.prototype as any).toJSON = function (this: bigint) {
+  return this.toString();
+};
+
 async function bootstrapApp(): Promise<INestApplication> {
   process.env.DATABASE_URL = APP_URL;
   process.env.DATABASE_URL_SYSTEM = SYSTEM_URL;
@@ -100,7 +111,11 @@ describeIf('e2e /inquiries/import-template and /inquiries/import', () => {
       data: { companyId: fx.companyId, name: 'E2E Importer', slug: `e2e-importer-${TAG}`, isSystem: true },
     });
     await systemPrisma.rolePermission.createMany({
-      data: [PERMISSIONS.PRESALES_INQUIRY_IMPORT, PERMISSIONS.PRESALES_INQUIRY_READ].map((key) => ({
+      data: [
+        PERMISSIONS.PRESALES_INQUIRY_IMPORT,
+        PERMISSIONS.PRESALES_INQUIRY_READ,
+        PERMISSIONS.ADMIN_CONFIG_UPDATE,
+      ].map((key) => ({
         roleId: role.id,
         permissionId: permByKey.get(key),
       })),
@@ -207,5 +222,86 @@ describeIf('e2e /inquiries/import-template and /inquiries/import', () => {
       include: { applicant: true },
     });
     expect(created?.applicant.name).toBe(`E2E Import Applicant ${TAG}`);
+  });
+
+  // ── Item 7: CompanyConfig.presalesPhoneDedupAutoLink toggle ────
+
+  describe('presalesPhoneDedupAutoLink toggle', () => {
+    afterAll(async () => {
+      await systemPrisma.companyConfig.upsert({
+        where: { companyId: fx.companyId },
+        update: { presalesPhoneDedupAutoLink: true },
+        create: { companyId: fx.companyId, presalesPhoneDedupAutoLink: true },
+      });
+    });
+
+    it('default (on): a phone match against an existing applicant is auto-linked, not created', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const loginRes = await agent.post('/api/v1/auth/login').send({ email: staffEmail, password: STAFF_PASSWORD }).expect(200);
+      const csrf = extractCookie(loginRes.headers['set-cookie'], 'openestate_csrf');
+      const token = loginRes.body.accessToken as string;
+
+      const phone = `98123${TAG.toString().slice(-5)}`;
+      const first = await buildXlsx([{ applicantName: `Import Link First ${TAG}`, primaryPhone: phone }]);
+      await agent
+        .post('/api/v1/inquiries/import')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-CSRF-Token', csrf)
+        .attach('file', first, 'first.xlsx')
+        .expect(201);
+
+      const second = await buildXlsx([{ applicantName: `Import Link Second ${TAG}`, primaryPhone: phone }]);
+      const res = await agent
+        .post('/api/v1/inquiries/import')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-CSRF-Token', csrf)
+        .attach('file', second, 'second.xlsx')
+        .expect(201);
+
+      expect(res.body.linkedCount).toBe(1);
+      expect(res.body.flaggedCount).toBe(0);
+      const applicantCount = await systemPrisma.applicant.count({ where: { companyId: fx.companyId, primaryPhone: phone } });
+      expect(applicantCount).toBe(1);
+    });
+
+    it('off: a phone match is NOT auto-linked — a new applicant is created and reported in `flagged`', async () => {
+      const agent = request.agent(app.getHttpServer());
+      const loginRes = await agent.post('/api/v1/auth/login').send({ email: staffEmail, password: STAFF_PASSWORD }).expect(200);
+      const csrf = extractCookie(loginRes.headers['set-cookie'], 'openestate_csrf');
+      const token = loginRes.body.accessToken as string;
+
+      await agent
+        .patch('/api/v1/company/config')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-CSRF-Token', csrf)
+        .send({ presalesPhoneDedupAutoLink: false })
+        .expect(200);
+
+      const phone = `98124${TAG.toString().slice(-5)}`;
+      const first = await buildXlsx([{ applicantName: `Import Flag First ${TAG}`, primaryPhone: phone }]);
+      await agent
+        .post('/api/v1/inquiries/import')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-CSRF-Token', csrf)
+        .attach('file', first, 'first-flag.xlsx')
+        .expect(201);
+
+      const second = await buildXlsx([{ applicantName: `Import Flag Second ${TAG}`, primaryPhone: phone }]);
+      const res = await agent
+        .post('/api/v1/inquiries/import')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-CSRF-Token', csrf)
+        .attach('file', second, 'second-flag.xlsx')
+        .expect(201);
+
+      expect(res.body.linkedCount).toBe(0);
+      expect(res.body.flaggedCount).toBe(1);
+      expect(res.body.flagged[0]).toMatchObject({ applicantName: `Import Flag Second ${TAG}` });
+      expect(res.body.flagged[0].possibleDuplicateOfApplicantId).toBeTruthy();
+      expect(res.body.flagged[0].applicantId).not.toBe(res.body.flagged[0].possibleDuplicateOfApplicantId);
+
+      const applicantCount = await systemPrisma.applicant.count({ where: { companyId: fx.companyId, primaryPhone: phone } });
+      expect(applicantCount).toBe(2); // NOT linked — a real second applicant
+    });
   });
 });

@@ -324,6 +324,10 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     // above), surfaced by the master-factory regression test being the
     // first to create an InquirySource row here.
     'inquiry_sources',
+    // Item 7: applicant_a_id/applicant_b_id are ON DELETE CASCADE from
+    // applicants, so this would clean up on its own — listed explicitly
+    // anyway, before 'applicants', matching this file's own discipline.
+    'applicant_distinct_pairs',
     'applicant_consents', 'applicant_merges',
     // Phase 1 — no child rows reference custom_field_definitions (values
     // live inline as JSON on each entity), so it just needs to go before

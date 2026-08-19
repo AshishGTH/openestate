@@ -48,6 +48,7 @@ describeIf('Applicant dedup, consent, merge', () => {
     await systemPrisma.inquiry.deleteMany({ where: { companyId } });
     await systemPrisma.applicantConsent.deleteMany({ where: { companyId } });
     await systemPrisma.applicantMerge.deleteMany({ where: { companyId } });
+    await systemPrisma.applicantDistinctPair.deleteMany({ where: { companyId } });
     await systemPrisma.applicant.deleteMany({ where: { companyId } });
     await systemPrisma.user.deleteMany({ where: { companyId } });
     await systemPrisma.role.deleteMany({ where: { companyId } });
@@ -287,6 +288,64 @@ describeIf('Applicant dedup, consent, merge', () => {
 
       await applicantService.merge(companyId, a.id, b.id, userId);
       await expect(applicantService.merge(companyId, c.id, b.id, userId)).rejects.toThrow();
+    });
+  });
+
+  describe('Item 7: confirmed-distinct pairs (the deliberate opposite of merge)', () => {
+    it('findDuplicatesForApplicant surfaces a same-phone applicant by default', async () => {
+      const a = await applicantService.create(companyId, { name: 'Distinct A', primaryPhone: '9876510070', alternatePhones: [] });
+      const b = await applicantService.create(companyId, { name: 'Distinct B', primaryPhone: '9876510070', alternatePhones: [] });
+
+      const dupsForA = await applicantService.findDuplicatesForApplicant(companyId, a.id);
+      expect(dupsForA.map((d: { id: string }) => d.id)).toEqual([b.id]);
+    });
+
+    it('confirmDistinct() stops that exact pair from resurfacing, both directions', async () => {
+      const a = await applicantService.create(companyId, { name: 'Confirm A', primaryPhone: '9876510071', alternatePhones: [] });
+      const b = await applicantService.create(companyId, { name: 'Confirm B', primaryPhone: '9876510071', alternatePhones: [] });
+
+      expect((await applicantService.findDuplicatesForApplicant(companyId, a.id)).map((d: { id: string }) => d.id)).toContain(b.id);
+
+      await applicantService.confirmDistinct(companyId, a.id, b.id, userId);
+
+      expect(await applicantService.findDuplicatesForApplicant(companyId, a.id)).toEqual([]);
+      // Symmetric — checking from B's side also excludes A, proving the
+      // pair is stored once (applicantAId < applicantBId) and matched
+      // regardless of which side initiated the confirmation.
+      expect(await applicantService.findDuplicatesForApplicant(companyId, b.id)).toEqual([]);
+    });
+
+    it('is idempotent — confirming the same pair twice does not error or duplicate the row', async () => {
+      const a = await applicantService.create(companyId, { name: 'Idem A', primaryPhone: '9876510072', alternatePhones: [] });
+      const b = await applicantService.create(companyId, { name: 'Idem B', primaryPhone: '9876510072', alternatePhones: [] });
+
+      await applicantService.confirmDistinct(companyId, a.id, b.id, userId);
+      await applicantService.confirmDistinct(companyId, b.id, a.id, userId); // reversed argument order
+
+      const rows = await systemPrisma.applicantDistinctPair.findMany({ where: { companyId } });
+      const matching = rows.filter(
+        (r: { applicantAId: string; applicantBId: string }) =>
+          (r.applicantAId === a.id && r.applicantBId === b.id) ||
+          (r.applicantAId === b.id && r.applicantBId === a.id),
+      );
+      expect(matching).toHaveLength(1);
+    });
+
+    it('rejects confirming an applicant as distinct from itself', async () => {
+      const a = await applicantService.create(companyId, { name: 'Self A', primaryPhone: '9876510073', alternatePhones: [] });
+      await expect(applicantService.confirmDistinct(companyId, a.id, a.id, userId)).rejects.toThrow();
+    });
+
+    it('does not suppress a DIFFERENT pair sharing one applicant', async () => {
+      // A confirmed-distinct from B must not silently also suppress A vs C.
+      const a = await applicantService.create(companyId, { name: 'Triple A', primaryPhone: '9876510074', alternatePhones: [] });
+      const b = await applicantService.create(companyId, { name: 'Triple B', primaryPhone: '9876510074', alternatePhones: [] });
+      const c = await applicantService.create(companyId, { name: 'Triple C', primaryPhone: '9876510074', alternatePhones: [] });
+
+      await applicantService.confirmDistinct(companyId, a.id, b.id, userId);
+
+      const dupsForA = await applicantService.findDuplicatesForApplicant(companyId, a.id);
+      expect(dupsForA.map((d: { id: string }) => d.id)).toEqual([c.id]); // B suppressed, C still flagged
     });
   });
 });

@@ -48,6 +48,13 @@ export const updateCompanyConfigSchema = z
     // A rep's own inquiry must never silently move via round-robin — see
     // CompanyConfig.presalesCreatorRetainsLead's schema comment.
     presalesCreatorRetainsLead: z.boolean().optional(),
+    // Item 7: for machine-driven intake (inbound lead API, bulk import)
+    // only — auto-link-on-phone/email-match (default) vs
+    // always-create-and-flag, for companies with heavy phone sharing
+    // (e.g. a shared family/office number). Interactive creation is
+    // unaffected either way — a human always sees the warning and
+    // decides. See CompanyConfig.presalesPhoneDedupAutoLink.
+    presalesPhoneDedupAutoLink: z.boolean().optional(),
   })
   .strict();
 

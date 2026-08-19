@@ -37,6 +37,13 @@ export function normalizeEmail(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
+/** Canonical (a, b) ordering for ApplicantDistinctPair, lexicographic on
+ *  the UUID string — the pair is always stored applicantAId < applicantBId
+ *  so a lookup never needs to check both orderings. */
+export function orderApplicantPair(x: string, y: string): [string, string] {
+  return x < y ? [x, y] : [y, x];
+}
+
 // ── Ageing / overdue calculations (pure, testable with injected `now`) ──
 
 export const AGEING_BUCKETS = ['0-7', '8-30', '31-90', '90+'] as const;
@@ -125,6 +132,16 @@ export const recordConsentSchema = z
   .strict();
 
 export type RecordConsentDto = z.infer<typeof recordConsentSchema>;
+
+/** The opposite decision from merge — "these are different people," not
+ *  "these are the same." See ApplicantDistinctPair (packages/db). */
+export const confirmDistinctSchema = z
+  .object({
+    otherApplicantId: z.string().uuid(),
+  })
+  .strict();
+
+export type ConfirmDistinctDto = z.infer<typeof confirmDistinctSchema>;
 
 // ── Zod Schemas: Inquiry ────────────────────────────────────
 

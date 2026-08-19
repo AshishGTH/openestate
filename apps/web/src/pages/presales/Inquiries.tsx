@@ -31,9 +31,22 @@ interface ImportResult {
   success: boolean;
   createdCount: number;
   linkedCount: number;
+  flaggedCount: number;
   errorCount: number;
   errors: ImportRowError[];
   linked: Array<{ row: number; applicantName: string; applicantId: string }>;
+  flagged: Array<{
+    row: number;
+    applicantName: string;
+    applicantId: string;
+    possibleDuplicateOfApplicantId: string;
+  }>;
+}
+
+interface DuplicateCandidate {
+  id: string;
+  name: string;
+  primaryPhone: string;
 }
 
 interface MasterOption {
@@ -50,7 +63,10 @@ export default function InquiriesPage() {
   const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [error, setError] = useState('');
-  const [duplicateWarning, setDuplicateWarning] = useState<string[]>([]);
+  const [newApplicantId, setNewApplicantId] = useState<string | null>(null);
+  const [duplicateCandidates, setDuplicateCandidates] = useState<DuplicateCandidate[]>([]);
+  const [confirmingDistinctId, setConfirmingDistinctId] = useState<string | null>(null);
+  const [confirmDistinctError, setConfirmDistinctError] = useState('');
   const [applicantName, setApplicantName] = useState('');
   const [applicantPhone, setApplicantPhone] = useState('');
   const [projectId, setProjectId] = useState('');
@@ -105,9 +121,14 @@ export default function InquiriesPage() {
 
   const handleCreate = async () => {
     setError('');
-    setDuplicateWarning([]);
+    setNewApplicantId(null);
+    setDuplicateCandidates([]);
+    setConfirmDistinctError('');
     try {
-      const res = await api<{ possibleDuplicateApplicantIds?: string[] }>('/inquiries', {
+      const res = await api<{
+        applicantId: string;
+        possibleDuplicates?: DuplicateCandidate[];
+      }>('/inquiries', {
         method: 'POST',
         body: JSON.stringify({
           applicant: {
@@ -122,8 +143,9 @@ export default function InquiriesPage() {
           customFields: buildCustomFieldPayload(inquiryDefs, inquiryCf),
         }),
       });
-      if (res.possibleDuplicateApplicantIds && res.possibleDuplicateApplicantIds.length > 0) {
-        setDuplicateWarning(res.possibleDuplicateApplicantIds);
+      if (res.possibleDuplicates && res.possibleDuplicates.length > 0) {
+        setNewApplicantId(res.applicantId);
+        setDuplicateCandidates(res.possibleDuplicates);
       }
       qc.invalidateQueries({ queryKey: ['inquiries'] });
       setShowForm(false);
@@ -157,6 +179,23 @@ export default function InquiriesPage() {
       setImportError((err as Error).message);
     } finally {
       setImporting(false);
+    }
+  };
+
+  const handleConfirmDistinct = async (otherApplicantId: string) => {
+    if (!newApplicantId) return;
+    setConfirmDistinctError('');
+    setConfirmingDistinctId(otherApplicantId);
+    try {
+      await api(`/applicants/${newApplicantId}/confirm-distinct`, {
+        method: 'POST',
+        body: JSON.stringify({ otherApplicantId }),
+      });
+      setDuplicateCandidates((prev) => prev.filter((c) => c.id !== otherApplicantId));
+    } catch (err) {
+      setConfirmDistinctError((err as Error).message);
+    } finally {
+      setConfirmingDistinctId(null);
     }
   };
 
@@ -229,7 +268,11 @@ export default function InquiriesPage() {
               {importResult.success ? (
                 <p className="text-emerald-700">
                   Created {importResult.createdCount}, linked to an existing applicant{' '}
-                  {importResult.linkedCount}.
+                  {importResult.linkedCount}
+                  {importResult.flaggedCount > 0 && (
+                    <>, flagged as a possible duplicate (not linked) {importResult.flaggedCount}</>
+                  )}
+                  .
                 </p>
               ) : (
                 <>
@@ -251,10 +294,32 @@ export default function InquiriesPage() {
         </div>
       )}
 
-      {duplicateWarning.length > 0 && (
+      {duplicateCandidates.length > 0 && (
         <div className="mt-4 rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
-          Inquiry created, but {duplicateWarning.length} possible duplicate applicant(s) were found with the same
-          phone/email. Review before proceeding.
+          <p>
+            Inquiry created, but {duplicateCandidates.length} possible duplicate applicant(s) were found with the
+            same phone/email. If they're genuinely different people, confirm it so this stops warning for this
+            pair.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {duplicateCandidates.map((c) => (
+              <li key={c.id} className="flex items-center justify-between gap-3 rounded bg-white px-2 py-1">
+                <span>
+                  {c.name} — {c.primaryPhone}
+                </span>
+                {hasPermission(PERMISSIONS.PRESALES_APPLICANT_MERGE) && (
+                  <button
+                    onClick={() => handleConfirmDistinct(c.id)}
+                    disabled={confirmingDistinctId === c.id}
+                    className="rounded-md border border-amber-300 px-2 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+                  >
+                    {confirmingDistinctId === c.id ? 'Confirming…' : 'Confirm distinct'}
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+          {confirmDistinctError && <p className="mt-2 text-xs text-red-700">{confirmDistinctError}</p>}
         </div>
       )}
 

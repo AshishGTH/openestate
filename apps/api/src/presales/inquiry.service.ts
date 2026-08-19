@@ -181,6 +181,11 @@ export class InquiryService {
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
         let applicantId = dto.applicantId;
         let possibleDuplicateApplicantIds: string[] = [];
+        // Item 7: enriched alongside the existing id-only array (kept
+        // unchanged for the plugin-sdk/existing-test contract) so
+        // Inquiries.tsx's duplicate-warning banner can show a name/phone
+        // per candidate instead of a bare count.
+        let possibleDuplicates: Array<{ id: string; name: string; primaryPhone: string }> = [];
 
         if (!applicantId && dto.applicant) {
           const primaryPhoneNormalized = normalizePhone(dto.applicant.primaryPhone);
@@ -195,6 +200,13 @@ export class InquiryService {
             where: { companyId, mergedIntoId: null, OR: or },
           });
           possibleDuplicateApplicantIds = duplicates.map((d: { id: string }) => d.id);
+          possibleDuplicates = duplicates.map(
+            (d: { id: string; name: string; primaryPhone: string }) => ({
+              id: d.id,
+              name: d.name,
+              primaryPhone: d.primaryPhone,
+            }),
+          );
 
           const created = await tx.applicant.create({
             data: {
@@ -283,7 +295,7 @@ export class InquiryService {
           });
         }
 
-        return { ...inquiry, assignedToId, possibleDuplicateApplicantIds };
+        return { ...inquiry, assignedToId, possibleDuplicateApplicantIds, possibleDuplicates };
       }),
     );
   }
@@ -301,6 +313,15 @@ export class InquiryService {
    * the underlying duplicate lookup: ApplicantService.findDuplicates().
    * Returns the shape @openestate/plugin-sdk's LeadCreateResult already
    * committed to in Phase 7 commit 1.
+   *
+   * Item 7: CompanyConfig.presalesPhoneDedupAutoLink (default true) gates
+   * whether a phone/email match auto-links here at all. Companies with
+   * heavy phone sharing (a shared family/office number funnelling
+   * distinct people through the same inbound channel) can flip it off —
+   * every lead then always creates a NEW applicant, with
+   * duplicateApplicantIds still populated so the caller/plugin can flag
+   * it, matching the interactive create() flow's "always create + flag,
+   * let a human decide" discipline instead of silently merging.
    */
   async createFromLead(companyId: string, lead: LeadInput): Promise<LeadCreateResult> {
     return runWithTenant({ companyId }, () =>
@@ -311,8 +332,11 @@ export class InquiryService {
         const duplicates = await this.applicantService.findDuplicates(companyId, primaryPhoneNormalized, emailNormalized);
         const duplicateApplicantIds = duplicates.map((d: { id: string }) => d.id);
 
+        const config = await tx.companyConfig.findFirst({ where: { companyId } });
+        const autoLink = config?.presalesPhoneDedupAutoLink ?? true;
+
         let applicantId: string;
-        if (duplicates.length > 0) {
+        if (duplicates.length > 0 && autoLink) {
           applicantId = duplicates[0].id;
         } else {
           const created = await tx.applicant.create({

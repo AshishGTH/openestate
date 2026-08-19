@@ -18,6 +18,7 @@ import {
   createApplicantSchema,
   updateApplicantSchema,
   recordConsentSchema,
+  confirmDistinctSchema,
   paginationQuerySchema,
   PERMISSIONS,
 } from '@openestate/shared';
@@ -29,6 +30,7 @@ import { ApplicantService } from './applicant.service';
 class CreateApplicantDto extends createZodDto(createApplicantSchema) {}
 class UpdateApplicantDto extends createZodDto(updateApplicantSchema) {}
 class RecordConsentDto extends createZodDto(recordConsentSchema) {}
+class ConfirmDistinctDto extends createZodDto(confirmDistinctSchema) {}
 class PaginationQueryDto extends createZodDto(paginationQuerySchema) {}
 
 @ApiTags('Applicants')
@@ -147,6 +149,31 @@ export class ApplicantController {
     ]);
 
     return { applicant, bookings, inquiries, documents, dispatches };
+  }
+
+  @Get(':id/duplicates')
+  @RequirePermissions(PERMISSIONS.PRESALES_APPLICANT_READ)
+  @ApiOperation({ summary: 'Re-check for duplicate candidates, excluding confirmed-distinct pairs' })
+  duplicates(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.applicantService.findDuplicatesForApplicant(user.companyId, id);
+  }
+
+  @Post(':id/confirm-distinct')
+  @RequirePermissions(PERMISSIONS.PRESALES_APPLICANT_MERGE)
+  @ApiOperation({ summary: 'Record that this applicant and another are confirmed to be different people' })
+  confirmDistinct(
+    @Param('id') id: string,
+    @Body() dto: ConfirmDistinctDto,
+    @Req() req: Request,
+  ) {
+    const user = req.user as JwtPayload;
+    return this.applicantService.confirmDistinct(
+      user.companyId,
+      id,
+      dto.otherApplicantId,
+      user.sub,
+    );
   }
 
   @Post(':survivorId/merge/:mergedId')

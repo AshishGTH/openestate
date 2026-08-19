@@ -96,6 +96,48 @@ describeIf('Inbound lead API (Phase 7 commit 2)', () => {
     });
   });
 
+  // ── Item 7: CompanyConfig.presalesPhoneDedupAutoLink toggle ────
+
+  describe('presalesPhoneDedupAutoLink toggle', () => {
+    afterAll(async () => {
+      // Restore the default so no other test in this file (or a sibling
+      // file sharing this company row, if any ever does) sees the
+      // toggle left off.
+      await systemPrisma.companyConfig.upsert({
+        where: { companyId: fx.companyId },
+        update: { presalesPhoneDedupAutoLink: true },
+        create: { companyId: fx.companyId, presalesPhoneDedupAutoLink: true },
+      });
+    });
+
+    it('default (on): a phone match auto-links, exactly as the earlier dedup tests already prove', async () => {
+      const phone = uniquePhone();
+      const first = await inquiryService.createFromLead(fx.companyId, { name: 'Toggle Default First', phone });
+      const second = await inquiryService.createFromLead(fx.companyId, { name: 'Toggle Default Second', phone });
+      expect(second.applicantId).toBe(first.applicantId);
+    });
+
+    it('off: a phone match does NOT auto-link — a new applicant is created and flagged via duplicateApplicantIds', async () => {
+      await systemPrisma.companyConfig.upsert({
+        where: { companyId: fx.companyId },
+        update: { presalesPhoneDedupAutoLink: false },
+        create: { companyId: fx.companyId, presalesPhoneDedupAutoLink: false },
+      });
+
+      const phone = uniquePhone();
+      const first = await inquiryService.createFromLead(fx.companyId, { name: 'Toggle Off First', phone });
+      const second = await inquiryService.createFromLead(fx.companyId, { name: 'Toggle Off Second', phone });
+
+      expect(second.applicantId).not.toBe(first.applicantId); // NOT linked — a real second applicant
+      expect(second.duplicateApplicantIds).toContain(first.applicantId); // but still flagged
+
+      const applicantCount = await systemPrisma.applicant.count({
+        where: { companyId: fx.companyId, primaryPhone: phone },
+      });
+      expect(applicantCount).toBe(2);
+    });
+  });
+
   // ── ctx.leads capability wiring (commit 2 completes commit 1's forward reference) ──
 
   describe('ctx.leads capability', () => {

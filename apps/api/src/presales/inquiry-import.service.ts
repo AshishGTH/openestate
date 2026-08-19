@@ -15,9 +15,20 @@ export interface InquiryImportResult {
   success: boolean;
   createdCount: number;
   linkedCount: number;
+  flaggedCount: number;
   errorCount: number;
   errors: ImportRowError[];
   linked: Array<{ row: number; applicantName: string; applicantId: string }>;
+  // Item 7: populated only when CompanyConfig.presalesPhoneDedupAutoLink
+  // is false — a phone/email match was found but NOT auto-linked; a new
+  // applicant was created instead and flagged against the match for a
+  // human to review later (via GET /applicants/:id/duplicates).
+  flagged: Array<{
+    row: number;
+    applicantName: string;
+    applicantId: string;
+    possibleDuplicateOfApplicantId: string;
+  }>;
 }
 
 const HEADER_MAP: Record<string, string> = {
@@ -102,13 +113,26 @@ export class InquiryImportService {
     }
 
     if (errors.length > 0) {
-      return { success: false, createdCount: 0, linkedCount: 0, errorCount: errors.length, errors, linked: [] };
+      return {
+        success: false,
+        createdCount: 0,
+        linkedCount: 0,
+        flaggedCount: 0,
+        errorCount: errors.length,
+        errors,
+        linked: [],
+        flagged: [],
+      };
     }
 
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
         let createdCount = 0;
         const linked: Array<{ row: number; applicantName: string; applicantId: string }> = [];
+        const flagged: InquiryImportResult['flagged'] = [];
+
+        const config = await tx.companyConfig.findFirst({ where: { companyId } });
+        const autoLink = config?.presalesPhoneDedupAutoLink ?? true;
 
         const projectCache = new Map<string, string | null>();
         const sourceCache = new Map<string, string | null>();
@@ -127,7 +151,7 @@ export class InquiryImportService {
           });
 
           let applicantId: string;
-          if (existingApplicant) {
+          if (existingApplicant && autoLink) {
             applicantId = existingApplicant.id;
             linked.push({ row: rowNum, applicantName: data.applicantName, applicantId });
           } else {
@@ -143,6 +167,14 @@ export class InquiryImportService {
               },
             });
             applicantId = created.id;
+            if (existingApplicant) {
+              flagged.push({
+                row: rowNum,
+                applicantName: data.applicantName,
+                applicantId,
+                possibleDuplicateOfApplicantId: existingApplicant.id,
+              });
+            }
           }
 
           let projectId: string | null | undefined = undefined;
@@ -211,9 +243,11 @@ export class InquiryImportService {
           success: true,
           createdCount,
           linkedCount: linked.length,
+          flaggedCount: flagged.length,
           errorCount: 0,
           errors: [],
           linked,
+          flagged,
         };
       }),
     );
