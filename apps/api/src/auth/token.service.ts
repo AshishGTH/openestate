@@ -10,6 +10,7 @@ import type { JwtPayload } from '@openestate/shared';
 export class TokenService {
   private readonly refreshSecret: string;
   private readonly refreshExpiresIn: string;
+  private readonly reuseGraceMs: number;
 
   constructor(
     private readonly jwt: JwtService,
@@ -18,6 +19,8 @@ export class TokenService {
   ) {
     this.refreshSecret = this.config.getOrThrow('JWT_REFRESH_SECRET');
     this.refreshExpiresIn = this.config.get('JWT_REFRESH_EXPIRES_IN') ?? '7d';
+    this.reuseGraceMs =
+      Number(this.config.get('REFRESH_REUSE_GRACE_SECONDS') ?? 30) * 1000;
   }
 
   signAccessToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
@@ -51,6 +54,41 @@ export class TokenService {
     return { raw, expiresAt };
   }
 
+  /**
+   * Single-use rotation with reuse detection, plus a short grace window for
+   * the one case where re-presenting a consumed token is NOT an attack.
+   *
+   * The bug this grace window fixes, diagnosed from captured traffic rather
+   * than guessed: a full page load fires /auth/refresh from AuthProvider's
+   * mount effect. If the user navigates or reloads again before that
+   * response lands, the browser ABORTS the request — but the server has
+   * already processed it, consuming the token and issuing a replacement the
+   * client never receives. Its cookie therefore still holds the OLD token,
+   * and the next load re-presents it. Pre-fix that was read as token theft
+   * and revoked the entire family, logging the user out with no
+   * explanation. Reproduced with a burst of full page loads; the same thing
+   * happens when a browser restores several tabs at once (each fires its own
+   * refresh with the SAME cookie) or when a refresh response is simply lost.
+   * The client-side refreshSession() de-dupe cannot help — it is per-tab, and
+   * these are separate page contexts.
+   *
+   * Benign re-presentation is recognised structurally, not assumed: the
+   * presented token must be revoked RECENTLY (within reuseGraceMs) AND its
+   * family must still have a live token — i.e. the chain moved on normally
+   * and was never revoked wholesale. We then rotate that live token and hand
+   * the caller the result, so the client converges on a valid cookie. Every
+   * concurrent load in a burst therefore succeeds, and out-of-order
+   * responses self-heal: whichever cookie the client ends up with is either
+   * live or recently-consumed, and both paths lead back here.
+   *
+   * Security: a token replayed after the window, or after the family was
+   * revoked, still triggers full family revocation exactly as before. The
+   * accepted trade-off (standard for rotation-with-grace) is that a token
+   * stolen AND replayed inside the window yields a session — a few seconds
+   * of exposure, against the alternative of logging real users out for
+   * ordinary browser behaviour. Tune or disable with
+   * REFRESH_REUSE_GRACE_SECONDS (0 restores the strict pre-fix behaviour).
+   */
   async rotateRefreshToken(
     rawToken: string,
     expiresInOverride?: string,
@@ -68,24 +106,47 @@ export class TokenService {
     if (!existing) return null;
 
     if (existing.isRevoked) {
-      await this.prisma.refreshToken.updateMany({
-        where: { family: existing.family, isRevoked: false },
-        data: { isRevoked: true },
-      });
+      const revokedAgoMs = existing.revokedAt
+        ? Date.now() - existing.revokedAt.getTime()
+        : Number.POSITIVE_INFINITY;
+
+      if (revokedAgoMs <= this.reuseGraceMs) {
+        // Most recent live token in the same family, if the chain is intact.
+        const live = await this.prisma.refreshToken.findFirst({
+          where: {
+            family: existing.family,
+            isRevoked: false,
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (live) return this.rotateRow(live, expiresInOverride);
+      }
+
+      // Genuine reuse: outside the window, or the family is already dead.
+      await this.revokeFamilyById(existing.family);
       return null;
     }
 
     if (existing.expiresAt < new Date()) {
       await this.prisma.refreshToken.update({
         where: { id: existing.id },
-        data: { isRevoked: true },
+        data: { isRevoked: true, revokedAt: new Date() },
       });
       return null;
     }
 
+    return this.rotateRow(existing, expiresInOverride);
+  }
+
+  /** Consumes one live token row and issues its successor in the same family. */
+  private async rotateRow(
+    row: { id: string; userId: string; family: string },
+    expiresInOverride?: string,
+  ): Promise<{ userId: string; newRaw: string; expiresAt: Date }> {
     await this.prisma.refreshToken.update({
-      where: { id: existing.id },
-      data: { isRevoked: true },
+      where: { id: row.id },
+      data: { isRevoked: true, revokedAt: new Date() },
     });
 
     const newRaw = randomUUID();
@@ -96,14 +157,21 @@ export class TokenService {
     await this.prisma.refreshToken.create({
       data: {
         id: newJti,
-        userId: existing.userId,
+        userId: row.userId,
         tokenHash: newHash,
-        family: existing.family,
+        family: row.family,
         expiresAt,
       },
     });
 
-    return { userId: existing.userId, newRaw, expiresAt };
+    return { userId: row.userId, newRaw, expiresAt };
+  }
+
+  private async revokeFamilyById(family: string): Promise<void> {
+    await this.prisma.refreshToken.updateMany({
+      where: { family, isRevoked: false },
+      data: { isRevoked: true, revokedAt: new Date() },
+    });
   }
 
   async revokeFamily(rawToken: string): Promise<void> {
@@ -114,7 +182,7 @@ export class TokenService {
     if (existing) {
       await this.prisma.refreshToken.updateMany({
         where: { family: existing.family, isRevoked: false },
-        data: { isRevoked: true },
+        data: { isRevoked: true, revokedAt: new Date() },
       });
     }
   }
@@ -122,7 +190,7 @@ export class TokenService {
   async revokeAllForUser(userId: string): Promise<void> {
     await this.prisma.refreshToken.updateMany({
       where: { userId, isRevoked: false },
-      data: { isRevoked: true },
+      data: { isRevoked: true, revokedAt: new Date() },
     });
   }
 
@@ -144,7 +212,7 @@ export class TokenService {
         isRevoked: false,
         ...(current ? { family: { not: current.family } } : {}),
       },
-      data: { isRevoked: true },
+      data: { isRevoked: true, revokedAt: new Date() },
     });
   }
 

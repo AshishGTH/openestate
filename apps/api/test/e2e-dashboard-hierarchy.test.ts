@@ -95,6 +95,7 @@ describeIf('e2e GET /dashboard and GET /users/hierarchy', () => {
   let repEmail: string;
   let peerEmail: string;
   let adminEmail: string;
+  let customAdminEmail: string;
   let managerId: string;
   let repId: string;
   let peerId: string;
@@ -148,6 +149,15 @@ describeIf('e2e GET /dashboard and GET /users/hierarchy', () => {
       ROLE_PERMISSIONS[SYSTEM_ROLES.COMPANY_ADMIN],
     );
 
+    // A company's own role, holding literally every permission but with a
+    // slug that is none of the seeded ones — the case the old slug check
+    // silently got wrong.
+    const customAdminRole = await roleWith(
+      `E2E Custom Administrator ${TAG}`,
+      `e2e-custom-administrator-${TAG}`,
+      ALL_PERMISSIONS,
+    );
+
     const mkUser = async (email: string, name: string, roleId: string, roleSlug: string) => {
       const u = await systemPrisma.user.create({
         data: {
@@ -166,11 +176,14 @@ describeIf('e2e GET /dashboard and GET /users/hierarchy', () => {
     repEmail = `e2e-dash-rep-${TAG}@test.com`;
     peerEmail = `e2e-dash-peer-${TAG}@test.com`;
     adminEmail = `e2e-dash-admin-${TAG}@test.com`;
+    customAdminEmail = `e2e-dash-custom-admin-${TAG}@test.com`;
 
     const manager = await mkUser(managerEmail, 'E2E Dash Manager', managerRole.id, 'mgr');
     const rep = await mkUser(repEmail, 'E2E Dash Rep', repRole.id, 'rep');
     const peer = await mkUser(peerEmail, 'E2E Dash Peer', repRole.id, 'rep');
     await mkUser(adminEmail, 'E2E Dash Admin', adminRole.id, 'admin');
+    // No manager, no reports — so subtree-scoping would give them nothing.
+    await mkUser(customAdminEmail, 'E2E Dash Custom Admin', customAdminRole.id, 'custom');
     managerId = manager.id;
     repId = rep.id;
     peerId = peer.id;
@@ -194,7 +207,19 @@ describeIf('e2e GET /dashboard and GET /users/hierarchy', () => {
     ) => {
       const applicantId = await makeApplicant(systemPrisma, fx.companyId);
       return systemPrisma.inquiry.create({
-        data: { companyId: fx.companyId, applicantId, assignedToId, status, nextFollowupAt },
+        data: {
+          companyId: fx.companyId,
+          applicantId,
+          assignedToId,
+          status,
+          nextFollowupAt,
+          // Seeded straight through Prisma, which deliberately bypasses
+          // InquiryService.update() and therefore never stamps
+          // convertedAt — so a SUCCESSFUL fixture row has to carry its own
+          // conversion date, exactly as the migration's backfill gives one
+          // to pre-existing rows.
+          ...(status === 'SUCCESSFUL' ? { convertedAt: new Date() } : {}),
+        },
       });
     };
 
@@ -211,10 +236,19 @@ describeIf('e2e GET /dashboard and GET /users/hierarchy', () => {
     await systemPrisma.$disconnect();
   });
 
-  // Memoized: 8 tests across 3 distinct users needed 8 logins, which is
-  // 8 hits on a rate-limited endpoint for no added coverage — none of
-  // these tests assert anything about login itself. Now 3.
+  // Memoized: the tests across these distinct users needed one login each
+  // every time, which is repeated hits on a rate-limited endpoint for no
+  // added coverage — none of them assert anything about login itself.
   const tokenCache = new Map<string, string>();
+  const csrfCache = new Map<string, { csrf: string; cookie: string }>();
+
+  function captureCsrf(email: string, setCookie: string[] | string | undefined) {
+    const headers = Array.isArray(setCookie) ? setCookie : [setCookie ?? ''];
+    const csrf = /openestate_csrf=([^;]+)/.exec(headers.join(';'))?.[1] ?? '';
+    const cookie = headers.map((c) => c.split(';')[0]).join('; ');
+    csrfCache.set(email, { csrf, cookie });
+  }
+
   async function tokenFor(email: string): Promise<string> {
     const cached = tokenCache.get(email);
     if (cached) return cached;
@@ -224,7 +258,14 @@ describeIf('e2e GET /dashboard and GET /users/hierarchy', () => {
       .expect(200);
     const token = res.body.accessToken as string;
     tokenCache.set(email, token);
+    captureCsrf(email, res.headers['set-cookie']);
     return token;
+  }
+
+  /** CSRF pair from the same login the token came from — mutations need both. */
+  async function csrfFor(email: string): Promise<{ csrf: string; cookie: string }> {
+    await tokenFor(email);
+    return csrfCache.get(email)!;
   }
 
   describe('GET /dashboard', () => {
@@ -286,6 +327,27 @@ describeIf('e2e GET /dashboard and GET /users/hierarchy', () => {
       expect(row.lastActivityAt).toBeNull();
     });
 
+    it("a company's OWN full-permission role gets company-wide scope, not just its subtree", async () => {
+      // The regression this guards: admin-tier used to be decided by the
+      // role SLUG being literally company_admin/super_admin. A company
+      // that built its own "Administrator" role holding every permission
+      // was therefore scoped to its own subtree — here, nothing at all,
+      // since this user has no reports — and its dashboard silently showed
+      // a fraction of the company with no error to explain why. The slug
+      // below is deliberately NOT one of the seeded ones.
+      const token = await tokenFor(customAdminEmail);
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/dashboard')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(res.body.team).not.toBeNull();
+      expect(res.body.team.openInquiries).toBe(4); // whole company, not 0
+      const names = (res.body.team.perReport as Array<{ name: string }>).map((r) => r.name);
+      expect(names).toContain('E2E Dash Rep');
+      expect(names).toContain('E2E Dash Peer');
+    });
+
     it('an admin-tier caller gets the whole company as their team', async () => {
       const token = await tokenFor(adminEmail);
       const res = await request(app.getHttpServer())
@@ -299,6 +361,81 @@ describeIf('e2e GET /dashboard and GET /users/hierarchy', () => {
       const names = (res.body.team.perReport as Array<{ name: string }>).map((r) => r.name);
       expect(names).toContain('E2E Dash Rep');
       expect(names).toContain('E2E Dash Peer');
+    });
+  });
+
+  describe('Inquiry.convertedAt', () => {
+    it('is stamped on the transition into SUCCESSFUL and does NOT drift when the closed inquiry is edited later', async () => {
+      const token = await tokenFor(adminEmail);
+      const applicantId = await makeApplicant(systemPrisma, fx.companyId);
+      const inquiry = await systemPrisma.inquiry.create({
+        data: { companyId: fx.companyId, applicantId, assignedToId: null, status: 'OPEN' },
+      });
+
+      // Not converted yet.
+      expect(
+        (await systemPrisma.inquiry.findUnique({ where: { id: inquiry.id } })).convertedAt,
+      ).toBeNull();
+
+      const csrf = await csrfFor(adminEmail);
+      await request(app.getHttpServer())
+        .patch(`/api/v1/inquiries/${inquiry.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-CSRF-Token', csrf.csrf)
+        .set('Cookie', csrf.cookie)
+        .send({ status: 'SUCCESSFUL' })
+        .expect(200);
+
+      const converted = await systemPrisma.inquiry.findUnique({ where: { id: inquiry.id } });
+      expect(converted.convertedAt).not.toBeNull();
+      const stampedAt = converted.convertedAt.getTime();
+
+      // An unrelated edit afterwards. Pre-fix the figure keyed off
+      // updatedAt, so THIS is the moment a months-old conversion silently
+      // jumped into the current month.
+      await new Promise((r) => setTimeout(r, 20));
+      await request(app.getHttpServer())
+        .patch(`/api/v1/inquiries/${inquiry.id}`)
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-CSRF-Token', csrf.csrf)
+        .set('Cookie', csrf.cookie)
+        .send({ nextFollowupAt: new Date().toISOString() })
+        .expect(200);
+
+      const after = await systemPrisma.inquiry.findUnique({ where: { id: inquiry.id } });
+      expect(after.convertedAt.getTime()).toBe(stampedAt);
+      // ...and updatedAt genuinely did move, so the assertion above is
+      // meaningful rather than passing because nothing changed at all.
+      expect(after.updatedAt.getTime()).toBeGreaterThan(converted.updatedAt.getTime());
+    });
+
+    it('is cleared when the inquiry moves back out of SUCCESSFUL', async () => {
+      const token = await tokenFor(adminEmail);
+      const csrf = await csrfFor(adminEmail);
+      const applicantId = await makeApplicant(systemPrisma, fx.companyId);
+      const inquiry = await systemPrisma.inquiry.create({
+        data: { companyId: fx.companyId, applicantId, status: 'OPEN' },
+      });
+
+      const patch = (status: string) =>
+        request(app.getHttpServer())
+          .patch(`/api/v1/inquiries/${inquiry.id}`)
+          .set('Authorization', `Bearer ${token}`)
+          .set('X-CSRF-Token', csrf.csrf)
+          .set('Cookie', csrf.cookie)
+          .send({ status })
+          .expect(200);
+
+      await patch('SUCCESSFUL');
+      expect(
+        (await systemPrisma.inquiry.findUnique({ where: { id: inquiry.id } })).convertedAt,
+      ).not.toBeNull();
+
+      // A re-opened lead must stop counting as a conversion.
+      await patch('CONTINUED');
+      expect(
+        (await systemPrisma.inquiry.findUnique({ where: { id: inquiry.id } })).convertedAt,
+      ).toBeNull();
     });
   });
 

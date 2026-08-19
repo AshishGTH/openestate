@@ -1,9 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaClient } from '@openestate/db';
-import { SYSTEM_ROLES } from '@openestate/shared';
+import { PERMISSIONS } from '@openestate/shared';
 import { SYSTEM_PRISMA } from '../database/database.module';
-
-const ADMIN_TIER_ROLES: readonly string[] = [SYSTEM_ROLES.SUPER_ADMIN, SYSTEM_ROLES.COMPANY_ADMIN];
 
 /**
  * Single source of truth for "which users can this caller see the
@@ -26,13 +24,21 @@ export class TeamScopeService {
    * Returns the caller plus their full reporting subtree (not just direct
    * reports — a direct-reports-only version would silently hide a senior
    * manager's sub-subordinates' leads, a worse failure than showing "too
-   * much"). `null` means "no filter" — reserved for admin-tier roles
-   * (company_admin, super_admin), who see the whole company regardless of
-   * where they sit (or don't sit) in the org chart. Every other role,
-   * whether or not they currently have any reports, gets a real (possibly
-   * single-element, just themselves) visible set computed live from
-   * `users.manager_id` — never cached, so a manager change takes effect
-   * on the very next request.
+   * much"). `null` means "no filter" — granted by the
+   * ADMIN_TEAM_SCOPE_ALL permission, whose holders see the whole company
+   * regardless of where they sit (or don't sit) in the org chart. Every
+   * other caller, whether or not they currently have any reports, gets a
+   * real (possibly single-element, just themselves) visible set computed
+   * live from `users.manager_id` — never cached, so a manager change takes
+   * effect on the very next request.
+   *
+   * Keyed off a PERMISSION, not the role slug. The original slug check
+   * (`company_admin`/`super_admin` literally) meant a company that built
+   * its own "Administrator" role holding every permission was still scoped
+   * to its own subtree — its dashboard and reports silently showed a
+   * fraction of the company with nothing to explain why. Permissions are
+   * what the rest of this codebase authorises on; identity-by-slug was the
+   * odd one out.
    *
    * Service-layer, not RLS and not an ambient/AsyncLocalStorage filter —
    * deliberately a plain function called explicitly at the top of each
@@ -49,9 +55,9 @@ export class TeamScopeService {
   async getVisibleUserIds(
     companyId: string,
     userId: string,
-    roleSlug: string,
+    permissions: readonly string[],
   ): Promise<string[] | null> {
-    if (ADMIN_TIER_ROLES.includes(roleSlug)) return null;
+    if (permissions.includes(PERMISSIONS.ADMIN_TEAM_SCOPE_ALL)) return null;
 
     const rows = await this.systemPrisma.$queryRaw<Array<{ id: string }>>`
       WITH RECURSIVE subtree AS (

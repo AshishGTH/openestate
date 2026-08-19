@@ -380,6 +380,21 @@ export class InquiryService {
     const existing = await this.findOne(companyId, id, scope);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any = { ...dto };
+
+    // convertedAt is stamped on the TRANSITION into SUCCESSFUL, not on
+    // every save of an already-successful inquiry — otherwise it would
+    // drift exactly like updatedAt, which is the problem it exists to
+    // solve. Cleared when the inquiry moves back out of SUCCESSFUL, so a
+    // re-opened lead stops counting as a conversion. This is the only
+    // code path in the app that sets SUCCESSFUL (FollowUpService only
+    // moves OPEN -> CONTINUED), so one place covers it.
+    if (dto.status !== undefined && dto.status !== existing.status) {
+      if (dto.status === 'SUCCESSFUL') {
+        data.convertedAt = this.clock.now();
+      } else if (existing.status === 'SUCCESSFUL') {
+        data.convertedAt = null;
+      }
+    }
     if (dto.customFields !== undefined) {
       data.customFields = await this.customFields.resolveValuesForWrite(
         companyId,

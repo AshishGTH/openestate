@@ -98,7 +98,7 @@ function SummaryBlock({ summary }: { summary: Summary }) {
         <Stat label="Follow-ups due today" value={summary.followUpsToday} to="/presales/inquiries" />
         <Stat label="Overdue follow-ups" value={summary.followUpsOverdue} tone="warn" to="/presales/inquiries" />
         <Stat label="Open inquiries" value={summary.openInquiries} to="/presales/inquiries" />
-        <Stat label="Closed this month" value={summary.conversionsThisMonth} />
+        <Stat label="Converted this month" value={summary.conversionsThisMonth} />
       </div>
       {nonZeroStatuses.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
@@ -143,7 +143,7 @@ export default function Dashboard() {
         </span>
       ),
     },
-    { key: 'closed', header: 'Closed this month', render: (r) => r.conversionsThisMonth },
+    { key: 'converted', header: 'Converted this month', render: (r) => r.conversionsThisMonth },
     {
       key: 'activity',
       header: 'Last activity',

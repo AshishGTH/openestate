@@ -63,7 +63,7 @@ export class UsersController {
     const visibleUserIds = await this.teamScope.getVisibleUserIds(
       user.companyId,
       user.sub,
-      user.roleSlug,
+      user.permissions,
     );
     return this.usersService.getHierarchy(user.companyId, visibleUserIds);
   }

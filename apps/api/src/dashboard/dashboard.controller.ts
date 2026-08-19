@@ -19,6 +19,6 @@ export class DashboardController {
   })
   get(@Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.dashboardService.getDashboard(user.companyId, user.sub, user.roleSlug);
+    return this.dashboardService.getDashboard(user.companyId, user.sub, user.permissions);
   }
 }
