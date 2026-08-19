@@ -5270,3 +5270,109 @@ what a future session should and shouldn't attempt:
   blocks, and any committed `.env`) — clean apart from the two VM
   passwords already known. Worth re-running the same sweep before any
   future public-facing milestone rather than assuming it stays clean.
+
+### Standing rule: any migration touching a hot table needs `lock_timeout` reasoning, not just a schema diff
+
+Found when `native-upgrade` CI sat `in_progress` for over an hour against
+a ~3-minute norm — a migration adding `RefreshToken.revokedAt` hung
+indefinitely instead of failing. Root-caused empirically, not guessed
+(reproduced against a real Postgres before believing it).
+
+**The mechanism.** `upgrade-native.sh` runs migrations BEFORE cutover,
+deliberately — the previous release keeps serving against the new,
+backward-compatible schema until the symlink swaps (see the "Native
+install becomes primary" decisions entry). That means every DDL
+statement in every future migration contends with a LIVE app, not an
+idle database. `ALTER TABLE ... ADD COLUMN` needs an ACCESS EXCLUSIVE
+lock, which conflicts with the ACCESS SHARE an ordinary `SELECT` holds —
+so a single in-flight read on the table is enough to block it, and with
+no timeout it waits **forever**. Confirmed directly: an open read
+transaction on `refresh_tokens` blocked `ADD COLUMN` indefinitely in a
+real test.
+
+**Why the freeze isn't limited to the migrating statement.** A blocked
+DDL statement queues *ahead* of every later lock request against that
+table — Postgres's lock queue is FIFO, not priority-ordered — so once
+the `ALTER` is waiting, every subsequent `SELECT`/`UPDATE`/`INSERT`
+against that table from the live app queues up behind it too. The
+symptom is the whole app appearing to freeze on that table, not just the
+migration running slowly.
+
+**`CREATE INDEX` is a genuinely different risk profile — check which one
+a migration actually needs before reasoning about its blast radius.**
+Confirmed by the same test: a plain (non-`CONCURRENTLY`) `CREATE INDEX`
+succeeded immediately against the SAME open read transaction that blocked
+the `ALTER TABLE`, because a plain `CREATE INDEX` takes SHARE, which
+conflicts with writers but not readers. A migration that's *only* adding
+indexes is comparatively low-risk against read-heavy traffic; one with
+any `ALTER TABLE`/`ADD COLUMN`/`DROP COLUMN`/type change on a
+frequently-read table is not, and needs the timeout reasoning below
+applied deliberately, not assumed away because "it's just a migration."
+
+**The fix, and why it can't live in the migration file itself.**
+`upgrade-native.sh`'s `run_as_superuser()` now sets `lock_timeout` (15s
+default, `MIGRATION_LOCK_TIMEOUT` env var to override) on the connection
+used for `prisma migrate deploy`, so a contended migration aborts fast
+with a clear error and leaves the previous release running and
+untouched — the same intended failure mode `die()` already documents for
+a migration that fails outright. This could NOT be fixed by editing the
+already-applied `refresh_token_revoked_at` migration to add `SET
+lock_timeout` inline: Prisma records a checksum per migration file at
+apply time, and this repo's own rule is forward-only, never edit an
+applied migration — doing so would break the checksum check on every
+install that has already applied it, everywhere. Fixing it at the
+invocation instead covers every migration, past and future, which is
+strictly better than patching the one that happened to expose the gap.
+
+**`PGOPTIONS` does not work here — confirmed by testing both, not
+assumed from how libpq-based tools behave.** Prisma uses its own Rust
+query engine, not libpq, and does not read libpq's environment-variable
+conventions (`PGOPTIONS`, `PGCONNECT_TIMEOUT`, etc.). The only way that
+was empirically confirmed to make Prisma apply `lock_timeout` is the
+connection string's own `options` query parameter
+(`?options=-c%20lock_timeout%3D15s`, URL-encoded). Anyone reaching for a
+libpq-style env var to tune a Prisma connection in this codebase should
+expect it to be silently ignored — check the connection string first.
+
+**Migration risk checklist for anything touching a table this app reads
+on most requests** (`refresh_tokens`, `users`, `inquiries`,
+`ledger_entries`, and anything else on a hot request path): does this
+statement need ACCESS EXCLUSIVE (`ALTER TABLE` variants) or just SHARE
+(`CREATE INDEX` without `CONCURRENTLY`)? If the former, it WILL queue
+behind live reads with no timeout — the 15s default here is deliberate
+insurance, not decoration, and lowering or removing it for a "quick"
+migration reintroduces exactly this bug.
+
+### Decision: `REFRESH_REUSE_GRACE_SECONDS` stays at 30, trade-off stated explicitly
+
+The rapid-reload-logout fix (`TokenService.rotateRefreshToken`'s reuse
+grace window — see the fix's own commit and code comment for the
+mechanism) accepts a real security trade-off, not a hidden one: a raw
+refresh token that is BOTH stolen AND replayed within the grace window
+of the legitimate client's own next rotation will still be honored,
+yielding the thief a session.
+
+**Why 30 seconds is the right default, not just a round number.** The
+window only matters to an attacker who already possesses a valid raw
+refresh token (theft has already happened by the time this window is
+relevant at all) AND races the legitimate client's own rotation within
+30 seconds of it. That is a narrow, already-compromised scenario. The
+alternative — a zero-length window, i.e. the pre-fix behavior — logs out
+real, uncompromised users for ordinary browser behavior (a burst of
+reloads, several tabs restored at once), which is the actual bug this
+fix exists to close. Making the window shorter narrows an already-narrow
+attack surface further at the direct cost of the fix's own purpose;
+making it longer widens the attack surface for no corresponding user
+benefit, since legitimate rotation races resolve in milliseconds, not
+seconds. 30s is deliberately generous relative to the real race (which
+resolves near-instantly) specifically so it has margin against a slow
+mobile connection or a backgrounded tab, without meaningfully changing
+the attacker's already-narrow window.
+
+**Tunable, not fixed, via `REFRESH_REUSE_GRACE_SECONDS`** — sites with a
+different risk tolerance can set it to `0` to restore the strict
+pre-fix behavior, or raise it if their own traffic patterns show longer
+legitimate races. Genuine replay — after the window, or once the
+token's family has been revoked outright — still revokes the entire
+family exactly as before; the grace window narrows WHEN reuse is
+forgiven, it does not weaken the theft-detection mechanism itself.
