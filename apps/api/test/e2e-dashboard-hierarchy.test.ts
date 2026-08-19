@@ -51,6 +51,16 @@ const TAG = Date.now();
   return this.toString();
 };
 
+// Private throttle keyspace for this file, set BEFORE the app bootstraps
+// so RedisThrottlerStorage picks it up. Six other e2e files already do
+// this and omitting it here broke CI: the default bucket is IP-keyed
+// (100/min) and every e2e file shares one loopback IP and one Redis, so
+// this file's logins pushed an already-near-limit shared bucket over and
+// four UNRELATED files started failing with 429 on login. Isolating the
+// keyspace removes this file's contribution to that shared budget
+// entirely. See RedisThrottlerStorage + CLAUDE.md's Phase 8 entry.
+process.env.THROTTLE_TEST_KEY_PREFIX = `e2e-dashboard-hierarchy-${process.pid}-${Date.now()}-`;
+
 async function bootstrapApp(): Promise<INestApplication> {
   process.env.DATABASE_URL = APP_URL;
   process.env.DATABASE_URL_SYSTEM = SYSTEM_URL;
@@ -201,12 +211,20 @@ describeIf('e2e GET /dashboard and GET /users/hierarchy', () => {
     await systemPrisma.$disconnect();
   });
 
+  // Memoized: 8 tests across 3 distinct users needed 8 logins, which is
+  // 8 hits on a rate-limited endpoint for no added coverage — none of
+  // these tests assert anything about login itself. Now 3.
+  const tokenCache = new Map<string, string>();
   async function tokenFor(email: string): Promise<string> {
+    const cached = tokenCache.get(email);
+    if (cached) return cached;
     const res = await request(app.getHttpServer())
       .post('/api/v1/auth/login')
       .send({ email, password: STAFF_PASSWORD })
       .expect(200);
-    return res.body.accessToken as string;
+    const token = res.body.accessToken as string;
+    tokenCache.set(email, token);
+    return token;
   }
 
   describe('GET /dashboard', () => {
