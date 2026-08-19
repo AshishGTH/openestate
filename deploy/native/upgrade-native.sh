@@ -121,9 +121,28 @@ run_as_superuser() {
 log "Running database migrations (before cutover — old release keeps running against the new, backward-compatible schema until it's swapped)..."
 # See install-native.sh: pnpm's .bin shims are shell scripts, not JS —
 # invoked directly, never wrapped in `node`.
-run_as_superuser "${RELEASE_DIR}/api/node_modules/.bin/prisma" migrate deploy \
-  --schema "${RELEASE_DIR}/api/packages/db/prisma/schema.prisma" \
-  || die "Migration failed. Previous release (${PREVIOUS_RELEASE}) is untouched and still running. Inspect the backup taken above before retrying."
+#
+# Output is captured (via `tee`, not just redirected — the admin still
+# sees it live) so a lock-timeout failure can be told apart from any
+# other migration failure and given its OWN actionable guidance instead
+# of the generic message: this specific failure is EXPECTED occasionally
+# on a busy install (see this file's own CLAUDE.md "any migration
+# touching a hot table" entry for the mechanism) and has a real remedy —
+# retry, or raise the timeout — where a generic migration error usually
+# does not. `set -o pipefail` (top of this script) is load-bearing here:
+# without it, `cmd | tee file`'s checked exit status would be `tee`'s
+# (always 0), the exact bug this project's own CI once shipped silently.
+MIGRATE_LOG="$(mktemp)"
+if ! run_as_superuser "${RELEASE_DIR}/api/node_modules/.bin/prisma" migrate deploy \
+  --schema "${RELEASE_DIR}/api/packages/db/prisma/schema.prisma" 2>&1 | tee "$MIGRATE_LOG"; then
+  if grep -qi "lock timeout" "$MIGRATE_LOG"; then
+    rm -f "$MIGRATE_LOG"
+    die "Migration timed out waiting for a table lock (current limit: ${MIGRATION_LOCK_TIMEOUT}). This means another process — almost always the PREVIOUS release, still serving live traffic — held a conflicting lock on a table this migration needs to change for longer than the timeout. Previous release (${PREVIOUS_RELEASE}) is untouched and still running; nothing is broken. What to do: retry this upgrade during a quieter traffic period, or raise the limit for one run: MIGRATION_LOCK_TIMEOUT=60s sudo ./upgrade-native.sh"
+  fi
+  rm -f "$MIGRATE_LOG"
+  die "Migration failed. Previous release (${PREVIOUS_RELEASE}) is untouched and still running. Inspect the backup taken above before retrying."
+fi
+rm -f "$MIGRATE_LOG"
 
 # Schema migrations don't cover PERMISSIONS constants — those are
 # application-level rows, not a Prisma model change. seed.ts's own
