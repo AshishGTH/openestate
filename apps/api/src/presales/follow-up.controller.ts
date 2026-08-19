@@ -24,7 +24,7 @@ export class FollowUpController {
     const visibleUserIds = await this.teamScope.getVisibleUserIds(
       user.companyId,
       user.sub,
-      user.roleSlug,
+      user.permissions,
     );
     return { visibleUserIds };
   }

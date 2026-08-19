@@ -127,7 +127,19 @@ describeIf('e2e team scoping: manager hierarchy, FollowUp IDOR fix, scoped reass
       data: { companyId: fx.companyId, name: 'E2E Admin', slug: SYSTEM_ROLES.COMPANY_ADMIN, isSystem: true },
     });
     await systemPrisma.rolePermission.createMany({
-      data: [PERMISSIONS.PRESALES_INQUIRY_READ, PERMISSIONS.ADMIN_USER_UPDATE].map((key) => ({
+      // ADMIN_TEAM_SCOPE_ALL is what now confers company-wide visibility.
+      // This role previously got it purely from its SLUG being
+      // `company_admin`, which is exactly the coupling that broke a
+      // company's own custom full-permission admin role — it was scoped to
+      // its own subtree with no error to explain why. The real seeded
+      // company_admin holds this permission (it takes every admin.* key),
+      // so granting it here matches production rather than working around
+      // the change.
+      data: [
+        PERMISSIONS.PRESALES_INQUIRY_READ,
+        PERMISSIONS.ADMIN_USER_UPDATE,
+        PERMISSIONS.ADMIN_TEAM_SCOPE_ALL,
+      ].map((key) => ({
         roleId: adminRole.id,
         permissionId: permByKey.get(key),
       })),

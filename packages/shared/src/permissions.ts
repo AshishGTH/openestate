@@ -42,6 +42,16 @@ export const PERMISSIONS = {
   ADMIN_WEBHOOK_MANAGE: 'admin.webhook.manage',
   ADMIN_LEAD_API_KEY_READ: 'admin.lead-api-key.read',
   ADMIN_LEAD_API_KEY_MANAGE: 'admin.lead-api-key.manage',
+  // Exempts the holder from reporting-line scoping: they see every user's
+  // leads, reports and dashboard figures company-wide, regardless of where
+  // they sit (or don't sit) in the org chart. TeamScopeService keys off
+  // THIS, not off the role slug — a company that builds its own
+  // "Administrator" role with every permission must behave like an admin,
+  // and before this it was silently scoped to its own subtree instead
+  // (its dashboard simply looked broken, with no error to explain why).
+  // Deliberately NOT granted to sales_manager: a manager seeing their own
+  // subtree is the whole point of the hierarchy.
+  ADMIN_TEAM_SCOPE_ALL: 'admin.team-scope.all',
 
   // ── Inventory ─────────────────────────────────────
   INVENTORY_PROJECT_READ: 'inventory.project.read',

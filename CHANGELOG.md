@@ -3,6 +3,56 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+
+- **Reloading a few times, or letting your browser restore several tabs,
+  could log you out.** Every page load refreshes the session; if that
+  response never reached the browser — you navigated again, the browser
+  restored several tabs at once, the response was simply lost — the
+  server had already consumed the token and issued a replacement the
+  browser never received. Re-presenting the old one was then treated as
+  token theft and killed the whole session. It landed you on the login
+  screen with no explanation, and it could never be reproduced on
+  demand. Refresh-token rotation now allows a short grace window
+  (`REFRESH_REUSE_GRACE_SECONDS`, default 30) for re-presenting a
+  just-consumed token when the session chain is otherwise intact.
+  Genuine replay — after the window, or once the session has been
+  revoked — still revokes everything exactly as before. Affects staff
+  and portal alike; both share one rotation path.
+
+- **A custom "Administrator" role saw only its own subtree.** Whether a
+  role sees the whole company was decided by its slug being literally
+  `company_admin` or `super_admin`, so a company that built its own
+  full-permission admin role was silently scoped to its own reporting
+  line — its dashboard and reports showed a fraction of the company with
+  no error to explain why. That decision now keys off a permission
+  (`admin.team-scope.all`), which the seeded `company_admin` and
+  `super_admin` roles receive automatically, including on upgrade. Grant
+  it to any custom admin-equivalent role of your own via Admin → Roles.
+  Deliberately not granted to `sales_manager`: seeing your own subtree
+  is the point of the hierarchy.
+
+### Changed
+
+- **The dashboard's conversion figure no longer drifts.** It counted
+  inquiries whose status was SUCCESSFUL and whose `updatedAt` fell in
+  the current month — but `updatedAt` moves on ANY edit, so adding a
+  note to a lead closed last year silently counted it as this month's
+  conversion and changed a manager's team-performance number. Inquiries
+  now carry a real `convertedAt`, stamped when the status becomes
+  SUCCESSFUL and cleared if it moves back out.
+
+  **Historical figures are approximate.** Inquiries closed before this
+  release have `convertedAt` backfilled from `updatedAt` — the same
+  approximation the old figure already used, so no number you have seen
+  changes as a result of upgrading; they simply stop drifting from here
+  on. Where a closed lead was edited after the fact, its recorded
+  conversion date is that later edit, which is not recoverable after the
+  fact and has not been guessed at. Figures from this release onward are
+  exact.
+
 ## [0.4.0]
 
 Lead ownership and manager hierarchy — the second half of the v0.3.1

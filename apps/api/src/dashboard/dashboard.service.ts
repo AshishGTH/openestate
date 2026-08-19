@@ -64,15 +64,15 @@ export interface DashboardResponse {
  * conversions, last-activity) is new aggregation because nothing existing
  * computes it at all.
  *
- * KNOWN IMPRECISION, stated rather than hidden: `conversionsThisMonth`
- * keys off `Inquiry.updatedAt` with `status = SUCCESSFUL`, because there
- * is no `convertedAt` column and no status-change log for Inquiry. Any
- * edit to an already-successful inquiry re-dates it into the current
- * month. The clean fix is a real `convertedAt` timestamp written on the
- * transition — deliberately not done here (it is a migration, and this
- * was scoped as frontend work over existing data), but it is the reason
- * this number should be read as "closed-and-touched this month", not an
- * exact conversion count.
+ * `conversionsThisMonth` keys off `Inquiry.convertedAt`, stamped by
+ * InquiryService.update() on the transition into SUCCESSFUL and cleared
+ * when an inquiry moves back out. It deliberately does NOT use
+ * `updatedAt`, which an earlier version did: every unrelated edit bumps
+ * that, so editing a lead closed months ago silently re-dated it into the
+ * current month and moved a manager's team-performance number. Inquiries
+ * closed before that column existed were backfilled from `updatedAt` —
+ * the same approximation the old figure already used, so no historical
+ * number changed, they merely stopped drifting (see CHANGELOG.md).
  */
 @Injectable()
 export class DashboardService {
@@ -128,7 +128,7 @@ export class DashboardService {
           where: { ...base, status: { in: OPEN_STATUSES } },
         }),
         this.systemPrisma.inquiry.count({
-          where: { ...base, status: 'SUCCESSFUL', updatedAt: { gte: startOfMonth } },
+          where: { ...base, convertedAt: { gte: startOfMonth } },
         }),
         this.reportsService.funnelByStatus(companyId, { visibleUserIds: userIds }),
       ]);
@@ -180,7 +180,7 @@ export class DashboardService {
         }),
         this.systemPrisma.inquiry.groupBy({
           by: ['assignedToId'],
-          where: { ...inTeam, status: 'SUCCESSFUL', updatedAt: { gte: startOfMonth } },
+          where: { ...inTeam, convertedAt: { gte: startOfMonth } },
           _count: { _all: true },
         }),
         this.systemPrisma.followUp.groupBy({
@@ -226,9 +226,9 @@ export class DashboardService {
   async getDashboard(
     companyId: string,
     userId: string,
-    roleSlug: string,
+    permissions: readonly string[],
   ): Promise<DashboardResponse> {
-    const visibleUserIds = await this.teamScope.getVisibleUserIds(companyId, userId, roleSlug);
+    const visibleUserIds = await this.teamScope.getVisibleUserIds(companyId, userId, permissions);
 
     // "Mine" is always exactly the caller, never the visible set — a
     // manager's own queue is a different number from their team's, and
