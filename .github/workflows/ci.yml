@@ -20,6 +20,13 @@ jobs:
   lint-typecheck-build:
     name: Lint, typecheck, unit tests, build
     runs-on: ubuntu-latest
+    # No job here had an upper time bound, so GitHub's 6-hour default
+    # applied: a hung step burned runner time for hours and never
+    # self-reported. Found when a migration blocked on a database lock and
+    # native-upgrade sat in_progress for an hour against a ~3 minute norm.
+    # 30 is far above every job's real duration (longest observed ~8 min)
+    # and far below the point where a hang stops being obvious.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 
@@ -57,6 +64,13 @@ jobs:
   integration-tests:
     name: Integration tests (Postgres + Redis)
     runs-on: ubuntu-latest
+    # No job here had an upper time bound, so GitHub's 6-hour default
+    # applied: a hung step burned runner time for hours and never
+    # self-reported. Found when a migration blocked on a database lock and
+    # native-upgrade sat in_progress for an hour against a ~3 minute norm.
+    # 30 is far above every job's real duration (longest observed ~8 min)
+    # and far below the point where a hang stops being obvious.
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16-alpine
@@ -220,6 +234,13 @@ jobs:
   e2e-playwright:
     name: E2E (Playwright against a real browser + built frontend)
     runs-on: ubuntu-latest
+    # No job here had an upper time bound, so GitHub's 6-hour default
+    # applied: a hung step burned runner time for hours and never
+    # self-reported. Found when a migration blocked on a database lock and
+    # native-upgrade sat in_progress for an hour against a ~3 minute norm.
+    # 30 is far above every job's real duration (longest observed ~8 min)
+    # and far below the point where a hang stops being obvious.
+    timeout-minutes: 30
     needs: lint-typecheck-build
     # Ports match deploy/docker-compose.test.yml exactly (5433/6380, not
     # Postgres/Redis's own defaults) so apps/e2e/playwright.config.ts's
@@ -340,6 +361,13 @@ jobs:
   compose-healthcheck:
     name: docker compose up + healthcheck
     runs-on: ubuntu-latest
+    # No job here had an upper time bound, so GitHub's 6-hour default
+    # applied: a hung step burned runner time for hours and never
+    # self-reported. Found when a migration blocked on a database lock and
+    # native-upgrade sat in_progress for an hour against a ~3 minute norm.
+    # 30 is far above every job's real duration (longest observed ~8 min)
+    # and far below the point where a hang stops being obvious.
+    timeout-minutes: 30
     needs: lint-typecheck-build
     steps:
       - uses: actions/checkout@v4
@@ -387,6 +415,13 @@ jobs:
   native-install:
     name: Native install (real Postgres/Redis/nginx, no Docker)
     runs-on: ubuntu-latest
+    # No job here had an upper time bound, so GitHub's 6-hour default
+    # applied: a hung step burned runner time for hours and never
+    # self-reported. Found when a migration blocked on a database lock and
+    # native-upgrade sat in_progress for an hour against a ~3 minute norm.
+    # 30 is far above every job's real duration (longest observed ~8 min)
+    # and far below the point where a hang stops being obvious.
+    timeout-minutes: 30
     needs: lint-typecheck-build
     steps:
       - uses: actions/checkout@v4
@@ -569,6 +604,13 @@ jobs:
     # gate instead of a one-off manual check.
     name: Native upgrade (populated DB, real Postgres/Redis/nginx)
     runs-on: ubuntu-latest
+    # No job here had an upper time bound, so GitHub's 6-hour default
+    # applied: a hung step burned runner time for hours and never
+    # self-reported. Found when a migration blocked on a database lock and
+    # native-upgrade sat in_progress for an hour against a ~3 minute norm.
+    # 30 is far above every job's real duration (longest observed ~8 min)
+    # and far below the point where a hang stops being obvious.
+    timeout-minutes: 30
     needs: lint-typecheck-build
     steps:
       - uses: actions/checkout@v4
