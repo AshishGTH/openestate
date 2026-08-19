@@ -28,7 +28,7 @@ jobs:
     # and far below the point where a hang stops being obvious.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
         with:
@@ -96,7 +96,7 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
         with:
@@ -272,7 +272,7 @@ jobs:
           --health-retries 10
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v4
         with:
@@ -370,7 +370,7 @@ jobs:
     timeout-minutes: 30
     needs: lint-typecheck-build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Generate deploy/.env
         working-directory: deploy
@@ -424,7 +424,7 @@ jobs:
     timeout-minutes: 30
     needs: lint-typecheck-build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Mirrors deploy/native's own documented prerequisite list
       # (docs/docs/installation.md §2) — install-native.sh checks for
@@ -613,7 +613,7 @@ jobs:
     timeout-minutes: 30
     needs: lint-typecheck-build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # need real history to check out an older ref, then return to HEAD
 
