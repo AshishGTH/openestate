@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard';
 import Settings from './pages/Settings';
 import UsersPage from './pages/admin/Users';
 import UserForm from './pages/admin/UserForm';
+import HierarchyPage from './pages/admin/Hierarchy';
 import RolesPage from './pages/admin/Roles';
 import RoleForm from './pages/admin/RoleForm';
 import MastersPage from './pages/admin/Masters';
@@ -48,6 +49,7 @@ export default function App() {
             <Route index element={<Dashboard />} />
             <Route path="settings" element={<Settings />} />
             <Route path="admin/users" element={<RequirePermission perm={PERMISSIONS.ADMIN_USER_READ}><UsersPage /></RequirePermission>} />
+            <Route path="admin/hierarchy" element={<RequirePermission perm={PERMISSIONS.ADMIN_USER_READ}><HierarchyPage /></RequirePermission>} />
             <Route path="admin/users/:id" element={<RequirePermission perm={PERMISSIONS.ADMIN_USER_READ}><UserForm /></RequirePermission>} />
             <Route path="admin/roles" element={<RequirePermission perm={PERMISSIONS.ADMIN_ROLE_READ}><RolesPage /></RequirePermission>} />
             <Route path="admin/roles/:id" element={<RequirePermission perm={PERMISSIONS.ADMIN_ROLE_READ}><RoleForm /></RequirePermission>} />

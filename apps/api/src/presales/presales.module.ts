@@ -56,6 +56,8 @@ import { ReportsService } from './reports.service';
     EscalationScheduler,
     ReportsService,
   ],
-  exports: [CLOCK, AssignmentService, EscalationService, ApplicantService, InquiryService],
+  // ReportsService is exported for DashboardModule, which reuses
+  // funnelByStatus rather than reimplementing the status aggregation.
+  exports: [CLOCK, AssignmentService, EscalationService, ApplicantService, InquiryService, ReportsService],
 })
 export class PresalesModule {}

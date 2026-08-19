@@ -35,6 +35,7 @@ import { BrokersPortalModule } from './brokers-portal/brokers-portal.module';
 import { PluginsModule } from './plugins/plugins.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
 import { LeadsModule } from './leads/leads.module';
+import { DashboardModule } from './dashboard/dashboard.module';
 import { LOG_REDACTION_PATHS } from './common/logger/redaction';
 
 @Module({
@@ -140,6 +141,7 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     PluginsModule,
     WebhooksModule,
     LeadsModule,
+    DashboardModule,
   ],
   providers: [
     // Filtered to the unnamed/'default' bucket only — see

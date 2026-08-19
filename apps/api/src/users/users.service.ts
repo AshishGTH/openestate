@@ -17,6 +17,17 @@ import type {
 
 const RESET_EXPIRY_MS = 30 * 60 * 1000;
 
+export interface HierarchyNode {
+  id: string;
+  name: string;
+  /** Nullable — staff users can be phone-identified with no email. */
+  email: string | null;
+  roleName: string | null;
+  roleSlug: string | null;
+  directReportCount: number;
+  reports: HierarchyNode[];
+}
+
 @Injectable()
 export class UsersService {
   constructor(
@@ -90,6 +101,72 @@ export class UsersService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  /**
+   * Read-only org tree, scoped to what the caller may see: admin-tier
+   * callers (`visibleUserIds === null`) get the whole company; everyone
+   * else gets their own reporting subtree, which `TeamScopeService`
+   * already computes — this method never decides scope itself, it only
+   * shapes the rows it is handed into a tree.
+   *
+   * Roots are the visible users whose own manager is either unset or NOT
+   * in the visible set. That second condition matters: a manager viewing
+   * their own subtree has a manager above them who is deliberately not
+   * visible, and without it the tree would come back empty (no node's
+   * parent would be present) rather than rooted at the caller.
+   */
+  async getHierarchy(
+    companyId: string,
+    visibleUserIds: string[] | null,
+  ): Promise<HierarchyNode[]> {
+    const users = await this.systemPrisma.user.findMany({
+      where: {
+        companyId,
+        isActive: true,
+        ...(visibleUserIds ? { id: { in: visibleUserIds } } : {}),
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        managerId: true,
+        role: { select: { name: true, slug: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    type Row = (typeof users)[number];
+
+    const visible = new Set(users.map((u: Row) => u.id));
+    const nodeById = new Map<string, HierarchyNode>(
+      users.map((u: Row) => [
+        u.id,
+        {
+          id: u.id,
+          name: u.name,
+          email: u.email,
+          roleName: u.role?.name ?? null,
+          roleSlug: u.role?.slug ?? null,
+          directReportCount: 0,
+          reports: [],
+        },
+      ]),
+    );
+
+    const roots: HierarchyNode[] = [];
+    for (const u of users) {
+      const node = nodeById.get(u.id)!;
+      const parent = u.managerId && visible.has(u.managerId) ? nodeById.get(u.managerId) : undefined;
+      if (parent) {
+        parent.reports.push(node);
+        parent.directReportCount++;
+      } else {
+        roots.push(node);
+      }
+    }
+
+    return roots;
   }
 
   async findOne(companyId: string, userId: string) {
