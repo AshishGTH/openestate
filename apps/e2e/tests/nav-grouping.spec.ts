@@ -40,6 +40,19 @@ test('sections collapse and expand, and an explicit choice survives navigation',
   await expect(page).toHaveURL(/\/admin\/config$/);
   await expect(page.getByRole('button', { name: 'Admin' })).toHaveAttribute('aria-expanded', 'true');
 
+  // ...and navigating must not open sections that own neither the old nor
+  // the new route. Only the active section auto-opens; everything the
+  // user hasn't touched stays shut.
+  await expect(page.getByRole('button', { name: 'Pre-Sales' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  await expect(page.getByRole('button', { name: 'Inventory' })).toHaveAttribute(
+    'aria-expanded',
+    'false',
+  );
+  await expect(page.getByRole('link', { name: 'Inquiries' })).not.toBeVisible();
+
   // An explicit collapse must WIN over the "auto-open the section owning
   // the active route" default — otherwise a user could never keep the
   // section for the page they're on shut. Deliberately asserted while ON
