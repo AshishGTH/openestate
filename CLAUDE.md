@@ -4760,10 +4760,13 @@ password reset on `admin@demo-realty.com` via `reset-admin-password.sh`
 (no other known login existed) — blocked once by the auto-mode safety
 classifier as a credential mutation, then explicitly approved by the
 user in chat before proceeding. The account's password is now
-`ClickThrough#Verify1`, not its original value, since resetting a
+`[redacted — rotated]`, not its original value, since resetting a
 password by definition means the old hash isn't recoverable — noted
 here so a future session doesn't waste time on a stale credential
-assumption for this specific demo account.
+assumption for this specific demo account. (The literal value that
+used to sit here was committed to this public repo and has since been
+rotated twice; see the no-credentials-in-committed-files standing rule
+below, and `docs/handoff.md` for where credentials actually live now.)
 
 ### Standing rule: an upgrade assertion must assert the OUTCOME, not the mechanism
 
@@ -5218,3 +5221,52 @@ things a pilot user hits hourly and this needed its own design pass.
   `sales_executive` users) or their managers will suddenly see far less
   than they did on the previous version, with no error, just a smaller
   list.
+
+### Standing rule: no credential VALUES in any committed file, including this one
+
+This repo is public. Two real credentials were committed to it and
+stayed in history for weeks: the VM's SSH/sudo login password (in
+`docs/handoff.md`'s VM table AND inline in its own `printf ... | ssh`
+example, across ~5 commits) and the demo-admin app password (in
+`docs/handoff.md`, and separately in this file's own "Project edit"
+decisions entry). Both were written down for a genuinely good reason —
+a future session needs them to do anything on the VM — and that reason
+is exactly why nobody questioned them.
+
+**The rule: a real credential value never goes in a tracked file.** Not
+in `docs/handoff.md`, not in a decisions-log entry here, not in a code
+comment, not in a commit message, not in an example command. A
+placeholder (`<password>`, `<token>`) is correct; the real string is
+not, even for a throwaway demo box on a private LAN, and even when the
+surrounding prose is genuinely useful operational knowledge. Write down
+*where* a credential lives and *how* to recover it (e.g.
+`deploy/native/reset-admin-password.sh` recovers the demo admin without
+needing the old value) — never the value itself.
+
+**This file's append-only rule protects DECISIONS, not SECRETS.** That
+distinction had never been stated, and the omission is why a password
+sat in a decisions entry unchallenged: "append-only" was read as "never
+edit anything here." Redacting a leaked credential value in place
+(replacing it with `[redacted — rotated]`, keeping the entry and its
+reasoning fully intact) is explicitly ALLOWED and expected. What
+append-only forbids is rewriting or deleting the *decision* — the what,
+the why, and what it ruled out. A redaction changes none of those.
+
+Two things worth knowing about the cleanup itself, since they shape
+what a future session should and shouldn't attempt:
+
+- **Redacting the current file does NOT un-expose anything.** Both
+  values were already pushed to a public remote; git history still has
+  them at their original commits. Redaction stops the *current* file
+  from displaying a secret and stops it being copied forward — the
+  actual mitigation is ROTATION, which is what was done (both passwords
+  rotated; the SSH one additionally superseded by disabling password
+  auth entirely on the box). History rewriting was deliberately NOT
+  attempted: it would break every existing clone and every commit SHA
+  referenced throughout this log, for no security benefit once the
+  credentials are dead.
+- **A full-history credential sweep was run** (all 222 commits, for
+  cloud-provider key shapes, bearer/PAT token shapes, PEM private-key
+  blocks, and any committed `.env`) — clean apart from the two VM
+  passwords already known. Worth re-running the same sweep before any
+  future public-facing milestone rather than assuming it stays clean.

@@ -34,11 +34,27 @@ second (fresh-install) box reappears, add it back as its own row
 rather than overwriting this one.
 
 Reachable with the existing key, no password needed:
-`ssh -i ~/.ssh/openestate_vm <user>@<ip>`. This box's key install
-needed `plink` (PuTTY), not `ssh-copy-id`/piped-password `ssh` — the
-OpenSSH client does not read a password from a pipe for its own auth
-prompt (unlike sudo's prompt, which does read from the pty). Pattern
-that worked:
+`ssh -i ~/.ssh/openestate_vm <user>@<ip>`.
+
+**192.168.1.21 is now key-only — `PasswordAuthentication no`.** Set via
+`/etc/ssh/sshd_config.d/01-disable-password-auth.conf` (the drop-in dir
+was empty, and `Include` sits at the top of `sshd_config`, so a drop-in
+wins over the commented-out default further down). `sshd -T` confirms
+`passwordauthentication no` / `kbdinteractiveauthentication no` /
+`pubkeyauthentication yes`, and a password-only connection attempt is
+refused with `Permission denied (publickey)`. **The account password
+still exists and is still required for `sudo`** — sudo reads the tty,
+not sshd, so the `printf '<password>' | ssh -tt ... sudo ...` deploy
+pattern below is unaffected. Losing the SSH key now means losing
+access: keep `~/.ssh/openestate_vm` backed up, or re-enable password
+auth from a console session before you need it.
+
+The ORIGINAL key install on this box needed `plink` (PuTTY), not
+`ssh-copy-id`/piped-password `ssh` — the OpenSSH client does not read a
+password from a pipe for its own auth prompt (unlike sudo's prompt,
+which does read from the pty). That pattern is kept here for a
+genuinely NEW box only; it can no longer work against 192.168.1.21
+itself now that password auth is off:
 ```bash
 plink -ssh -batch -hostkey "<fingerprint from the first connection attempt>" -pw '<password>' <user>@<ip> "mkdir -p ~/.ssh && chmod 700 ~/.ssh && echo '<pubkey contents>' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
 ```
