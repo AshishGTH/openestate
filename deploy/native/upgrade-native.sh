@@ -78,6 +78,29 @@ set -a
 source "$ENV_FILE"
 set +a
 
+# Migrations here run BEFORE cutover, deliberately — the previous release
+# keeps serving against the new, backward-compatible schema until the
+# symlink swaps. That means every DDL statement contends with a LIVE app.
+#
+# `ALTER TABLE ... ADD COLUMN` needs ACCESS EXCLUSIVE, which conflicts with
+# the ACCESS SHARE that an ordinary SELECT holds — so a single in-flight
+# read on the table is enough to block it, and with no timeout it waits
+# FOREVER. Worse, a blocked DDL statement queues ahead of later lock
+# requests, so every subsequent query on that table piles up behind it and
+# the app freezes rather than the migration merely being slow. Verified
+# empirically against a real Postgres, not assumed: an open read
+# transaction on `refresh_tokens` blocks `ADD COLUMN` indefinitely, and
+# `refresh_tokens` is read on essentially every authenticated request.
+#
+# lock_timeout turns that unbounded hang into a fast, legible failure —
+# upgrade-native.sh then aborts with the previous release still running and
+# untouched, which is exactly the intended failure mode. Set via the
+# connection string's `options` parameter, NOT PGOPTIONS: Prisma uses its
+# own Rust driver rather than libpq and does not read libpq env vars
+# (confirmed by testing both).
+: "${MIGRATION_LOCK_TIMEOUT:=15s}"
+PG_STARTUP_OPTIONS="-c%20lock_timeout%3D${MIGRATION_LOCK_TIMEOUT}"
+
 run_as_superuser() {
   # See install-native.sh: run from RELEASE_DIR (already o+rX), not this
   # script's own cwd — Prisma 6.19+'s cwd-relative prisma.config.*
@@ -88,9 +111,9 @@ run_as_superuser() {
     cd "$RELEASE_DIR" || exit 1
     if [ -n "$DB_HOST" ]; then
       PGPASSWORD="${PG_SUPERUSER_PASSWORD:?Set PG_SUPERUSER_PASSWORD when using --db-host}" \
-        env DATABASE_URL="postgresql://${PG_SUPERUSER:-postgres}:${PG_SUPERUSER_PASSWORD}@${DB_HOST}:5432/openestate" "$@"
+        env DATABASE_URL="postgresql://${PG_SUPERUSER:-postgres}:${PG_SUPERUSER_PASSWORD}@${DB_HOST}:5432/openestate?options=${PG_STARTUP_OPTIONS}" "$@"
     else
-      sudo -u postgres env DATABASE_URL="postgresql://postgres@localhost/openestate?host=/var/run/postgresql" "$@"
+      sudo -u postgres env DATABASE_URL="postgresql://postgres@localhost/openestate?host=/var/run/postgresql&options=${PG_STARTUP_OPTIONS}" "$@"
     fi
   )
 }

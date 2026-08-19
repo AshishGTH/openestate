@@ -22,6 +22,17 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   revoked — still revokes everything exactly as before. Affects staff
   and portal alike; both share one rotation path.
 
+- **An upgrade could hang indefinitely instead of failing.**
+  `upgrade-native.sh` runs migrations before cutover, deliberately, while
+  the previous release is still serving. A schema change needing an
+  exclusive table lock therefore waits on live traffic — and with no
+  timeout it waited forever, with later queries queueing behind it so the
+  app froze rather than the upgrade merely being slow. Migrations now run
+  with a `lock_timeout` (15s, override with `MIGRATION_LOCK_TIMEOUT`), so
+  a contended upgrade aborts quickly and leaves the previous release
+  running and untouched — the intended failure mode. If you hit the new
+  error, retry during a quieter period.
+
 - **A custom "Administrator" role saw only its own subtree.** Whether a
   role sees the whole company was decided by its slug being literally
   `company_admin` or `super_admin`, so a company that built its own
