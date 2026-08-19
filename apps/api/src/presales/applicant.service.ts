@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
-import { normalizePhone, normalizeEmail } from '@openestate/shared';
+import { normalizePhone, normalizeEmail, orderApplicantPair } from '@openestate/shared';
 import type {
   CreateApplicantDto,
   UpdateApplicantDto,
@@ -73,19 +73,93 @@ export class ApplicantService {
     return item;
   }
 
-  /** Duplicate candidates by exact normalized phone/email match, excluding tombstoned rows. */
+  /**
+   * Duplicate candidates by exact normalized phone/email match, excluding
+   * tombstoned rows. `excludeConfirmedAgainstId`, when given, drops any
+   * candidate that already has a confirmed-distinct decision recorded
+   * against that applicant (ApplicantDistinctPair) — only meaningful for
+   * an EXISTING applicant's re-check (findDuplicatesForApplicant); a
+   * brand-new applicant being created has no id yet to check pairs
+   * against, so create()/createFromLead() never pass this.
+   */
   async findDuplicates(
     companyId: string,
     primaryPhoneNormalized: string,
     emailNormalized: string | null,
+    excludeConfirmedAgainstId?: string,
   ) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const or: any[] = [{ primaryPhoneNormalized }];
     if (emailNormalized) or.push({ emailNormalized });
 
-    return this.systemPrisma.applicant.findMany({
+    const candidates = await this.systemPrisma.applicant.findMany({
       where: { companyId, mergedIntoId: null, OR: or },
     });
+
+    if (!excludeConfirmedAgainstId || candidates.length === 0) return candidates;
+
+    const confirmedPairs = await this.systemPrisma.applicantDistinctPair.findMany({
+      where: {
+        companyId,
+        OR: candidates.map((c: { id: string }) => {
+          const [applicantAId, applicantBId] = orderApplicantPair(excludeConfirmedAgainstId, c.id);
+          return { applicantAId, applicantBId };
+        }),
+      },
+      select: { applicantAId: true, applicantBId: true },
+    });
+    const confirmedOtherIds = new Set(
+      confirmedPairs.map((p: { applicantAId: string; applicantBId: string }) =>
+        p.applicantAId === excludeConfirmedAgainstId ? p.applicantBId : p.applicantAId,
+      ),
+    );
+
+    return candidates.filter((c: { id: string }) => !confirmedOtherIds.has(c.id));
+  }
+
+  /** Re-check for an EXISTING applicant: same match rule as findDuplicates,
+   *  minus itself and minus any confirmed-distinct pair. */
+  async findDuplicatesForApplicant(companyId: string, applicantId: string) {
+    const applicant = await this.findOne(companyId, applicantId);
+    const duplicates = await this.findDuplicates(
+      companyId,
+      applicant.primaryPhoneNormalized,
+      applicant.emailNormalized,
+      applicantId,
+    );
+    return duplicates.filter((d: { id: string }) => d.id !== applicantId);
+  }
+
+  /** The deliberate opposite of merge() — records "these are different
+   *  people," idempotently, so findDuplicatesForApplicant stops
+   *  resurfacing this exact pair. */
+  async confirmDistinct(
+    companyId: string,
+    applicantId: string,
+    otherApplicantId: string,
+    actorId: string | null,
+  ) {
+    if (applicantId === otherApplicantId) {
+      throw new BadRequestException('Cannot confirm an applicant as distinct from itself');
+    }
+    await Promise.all([
+      this.findOne(companyId, applicantId),
+      this.findOne(companyId, otherApplicantId),
+    ]);
+
+    const [applicantAId, applicantBId] = orderApplicantPair(applicantId, otherApplicantId);
+
+    return runWithTenant({ companyId }, () =>
+      withTenantTx(this.tenantPrisma, companyId, (tx) =>
+        tx.applicantDistinctPair.upsert({
+          where: {
+            companyId_applicantAId_applicantBId: { companyId, applicantAId, applicantBId },
+          },
+          update: {},
+          create: { companyId, applicantAId, applicantBId, decidedById: actorId },
+        }),
+      ),
+    );
   }
 
   async create(companyId: string, dto: CreateApplicantDto) {

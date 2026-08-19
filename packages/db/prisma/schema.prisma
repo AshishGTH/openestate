@@ -52,6 +52,7 @@ model Company {
   applicants               Applicant[]
   applicantConsents        ApplicantConsent[]
   applicantMerges          ApplicantMerge[]
+  applicantDistinctPairs   ApplicantDistinctPair[]
   inquiryTemperatures      InquiryTemperature[]
   inquiries                Inquiry[]
   inquiryAssignments       InquiryAssignment[]
@@ -164,6 +165,7 @@ model User {
   statusChangesActed       UnitStatusChange[]      @relation("statusChangeActor")
   consentsRecorded         ApplicantConsent[]      @relation("consentActor")
   applicantMergesActed     ApplicantMerge[]        @relation("applicantMergeActor")
+  applicantDistinctPairsDecided ApplicantDistinctPair[] @relation("applicantDistinctPairDecider")
   inquiriesAssigned        Inquiry[]               @relation("inquiryAssignee")
   inquiriesCreated         Inquiry[]               @relation("inquiryCreator")
   assignmentsFrom          InquiryAssignment[]     @relation("assignmentFrom")
@@ -347,6 +349,14 @@ model CompanyConfig {
   // ever runs for machine-driven intake (inbound lead API, bulk import),
   // which has no human creator to retain ownership for.
   presalesCreatorRetainsLead Boolean @default(true) @map("presales_creator_retains_lead")
+  // v0.5: automated intake (inbound lead API, bulk import) has no human
+  // present to ask "same person or not" — when true (default, unchanged
+  // behavior), a phone/email match auto-links to the existing applicant.
+  // A company with heavy legitimate phone-sharing (family members, a
+  // broker's office line) can flip this to always create a NEW applicant
+  // and flag the match for a human to resolve later instead, via
+  // ApplicantDistinctPair — never silently guessing which is riskier here.
+  presalesPhoneDedupAutoLink Boolean @default(true) @map("presales_phone_dedup_auto_link")
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
 
@@ -904,6 +914,8 @@ model Applicant {
   consents           ApplicantConsent[]
   survivorOfMerges   ApplicantMerge[]     @relation("mergeSurvivor")
   absorbedInMerge    ApplicantMerge?      @relation("mergeAbsorbed")
+  distinctPairsAsA   ApplicantDistinctPair[] @relation("distinctPairA")
+  distinctPairsAsB   ApplicantDistinctPair[] @relation("distinctPairB")
   inquiries          Inquiry[]
   communicationLogs  CommunicationLog[]
   addresses          ApplicantAddress[]
@@ -951,6 +963,31 @@ model ApplicantMerge {
   mergedBy User?     @relation("applicantMergeActor", fields: [mergedById], references: [id])
 
   @@map("applicant_merges")
+}
+
+/// The deliberate opposite of ApplicantMerge: a persisted "these are
+/// different people" decision, not "these are the same." Composes with
+/// merge — once a human decides two applicants sharing a phone/email are
+/// NOT the same person, ApplicantService.findDuplicates() stops flagging
+/// that exact pair again. Always stored with applicantAId < applicantBId
+/// (lexicographic UUID compare, enforced at the service layer — Postgres
+/// has no native "smaller of two UUID columns" constraint), so a lookup
+/// never needs to check both orderings.
+model ApplicantDistinctPair {
+  id           String   @id @default(uuid()) @db.Uuid
+  companyId    String   @map("company_id") @db.Uuid
+  applicantAId String   @map("applicant_a_id") @db.Uuid
+  applicantBId String   @map("applicant_b_id") @db.Uuid
+  decidedById  String?  @map("decided_by_id") @db.Uuid
+  decidedAt    DateTime @default(now()) @map("decided_at")
+
+  company    Company   @relation(fields: [companyId], references: [id])
+  applicantA Applicant @relation("distinctPairA", fields: [applicantAId], references: [id], onDelete: Cascade)
+  applicantB Applicant @relation("distinctPairB", fields: [applicantBId], references: [id], onDelete: Cascade)
+  decidedBy  User?     @relation("applicantDistinctPairDecider", fields: [decidedById], references: [id])
+
+  @@unique([companyId, applicantAId, applicantBId])
+  @@map("applicant_distinct_pairs")
 }
 
 model InquiryTemperature {

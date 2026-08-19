@@ -43,6 +43,7 @@ const TENANT_SCOPED_MODELS = new Set([
   'Applicant',
   'ApplicantConsent',
   'ApplicantMerge',
+  'ApplicantDistinctPair',
   'InquiryTemperature',
   'Inquiry',
   'InquiryAssignment',
