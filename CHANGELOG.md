@@ -20,15 +20,18 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   against a stage that may never have actually been reached** — those are
   ledger entries, and reversing them is a business decision only a human
   reviewing the specific booking can make, not something a migration
-  should decide for you. To find potentially affected rows: every
-  `interest_accrual` whose `installment` has a non-null `milestone_percent`
-  and whose booking's payment plan came from a template — cross-reference
-  `payment_plan_milestones.label` for construction-suggestive names
-  (stage/slab/plinth/excavation/superstructure/finishing/structure). This
-  is a **label-text heuristic, not an exact identification** — the
-  pre-fix schema never captured milestone intent, so there is no precise
-  query; a human still has to look at the actual milestone names on the
-  affected bookings' payment plans.
+  should decide for you. **To find potentially affected rows, run
+  `deploy/native/find-stage-suspect-interest.sh` on your install** — a
+  read-only report (no write, ever) listing every `interest_accrual`
+  against an installment whose label suggests a construction/handover
+  stage (Excavation, Plinth, Superstructure, Finishing, On Possession,
+  etc.), with the booking number, installment label, total accrued
+  amount, and the date interest started accruing against it. This is a
+  **label-text heuristic, not an exact identification** — the pre-fix
+  schema never captured milestone intent, so there is no precise query;
+  the script's own header explains exactly what it does and doesn't
+  catch (see also its `--extra-terms` flag for a custom template's own
+  stage-milestone labels).
 
 ### Added
 
