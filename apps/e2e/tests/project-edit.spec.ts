@@ -54,7 +54,14 @@ test('changing a project\'s area/location with existing bookings shows the GST-c
     });
     const floor = await prisma.floor.findFirst({ where: { tower: { projectId: fixture.projectId } } });
     const unit = await prisma.unit.create({
-      data: { companyId: fixture.companyId, floorId: floor!.id, number: `PE-${Date.now()}`, status: 'AVAILABLE' },
+      data: {
+        companyId: fixture.companyId,
+        projectId: fixture.projectId,
+        shape: 'HIGH_RISE',
+        floorId: floor!.id,
+        number: `PE-${Date.now()}`,
+        status: 'AVAILABLE',
+      },
     });
     const booking = await prisma.booking.create({
       data: {

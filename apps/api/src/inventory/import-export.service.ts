@@ -236,6 +236,8 @@ export class ImportExportService {
           await tx.unit.create({
             data: {
               companyId,
+              projectId,
+              shape: 'HIGH_RISE',
               floorId,
               number: data.unitNumber,
               unitTypeId: data.unitType ? unitTypeCache.get(data.unitType) ?? null : null,
@@ -298,10 +300,10 @@ export class ImportExportService {
 
     for (const unit of units) {
       sheet.addRow({
-        towerName: unit.floor.tower.name,
-        towerCode: unit.floor.tower.code,
-        floorName: unit.floor.name,
-        floorNumber: unit.floor.floorNumber,
+        towerName: unit.floor?.tower.name ?? '',
+        towerCode: unit.floor?.tower.code ?? '',
+        floorName: unit.floor?.name ?? '',
+        floorNumber: unit.floor?.floorNumber ?? '',
         unitNumber: unit.number,
         unitType: unit.unitType?.name ?? '',
         status: unit.status,

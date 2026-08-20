@@ -39,7 +39,7 @@ export class BookingService {
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
         const unit = await tx.unit.findFirst({
           where: { id: dto.unitId, companyId },
-          include: { floor: { include: { tower: { include: { project: { include: { areaLocation: true } } } } } } },
+          include: { project: { include: { areaLocation: true } } },
         });
         if (!unit) throw new NotFoundException('Unit not found');
         if (!BOOKABLE_FROM.has(unit.status)) {
@@ -63,7 +63,7 @@ export class BookingService {
         // state code (IGST Act §12(3)(a) — location of the immovable property).
         const placeOfSupplyStateCode =
           dto.placeOfSupplyStateCode ??
-          unit.floor.tower.project.areaLocation?.stateCode ??
+          unit.project.areaLocation?.stateCode ??
           null;
         let intraState: boolean;
         try {

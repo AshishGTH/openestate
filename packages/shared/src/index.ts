@@ -3,6 +3,7 @@ export * from './permissions';
 export * from './roles';
 export * from './auth.dto';
 export * from './money';
+export * from './area';
 export * from './pagination.dto';
 export * from './user.dto';
 export * from './master.dto';

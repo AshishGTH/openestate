@@ -70,7 +70,14 @@ describeIf('v0.2.2 ProjectMedia/ConstructionUpdateMedia portal RLS (IDOR)', () =
       data: { companyId: fx.companyId, towerId: towerB.id, name: 'Floor B', floorNumber: 1 },
     });
     const unitB = await systemPrisma.unit.create({
-      data: { companyId: fx.companyId, floorId: floorB.id, number: `UB-${Date.now()}`, status: 'AVAILABLE' },
+      data: {
+        companyId: fx.companyId,
+        projectId: projectBId,
+        shape: 'HIGH_RISE',
+        floorId: floorB.id,
+        number: `UB-${Date.now()}`,
+        status: 'AVAILABLE',
+      },
     });
     await systemPrisma.booking.create({
       data: {
