@@ -5,6 +5,31 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Correctness bug: construction-linked payment plans could show a
+  customer overdue, and accrue delay interest, against a construction
+  stage the builder had not reached.** Every payment-plan milestone
+  previously got a due date at booking time regardless of what it was
+  meant to represent. Installments are now either DATE_LINKED (due at
+  booking date + offset — unchanged behaviour) or STAGE_LINKED (no due
+  date until a staff user marks the construction stage complete and
+  raises demands for it, from a new "Construction Stages" panel on the
+  project detail page). **This release does not retroactively reverse
+  interest already accrued, or correct demand letters already issued,
+  against a stage that may never have actually been reached** — those are
+  ledger entries, and reversing them is a business decision only a human
+  reviewing the specific booking can make, not something a migration
+  should decide for you. To find potentially affected rows: every
+  `interest_accrual` whose `installment` has a non-null `milestone_percent`
+  and whose booking's payment plan came from a template — cross-reference
+  `payment_plan_milestones.label` for construction-suggestive names
+  (stage/slab/plinth/excavation/superstructure/finishing/structure). This
+  is a **label-text heuristic, not an exact identification** — the
+  pre-fix schema never captured milestone intent, so there is no precise
+  query; a human still has to look at the actual milestone names on the
+  affected bookings' payment plans.
+
 ### Added
 
 - **Phase A of two-shape inventory (plotted / farmhouse groundwork).**

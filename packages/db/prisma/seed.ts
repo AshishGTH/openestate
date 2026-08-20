@@ -265,7 +265,22 @@ async function main() {
   });
 
   // Payment-plan template milestones (percents sum to 100).
-  const milestoneSets: Record<string, Array<{ label: string; percent: number; dueOffsetDays: number }>> = {
+  //
+  // "Construction-Linked Plan"'s stage milestones are STAGE_LINKED, not
+  // DATE_LINKED — this is the fix for a real correctness bug (see
+  // docs/plans/construction-linked-demand-fix.md): every milestone here
+  // used to get a hardcoded dueOffsetDays from booking date regardless of
+  // whether the underlying construction stage had actually happened,
+  // which meant a customer could be shown overdue — and accrue delay
+  // interest — against a stage the builder hadn't reached yet. Only "On
+  // Booking" (due immediately, a real calendar fact) stays DATE_LINKED.
+  // graceDaysAfterRaise (15) is the demand-notice window after a stage is
+  // marked complete, not an offset from booking date — dueOffsetDays is
+  // irrelevant for these rows and left at 0.
+  const milestoneSets: Record<
+    string,
+    Array<{ label: string; percent: number; dueOffsetDays: number; milestoneType?: 'DATE_LINKED' | 'STAGE_LINKED'; graceDaysAfterRaise?: number }>
+  > = {
     'Down Payment Plan': [
       { label: 'On Booking', percent: 10, dueOffsetDays: 0 },
       { label: 'Within 30 days', percent: 85, dueOffsetDays: 30 },
@@ -273,11 +288,11 @@ async function main() {
     ],
     'Construction-Linked Plan': [
       { label: 'On Booking', percent: 10, dueOffsetDays: 0 },
-      { label: 'Excavation', percent: 15, dueOffsetDays: 90 },
-      { label: 'Plinth', percent: 15, dueOffsetDays: 180 },
-      { label: 'Superstructure', percent: 30, dueOffsetDays: 360 },
-      { label: 'Finishing', percent: 20, dueOffsetDays: 540 },
-      { label: 'On Possession', percent: 10, dueOffsetDays: 720 },
+      { label: 'Excavation', percent: 15, dueOffsetDays: 0, milestoneType: 'STAGE_LINKED', graceDaysAfterRaise: 15 },
+      { label: 'Plinth', percent: 15, dueOffsetDays: 0, milestoneType: 'STAGE_LINKED', graceDaysAfterRaise: 15 },
+      { label: 'Superstructure', percent: 30, dueOffsetDays: 0, milestoneType: 'STAGE_LINKED', graceDaysAfterRaise: 15 },
+      { label: 'Finishing', percent: 20, dueOffsetDays: 0, milestoneType: 'STAGE_LINKED', graceDaysAfterRaise: 15 },
+      { label: 'On Possession', percent: 10, dueOffsetDays: 0, milestoneType: 'STAGE_LINKED', graceDaysAfterRaise: 15 },
     ],
   };
   for (const [templateName, milestones] of Object.entries(milestoneSets)) {
@@ -288,7 +303,16 @@ async function main() {
     for (let i = 0; i < milestones.length; i++) {
       const m = milestones[i];
       await prisma.paymentPlanMilestone.create({
-        data: { companyId: company.id, templateId: template.id, seq: i + 1, label: m.label, percent: m.percent, dueOffsetDays: m.dueOffsetDays },
+        data: {
+          companyId: company.id,
+          templateId: template.id,
+          seq: i + 1,
+          label: m.label,
+          percent: m.percent,
+          milestoneType: m.milestoneType ?? 'DATE_LINKED',
+          dueOffsetDays: m.dueOffsetDays,
+          graceDaysAfterRaise: m.graceDaysAfterRaise ?? 0,
+        },
       });
     }
   }

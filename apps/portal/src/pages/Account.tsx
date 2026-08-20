@@ -11,7 +11,8 @@ interface CostLine {
 interface Installment {
   id: string;
   label: string;
-  dueDate: string;
+  /** Null for an unraised STAGE_LINKED installment. */
+  dueDate: string | null;
   amountPaise: string;
   allocatedPaise: string;
   status: string;
@@ -103,7 +104,12 @@ export default function Account() {
               {b.paymentSchedule.map((i) => (
                 <li key={i.id} className="flex justify-between gap-2 flex-wrap">
                   <span>
-                    {i.label} · {new Date(i.dueDate).toLocaleDateString('en-IN')}
+                    {i.label} ·{' '}
+                    {/* new Date(null) silently resolves to 1970-01-01 in
+                        JS rather than throwing — this branch is the fix,
+                        not decoration. See
+                        docs/plans/construction-linked-demand-fix.md §2. */}
+                    {i.dueDate ? new Date(i.dueDate).toLocaleDateString('en-IN') : 'not yet due'}
                   </span>
                   <span className={i.status === 'PAID' ? 'text-green-600' : ''}>
                     {formatInr(BigInt(i.amountPaise))} ({i.status})

@@ -45,8 +45,20 @@ export class PostsalesReportsService {
     const bookingIds = bookings.map((b: { id: string }) => b.id);
     if (bookingIds.length === 0) return;
 
+    // dueDate: { not: null } explicitly excludes unraised STAGE_LINKED
+    // installments — without it, Postgres's default NULLS FIRST on an
+    // ascending sort would put them at the very top of the dues list, and
+    // .getTime() on a null dueDate below would throw. Nothing is "due" for
+    // an unraised installment, so it must not appear in a dues report at
+    // all. See docs/plans/construction-linked-demand-fix.md §2.
     const installments = await this.systemPrisma.installment.findMany({
-      where: { companyId, bookingId: { in: bookingIds }, isActive: true, status: { not: 'PAID' } },
+      where: {
+        companyId,
+        bookingId: { in: bookingIds },
+        isActive: true,
+        status: { not: 'PAID' },
+        dueDate: { not: null },
+      },
       orderBy: { dueDate: 'asc' },
     });
 
@@ -54,7 +66,7 @@ export class PostsalesReportsService {
 
     for (const inst of installments) {
       const outstanding = inst.amountPaise - inst.allocatedPaise;
-      const overdueDays = Math.max(0, Math.floor((now.getTime() - inst.dueDate.getTime()) / 86_400_000));
+      const overdueDays = Math.max(0, Math.floor((now.getTime() - inst.dueDate!.getTime()) / 86_400_000));
       const b = byBooking.get(inst.bookingId) as { bookingNumber: string; primaryApplicant: { name: string } };
 
       let interestFormatted = '';
@@ -70,7 +82,7 @@ export class PostsalesReportsService {
         b.bookingNumber,
         b.primaryApplicant.name,
         inst.label,
-        inst.dueDate.toISOString().slice(0, 10),
+        inst.dueDate!.toISOString().slice(0, 10),
         formatInr(outstanding),
         String(overdueDays),
         ...(withInterest ? [interestFormatted] : []),
@@ -315,6 +327,12 @@ export class PostsalesReportsService {
       return AGEING_BUCKETS.map((bucket) => ({ bucket, count: 0 }));
     }
 
+    // dueDate: { lt: now } already excludes unraised installments via
+    // Postgres NULL-comparison semantics (NULL < now is NULL, not true) —
+    // no separate `not: null` needed here, unlike installmentDues() above
+    // whose query had no date filter at all. Confirmed by an explicit
+    // regression test, not just this comment. See
+    // docs/plans/construction-linked-demand-fix.md §2.
     const overdue = await this.systemPrisma.installment.findMany({
       where: { companyId, bookingId: { in: bookingIds }, isActive: true, status: { not: 'PAID' }, dueDate: { lt: now } },
       select: { dueDate: true },
@@ -322,7 +340,7 @@ export class PostsalesReportsService {
 
     const counts = new Map<string, number>(AGEING_BUCKETS.map((b) => [b, 0]));
     for (const inst of overdue) {
-      const bucket = computeAgeingBucket(inst.dueDate, now);
+      const bucket = computeAgeingBucket(inst.dueDate!, now);
       counts.set(bucket, (counts.get(bucket) ?? 0) + 1);
     }
     return AGEING_BUCKETS.map((bucket) => ({ bucket, count: counts.get(bucket) ?? 0 }));

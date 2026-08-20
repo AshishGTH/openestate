@@ -79,6 +79,8 @@ interface Installment {
   label: string;
   amountPaise: string;
   allocatedPaise: string;
+  /** Null for an unraised STAGE_LINKED installment. */
+  dueDate: string | null;
 }
 
 interface PlanVersion {
@@ -116,8 +118,13 @@ export default function Applicant360() {
     queryFn: () => api(`/bookings/${bookingId}/plan-history`),
     enabled: !!bookingId,
   });
+  // Same allocation-time exclusion as ReceiptEntry.tsx's dueInstallments —
+  // an unraised STAGE_LINKED installment (dueDate === null) has nothing
+  // due to demand payment against, so it must not be offered as a demand/
+  // reminder-letter target. See
+  // docs/plans/construction-linked-demand-fix.md revision 2, clarification 1.
   const dueInstallments = (planVersions?.find((v) => v.isActive)?.installments ?? []).filter(
-    (i) => BigInt(i.amountPaise) - BigInt(i.allocatedPaise) > 0n,
+    (i) => i.dueDate !== null && BigInt(i.amountPaise) - BigInt(i.allocatedPaise) > 0n,
   );
 
   const { data: templatesRes } = useQuery<{ data: LetterTemplate[] }>({

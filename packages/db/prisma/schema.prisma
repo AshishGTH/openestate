@@ -109,6 +109,7 @@ model Company {
   webhookDeliveryAttempts  WebhookDeliveryAttempt[]
   leadSourceApiKeys        LeadSourceApiKey[]
   inventoryGroups          InventoryGroup[]
+  stageRaises              StageRaise[]
 
   @@map("companies")
 }
@@ -654,26 +655,77 @@ model PaymentPlanTemplate {
   @@map("payment_plan_templates")
 }
 
+/// Whether a milestone becomes due by calendar offset from booking date
+/// (current, original behaviour) or only once a staff user marks the
+/// underlying construction stage complete and raises it. See
+/// docs/plans/construction-linked-demand-fix.md — this distinction is the
+/// entire point of that fix: previously EVERY milestone behaved as
+/// DATE_LINKED, which is what let a customer be shown overdue against a
+/// construction stage the builder had never reached.
+enum MilestoneType {
+  DATE_LINKED
+  STAGE_LINKED
+}
+
 /// A milestone line of a payment-plan template. Instantiated per booking into
 /// an Installment: amount = percent% of agreed price (allocated with no
-/// rounding loss), dueDate = bookingDate + dueOffsetDays. Milestone percents
-/// for a template should sum to 100.
+/// rounding loss).
+///
+/// DATE_LINKED: dueDate = bookingDate + dueOffsetDays (original behaviour,
+/// dueOffsetDays keeps its exact original meaning).
+/// STAGE_LINKED: dueDate = stageCompletedOn + graceDaysAfterRaise, set only
+/// when a StageRaise happens for this milestone's (project, template, seq).
+/// `dueOffsetDays` is not reused for this case — a field meaning two
+/// different things depending on milestoneType is exactly the kind of
+/// overload this codebase avoids for date/money-adjacent fields.
+///
+/// Milestone percents for a template should sum to 100.
 model PaymentPlanMilestone {
-  id            String   @id @default(uuid()) @db.Uuid
-  companyId     String   @map("company_id") @db.Uuid
-  templateId    String   @map("template_id") @db.Uuid
-  seq           Int
-  label         String   @db.VarChar(255)
-  percent       Decimal  @db.Decimal(6, 3)
-  dueOffsetDays Int      @default(0) @map("due_offset_days")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id                  String        @id @default(uuid()) @db.Uuid
+  companyId           String        @map("company_id") @db.Uuid
+  templateId          String        @map("template_id") @db.Uuid
+  seq                 Int
+  label               String        @db.VarChar(255)
+  percent             Decimal       @db.Decimal(6, 3)
+  milestoneType       MilestoneType @default(DATE_LINKED) @map("milestone_type")
+  dueOffsetDays       Int           @default(0) @map("due_offset_days")
+  graceDaysAfterRaise Int           @default(0) @map("grace_days_after_raise")
+  createdAt           DateTime      @default(now()) @map("created_at")
+  updatedAt           DateTime      @updatedAt @map("updated_at")
 
   company  Company             @relation(fields: [companyId], references: [id])
   template PaymentPlanTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
 
   @@unique([templateId, seq])
   @@map("payment_plan_milestones")
+}
+
+/// The audit-trail record for one "stage completed, raise its demands"
+/// event. Exactly one row per raise action, whether it touched one
+/// installment or hundreds — see docs/plans/construction-linked-demand-fix.md
+/// §1.4. `templateId`/`milestoneSeq` identify the stage being raised
+/// (a PaymentPlanMilestone is template-scoped, not project-scoped, so the
+/// stage's true identity within one project is the pair (templateId,
+/// milestoneSeq), not the milestone id alone — the same milestone
+/// definition could in principle be reused by another project's booking,
+/// and that must NOT be treated as the same physical stage).
+model StageRaise {
+  id               String   @id @default(uuid()) @db.Uuid
+  companyId        String   @map("company_id") @db.Uuid
+  projectId        String   @map("project_id") @db.Uuid
+  templateId       String   @map("template_id") @db.Uuid
+  milestoneSeq     Int      @map("milestone_seq")
+  label            String   @db.VarChar(255)
+  stageCompletedOn DateTime @map("stage_completed_on") @db.Date
+  raisedById       String?  @map("raised_by_id") @db.Uuid
+  raisedAt         DateTime @default(now()) @map("raised_at")
+
+  company      Company       @relation(fields: [companyId], references: [id])
+  project      Project       @relation(fields: [projectId], references: [id])
+  installments Installment[]
+
+  @@index([companyId, projectId, templateId, milestoneSeq])
+  @@map("stage_raises")
 }
 
 // ─── Phase 2: Inventory ───────────────────────────────────────
@@ -777,6 +829,7 @@ model Project {
   towers              Tower[]
   units               Unit[]
   inventoryGroups     InventoryGroup[]
+  stageRaises         StageRaise[]
   inquiries           Inquiry[]
   assignmentPools     ProjectAssignmentPool[]
   constructionUpdates ConstructionUpdate[]
@@ -1575,18 +1628,37 @@ model Installment {
   planId           String            @map("plan_id") @db.Uuid
   seq              Int
   label            String            @db.VarChar(255)
-  dueDate          DateTime          @map("due_date") @db.Date
+  /// Snapshotted from the template milestone at instantiation (same
+  /// discipline as milestonePercent below) — never re-read from the
+  /// template later, so a template edit can't retroactively change what
+  /// an already-instantiated installment is.
+  milestoneType    MilestoneType     @default(DATE_LINKED) @map("milestone_type")
+  /// The source PaymentPlanMilestone.seq this row was instantiated from
+  /// (joined with PaymentPlan.templateId, since Installment has no direct
+  /// templateId of its own) — NULL for custom-plan installments, which
+  /// have no source milestone. This is what a bulk stage raise matches
+  /// against: (plan.templateId, milestoneSeq) is a stage's true identity
+  /// within one project. Matching by milestonePercent or label alone
+  /// would be wrong — two different milestones in the same template can
+  /// share a percent (the seed's own Excavation/Plinth are both 15%).
+  milestoneSeq     Int?              @map("milestone_seq")
+  /// NULL means "not yet due" — true only for an unraised STAGE_LINKED
+  /// installment. See docs/plans/construction-linked-demand-fix.md §2 for
+  /// the full, enumerated list of every consumer's null-handling.
+  dueDate          DateTime?         @map("due_date") @db.Date
   amountPaise      BigInt            @map("amount_paise")
   milestonePercent Decimal?          @map("milestone_percent") @db.Decimal(6, 3)
   allocatedPaise   BigInt            @default(0) @map("allocated_paise")
   status           InstallmentStatus @default(UNPAID)
   isActive         Boolean           @default(true) @map("is_active")
+  stageRaiseId     String?           @map("stage_raise_id") @db.Uuid
   createdAt        DateTime          @default(now()) @map("created_at")
   updatedAt        DateTime          @updatedAt @map("updated_at")
 
   company     Company             @relation(fields: [companyId], references: [id])
   booking     Booking             @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   plan        PaymentPlan         @relation(fields: [planId], references: [id], onDelete: Cascade)
+  stageRaise  StageRaise?         @relation(fields: [stageRaiseId], references: [id])
   allocations ReceiptAllocation[]
 
   @@index([companyId, bookingId])

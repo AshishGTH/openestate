@@ -9,10 +9,12 @@ import { RefundController } from './refund.controller';
 import { BookingDraftController } from './booking-draft.controller';
 import { BookingDraftService } from './booking-draft.service';
 import { PlanHistoryController } from './plan-history.controller';
+import { StageRaiseController } from './stage-raise.controller';
 import { NumberSequenceService } from './number-sequence.service';
 import { LedgerService } from './ledger.service';
 import { BookingService } from './booking.service';
 import { PaymentPlanService } from './payment-plan.service';
+import { StageRaiseService } from './stage-raise.service';
 import { ReceiptService } from './receipt.service';
 import { ExtraChargeService } from './extra-charge.service';
 import { InterestService } from './interest.service';
@@ -23,13 +25,14 @@ import { RefundService } from './refund.service';
 
 @Module({
   imports: [InventoryModule, BrokersModule, CommissionModule],
-  controllers: [BookingController, ReceiptController, RefundController, BookingDraftController, PlanHistoryController],
+  controllers: [BookingController, ReceiptController, RefundController, BookingDraftController, PlanHistoryController, StageRaiseController],
   providers: [
     ClockProvider,
     NumberSequenceService,
     LedgerService,
     BookingService,
     PaymentPlanService,
+    StageRaiseService,
     ReceiptService,
     ExtraChargeService,
     InterestService,
