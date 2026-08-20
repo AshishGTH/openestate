@@ -32,10 +32,13 @@ export class UnitService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = {
       companyId,
-      floor: { tower: { projectId } },
+      // Unit.projectId (Phase A scalar), not floor.tower.projectId — the
+      // old traversal returned zero rows for a LAND_BASED unit (floor is
+      // null). See plotted-farmhouse-inventory.md §13.1.
+      projectId,
     };
     if (query.towerId) {
-      where.floor = { ...where.floor, towerId: query.towerId };
+      where.floor = { towerId: query.towerId };
     }
     if (query.floorId) {
       where.floorId = query.floorId;

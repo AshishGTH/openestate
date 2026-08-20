@@ -104,14 +104,16 @@ export class ProjectService {
   }
 
   // Cheap existence-style count for the frontend's areaLocationId-change
-  // confirmation dialog — Booking has no denormalized projectId, so this
-  // joins unit -> floor -> tower -> project. Only ever called for one
-  // project at a time from the edit form, not a list endpoint.
+  // confirmation dialog. Only ever called for one project at a time from
+  // the edit form, not a list endpoint. Joins via Unit.projectId (Phase A
+  // scalar) — the old floor.tower.projectId traversal always undercounted
+  // (silently zero) for a LAND_BASED project's bookings. See
+  // plotted-farmhouse-inventory.md §13.1.
   async bookingCount(companyId: string, id: string) {
     await this.findOne(companyId, id);
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>
-        tx.booking.count({ where: { unit: { floor: { tower: { projectId: id } } } } }),
+        tx.booking.count({ where: { unit: { projectId: id } } }),
       ),
     );
   }

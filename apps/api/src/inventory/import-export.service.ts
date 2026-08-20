@@ -266,7 +266,10 @@ export class ImportExportService {
     const units = await this.systemPrisma.unit.findMany({
       where: {
         companyId,
-        floor: { tower: { projectId } },
+        // Unit.projectId (Phase A scalar) — the old floor.tower.projectId
+        // traversal exported an EMPTY workbook for a LAND_BASED project.
+        // See plotted-farmhouse-inventory.md §13.1.
+        projectId,
       },
       include: {
         unitType: true,
@@ -274,6 +277,12 @@ export class ImportExportService {
           include: { tower: { select: { name: true, code: true } } },
         },
       },
+      // Sorting by tower/floor is still HIGH_RISE-shaped — a LAND_BASED
+      // export's own column layout is Phase C scope (§14 Phase C item 7,
+      // "moved here from Phase B per reviewer"), not fixed here. Units
+      // with no floor just sort per Postgres's NULLS LAST default, which
+      // is harmless, not silently wrong, for the where-clause bug this
+      // commit actually fixes.
       orderBy: [
         { floor: { tower: { code: 'asc' } } },
         { floor: { floorNumber: 'asc' } },

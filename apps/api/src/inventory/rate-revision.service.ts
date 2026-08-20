@@ -33,7 +33,11 @@ export class RateRevisionService {
           where: {
             id: { in: dto.unitIds },
             companyId,
-            floor: { tower: { projectId } },
+            // Unit.projectId (Phase A scalar) — the old floor.tower.projectId
+            // traversal matched zero LAND_BASED units, so a bulk rate change
+            // against them always 400'd as "not found in project," a false
+            // error. See plotted-farmhouse-inventory.md §13.1.
+            projectId,
           },
           include: {
             rateRevisions: {

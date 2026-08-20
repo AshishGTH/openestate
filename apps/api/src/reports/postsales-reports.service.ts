@@ -30,7 +30,11 @@ export class PostsalesReportsService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = { companyId };
     if (scope.visibleUserIds) where.createdById = { in: scope.visibleUserIds };
-    if (projectId) where.unit = { floor: { tower: { projectId } } };
+    // Unit.projectId (Phase A scalar) — the old floor.tower.projectId
+    // traversal silently excluded every LAND_BASED booking from every
+    // report that calls this shared helper. See
+    // plotted-farmhouse-inventory.md §13.1.
+    if (projectId) where.unit = { projectId };
     return where;
   }
 
@@ -216,16 +220,20 @@ export class PostsalesReportsService {
   async unitStatusRollup(companyId: string, projectId?: string) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = { companyId };
-    if (projectId) where.floor = { tower: { projectId } };
+    // Unit.projectId (Phase A scalar) — see plotted-farmhouse-inventory.md
+    // §13.1. Direct field here since this queries Unit itself, not
+    // through a booking's unit relation.
+    if (projectId) where.projectId = projectId;
     const rows = await this.systemPrisma.unit.groupBy({ by: ['status'], where, _count: { _all: true } });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return rows.map((r: any) => ({ status: r.status, count: r._count._all }));
   }
 
   async bookingStatusRollup(companyId: string, projectId?: string) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const where: any = { companyId };
-    if (projectId) where.unit = { floor: { tower: { projectId } } };
+    // Reuses bookingWhere() rather than re-deriving the same projectId
+    // traversal a second time — this file's own history is exactly one
+    // instance of that duplication silently going stale (§13.1).
+    const where = this.bookingWhere(companyId, { visibleUserIds: null }, projectId);
     const rows = await this.systemPrisma.booking.groupBy({ by: ['status'], where, _count: { _all: true } });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return rows.map((r: any) => ({ status: r.status, count: r._count._all }));
@@ -235,12 +243,16 @@ export class PostsalesReportsService {
     const projects = await this.systemPrisma.project.findMany({ where: { companyId }, select: { id: true, name: true } });
     const out: Array<{ projectId: string; projectName: string; totalUnits: number; bookedOrBeyond: number; collectedFormatted: string }> = [];
     for (const p of projects) {
-      const totalUnits = await this.systemPrisma.unit.count({ where: { companyId, floor: { tower: { projectId: p.id } } } });
+      // Unit.projectId (Phase A scalar) throughout — the old
+      // floor.tower.projectId traversal silently zeroed every one of
+      // these three figures for a LAND_BASED project. See
+      // plotted-farmhouse-inventory.md §13.1.
+      const totalUnits = await this.systemPrisma.unit.count({ where: { companyId, projectId: p.id } });
       const bookedOrBeyond = await this.systemPrisma.unit.count({
-        where: { companyId, floor: { tower: { projectId: p.id } }, status: { in: ['BOOKED', 'ALLOTTED', 'REGISTERED'] } },
+        where: { companyId, projectId: p.id, status: { in: ['BOOKED', 'ALLOTTED', 'REGISTERED'] } },
       });
       const receiptAgg = await this.systemPrisma.receipt.aggregate({
-        where: { companyId, isReversed: false, booking: { unit: { floor: { tower: { projectId: p.id } } } } },
+        where: { companyId, isReversed: false, booking: { unit: { projectId: p.id } } },
         _sum: { grossAmountPaise: true },
       });
       out.push({

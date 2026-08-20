@@ -40,7 +40,10 @@ export class ConstructionUpdateService {
     // precedent, and stays out of this trigger.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const bookings: any[] = await this.systemPrisma.booking.findMany({
-      where: { companyId, unit: { floor: { tower: { projectId: dto.projectId } } } },
+      // Unit.projectId (Phase A scalar) — the old floor.tower.projectId
+      // traversal silently sent zero notifications for a LAND_BASED
+      // project's bookings. See plotted-farmhouse-inventory.md §13.1.
+      where: { companyId, unit: { projectId: dto.projectId } },
       select: { primaryApplicantId: true },
     });
     const applicantIds = [...new Set(bookings.map((b) => b.primaryApplicantId as string))];
