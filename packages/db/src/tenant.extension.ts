@@ -35,6 +35,7 @@ const TENANT_SCOPED_MODELS = new Set([
   'Project',
   'Tower',
   'Floor',
+  'InventoryGroup',
   'Unit',
   'UnitPlc',
   'UnitCharge',

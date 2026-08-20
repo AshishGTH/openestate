@@ -109,7 +109,7 @@ describeIf('e2e /projects/:projectId/units/:id/{plcs,charges}', () => {
     // meaningful, known base rate to exercise the percentage snapshot,
     // and makeUnit() defaults baseRatePaise to 0.
     const unit = await systemPrisma.unit.create({
-      data: { companyId: fx.companyId, floorId: fx.floorId, number: `E2E-PRICE-${TAG}`, status: 'AVAILABLE', baseRatePaise: 50_00_000n * 100n },
+      data: { companyId: fx.companyId, projectId: fx.projectId, shape: 'HIGH_RISE', floorId: fx.floorId, number: `E2E-PRICE-${TAG}`, status: 'AVAILABLE', baseRatePaise: 50_00_000n * 100n },
     });
     unitId = unit.id;
 

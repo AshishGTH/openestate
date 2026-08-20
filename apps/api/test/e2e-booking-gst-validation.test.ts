@@ -103,7 +103,7 @@ describeIf('e2e POST /bookings — base-line GST rate validation', () => {
     });
 
     const unit = await systemPrisma.unit.create({
-      data: { companyId: fx.companyId, floorId: fx.floorId, number: `E2E-GSTVAL-${TAG}`, status: 'AVAILABLE', baseRatePaise: 50_00_000n * 100n },
+      data: { companyId: fx.companyId, projectId: fx.projectId, shape: 'HIGH_RISE', floorId: fx.floorId, number: `E2E-GSTVAL-${TAG}`, status: 'AVAILABLE', baseRatePaise: 50_00_000n * 100n },
     });
     unitId = unit.id;
 

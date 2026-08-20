@@ -185,8 +185,8 @@ async function main() {
   const project = await systemPrisma.project.create({ data: { companyId, name: 'Portal Demo Heights', code: PROJECT_CODE, areaLocationId: area.id } });
   const tower = await systemPrisma.tower.create({ data: { companyId, projectId: project.id, name: 'T1', code: 'T1' } });
   const floor = await systemPrisma.floor.create({ data: { companyId, towerId: tower.id, name: 'F1', floorNumber: 1 } });
-  const unit = await systemPrisma.unit.create({ data: { companyId, floorId: floor.id, number: 'PD-101', status: 'AVAILABLE' } });
-  const brokerUnit = await systemPrisma.unit.create({ data: { companyId, floorId: floor.id, number: 'PD-102', status: 'AVAILABLE' } });
+  const unit = await systemPrisma.unit.create({ data: { companyId, projectId: project.id, shape: 'HIGH_RISE', floorId: floor.id, number: 'PD-101', status: 'AVAILABLE' } });
+  const brokerUnit = await systemPrisma.unit.create({ data: { companyId, projectId: project.id, shape: 'HIGH_RISE', floorId: floor.id, number: 'PD-102', status: 'AVAILABLE' } });
 
   let category = await systemPrisma.ticketCategory.findFirst({ where: { companyId, name: 'General Query' } });
   if (!category) {

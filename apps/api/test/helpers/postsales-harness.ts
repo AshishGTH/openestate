@@ -157,7 +157,14 @@ export async function makeUnit(
   fx: CompanyFixture,
 ): Promise<string> {
   const u = await systemPrisma.unit.create({
-    data: { companyId: fx.companyId, floorId: fx.floorId, number: `U-${Date.now()}-${unitSeq++}-${rnd()}`, status: 'AVAILABLE' },
+    data: {
+      companyId: fx.companyId,
+      projectId: fx.projectId,
+      shape: 'HIGH_RISE',
+      floorId: fx.floorId,
+      number: `U-${Date.now()}-${unitSeq++}-${rnd()}`,
+      status: 'AVAILABLE',
+    },
   });
   return u.id;
 }

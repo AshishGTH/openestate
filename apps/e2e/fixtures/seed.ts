@@ -133,6 +133,8 @@ export async function seedE2eFixture(
     const unit = await prisma.unit.create({
       data: {
         companyId: company.id,
+        projectId: project.id,
+        shape: 'HIGH_RISE',
         floorId: floor.id,
         number: unitNumber,
         status: 'AVAILABLE',

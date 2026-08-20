@@ -102,7 +102,14 @@ export class UnitService {
 
         return tx.unit.create({
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          data: { ...rest, companyId, floorId, customFields: customFields as any },
+          data: {
+            ...rest,
+            companyId,
+            projectId: floor.tower.projectId,
+            shape: 'HIGH_RISE',
+            floorId,
+            customFields: customFields as any,
+          },
         });
       }),
     );
@@ -169,6 +176,8 @@ export class UnitService {
             await tx.unit.create({
               data: {
                 companyId,
+                projectId: tower.projectId,
+                shape: 'HIGH_RISE',
                 floorId: floor.id,
                 number: unitNum,
                 unitTypeId: dto.unitTypeId ?? null,

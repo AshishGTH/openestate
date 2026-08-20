@@ -96,10 +96,10 @@ describeIf('Inventory tenant isolation (RLS)', () => {
     floorBId = fB.id;
 
     const unitA = await systemPrisma.unit.create({
-      data: { companyId: companyAId, floorId: floorAId, number: 'A-0101', baseRatePaise: BigInt(500000) },
+      data: { companyId: companyAId, projectId: projectAId, shape: 'HIGH_RISE', floorId: floorAId, number: 'A-0101', baseRatePaise: BigInt(500000) },
     });
     const unitB = await systemPrisma.unit.create({
-      data: { companyId: companyBId, floorId: floorBId, number: 'B-0101', baseRatePaise: BigInt(600000) },
+      data: { companyId: companyBId, projectId: projectBId, shape: 'HIGH_RISE', floorId: floorBId, number: 'B-0101', baseRatePaise: BigInt(600000) },
     });
     unitAId = unitA.id;
     unitBId = unitB.id;

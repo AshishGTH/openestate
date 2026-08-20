@@ -136,7 +136,7 @@ export class DocumentService {
       include: {
         primaryApplicant: { omit: { panCiphertext: true, panKeyVersion: true } },
         company: true,
-        unit: { include: { floor: { include: { tower: { include: { project: true } } } } } },
+        unit: { include: { project: true } },
       },
     });
     if (!booking) throw new NotFoundException('Booking not found');
@@ -164,7 +164,7 @@ export class DocumentService {
     const ctx: StatementPdfContext = {
       bookingNumber: booking.bookingNumber,
       applicantName: booking.primaryApplicant.name,
-      projectName: booking.unit.floor.tower.project.name,
+      projectName: booking.unit.project.name,
       unitNumber: booking.unit.number,
       statementDate: new Date().toISOString().slice(0, 10),
       entries: rows,
@@ -259,7 +259,7 @@ export class DocumentService {
       include: {
         primaryApplicant: { omit: { panCiphertext: true, panKeyVersion: true } },
         company: true,
-        unit: { include: { floor: { include: { tower: { include: { project: true } } } } } },
+        unit: { include: { project: true, floor: { include: { tower: true } } } },
       },
     });
     if (!booking) throw new NotFoundException('Booking not found');
@@ -321,10 +321,10 @@ export class DocumentService {
     const base = {
       applicantName: booking.primaryApplicant.name,
       bookingNumber: booking.bookingNumber,
-      projectName: booking.unit.floor.tower.project.name,
+      projectName: booking.unit.project.name,
       unitNumber: booking.unit.number,
-      towerName: booking.unit.floor.tower.name,
-      floorLabel: booking.unit.floor.name,
+      towerName: booking.unit.floor?.tower.name ?? '',
+      floorLabel: booking.unit.floor?.name ?? '',
       agreedPriceFormatted: formatInr(booking.agreedPricePaise),
       allotmentDate: booking.allotmentDate ? booking.allotmentDate.toISOString().slice(0, 10) : '',
       companyName: booking.company.name,

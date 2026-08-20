@@ -5,6 +5,29 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Phase A of two-shape inventory (plotted / farmhouse groundwork).**
+  Schema-only step: `Project.shape` (HIGH_RISE or LAND_BASED, immutable
+  after creation), a shared `AreaUnit` enum (SQFT / SQYD / SQM / ACRE
+  / GUNTA), new `inventory_groups` table for LAND_BASED grouping
+  (Sector / Block / Cluster / Phase), and the columns a LAND_BASED
+  `Unit` needs — `landAreaEntered` + `landAreaEnteredUnit` (source of
+  truth for pricing, no divide-through-sqft rounding) plus derived
+  `landAreaSqft` for reports, `landRecordRef`, `facing`, `lengthFeet`,
+  `breadthFeet`, `rateUnit` (default SQFT), and an optional
+  `builtUpRatePaise` for farmhouses that price land and structure
+  separately. Existing HIGH_RISE units are backfilled with
+  `shape='HIGH_RISE'` and their existing `floor→tower→project` walk;
+  every existing booking's ledger stays byte-identical (verified
+  directly against the migrated database). A row-level CHECK
+  constraint (`units_shape_hierarchy_chk`) enforces the exact
+  per-shape hierarchy — HIGH_RISE requires a floor and no group,
+  LAND_BASED forbids a floor — so a wrong-shape row can never be
+  written. LAND_BASED create/booking paths are NOT wired yet; this
+  release only lands the schema so those follow-ups can be reviewed
+  in isolation.
+
 ### Fixed
 
 - **Reloading a few times, or letting your browser restore several tabs,
