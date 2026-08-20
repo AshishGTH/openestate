@@ -22,7 +22,13 @@ interface UnitRow {
   number: string;
   baseRatePaise: string;
   status: string;
-  floor: { name: string; tower: { name: string } };
+  // null for a LAND_BASED unit (Phase A) — every read must check it, not
+  // assume it, per plotted-farmhouse-inventory.md §13.1.
+  floor: { name: string; tower: { name: string } } | null;
+}
+
+function unitLabel(u: UnitRow): string {
+  return u.floor ? `${u.floor.tower.name} / ${u.floor.name} / ${u.number}` : u.number;
 }
 
 // The generic master-factory list endpoint returns plain PaymentPlanTemplate
@@ -530,7 +536,7 @@ export default function BookingWizard() {
                     setDraft({
                       ...draft,
                       unitId: e.target.value,
-                      unitLabel: u ? `${u.floor.tower.name} / ${u.floor.name} / ${u.number}` : undefined,
+                      unitLabel: u ? unitLabel(u) : undefined,
                       basePricePaise: draft.basePricePaise || (u ? u.baseRatePaise : ''),
                     });
                   }}
@@ -539,7 +545,7 @@ export default function BookingWizard() {
                   <option value="">Select an available unit</option>
                   {units?.data?.map((u) => (
                     <option key={u.id} value={u.id}>
-                      {u.floor.tower.name} / {u.floor.name} / {u.number} — {formatInr(BigInt(u.baseRatePaise))}
+                      {unitLabel(u)} — {formatInr(BigInt(u.baseRatePaise))}
                     </option>
                   ))}
                 </select>

@@ -1020,7 +1020,7 @@ Broker portal statement PDFs reference the Unit by number, not by tower
 
 ## 13. Risks and rollback
 
-### 13.1 The 35 coupling sites in reports
+### 13.1 The coupling sites in reports (revised — "35" was an unverified estimate)
 
 The most concrete risk in this change. Every one is a `where: { floor:
 { tower: { projectId } } }` traversal that will return no rows for a
@@ -1029,9 +1029,60 @@ scalar. Missing one silently under-reports LAND_BASED activity, which
 is exactly the class of bug the "assert the OUTCOME, not the mechanism"
 standing rule warns about.
 
-Mitigation: a Phase A stop-and-verify script that greps the codebase
-for `floor: { tower:` inside a `where`, produces the list, and fails
-Phase B if any remain. Not an ESLint rule — a one-off migration check.
+**This section originally said "35 coupling sites," a figure that was
+never actually run against the codebase.** At the start of Phase B the
+documented grep (`floor: { tower:` inside a `where`) was run for real:
+11 literal matches across 6 files in `apps/api/src`. That undercounts
+the real risk — the same grep, broadened to also catch property-chain
+reads (`.floor.tower.`, not just object-literal `where` shapes), found
+24 across 10 files, and surfaced a WORSE bug class the original framing
+missed entirely: unguarded property-chain reads don't under-report,
+they throw. A stale number in a risk-mitigation section is worse than
+no number, so this entry is corrected to the verified breakdown rather
+than left at 35:
+
+- **1 crash-class bug** (not a query at all — a `TypeError` on an
+  already-fetched result): `PortalPropertyService.getMyProperties`
+  reads `b.unit.floor.tower.project.id`/`.name`/`.address`/
+  `.expectedEndDate` and `b.unit.floor.tower.name` with no optional
+  chaining, across 6 read sites in one method. For a LAND_BASED
+  booking (`floor: null`) this 500s the customer's own property page
+  — worse than under-reporting, since it's user-facing and immediate.
+  Fixed ahead of everything else below, in its own commit, using
+  `Unit.project` (the new direct relation) for project fields and a
+  null-check on `unit.floor` for tower/floor display.
+- **~10 real `where`/`orderBy` query-traversal bugs** (silently return
+  zero rows / mis-sort for LAND_BASED units):
+  `construction-update.service.ts`, `import-export.service.ts`,
+  `project.service.ts`, `rate-revision.service.ts`, `unit.service.ts`
+  (one site each), and 5 separate sites inside
+  `postsales-reports.service.ts` alone — the single riskiest file,
+  since a miss there is a silently-wrong report number, not a visible
+  error. Each moves to `where: { projectId }` via `Unit.projectId`.
+- **Several hits that are already safe or genuinely out of scope for
+  this phase**, left untouched deliberately, not by oversight:
+  `document.service.ts` and `import-export.service.ts`'s own display
+  reads already use `floor?.tower...` (optional-chained — `floor` null
+  short-circuits to `undefined`, no crash); `unit.service.ts`'s
+  `create`/`validateTowerScopedUniqueness` and `commission.service.ts`'s
+  `unit?.floor?.tower?.projectId` lookup are all confined to the
+  existing HIGH_RISE-only, floor-scoped unit-create path — the new
+  LAND_BASED unit-create endpoint (§14 Phase B item 4) is a SEPARATE
+  code path, so these don't need touching for LAND_BASED support to
+  work; "finishing the job" on these later would be scope creep, not a
+  fix.
+- **Frontend hits** (`Applicant360.tsx`, `ReceiptEntry.tsx`,
+  `BookingWizard.tsx`) are Phase C's — checked for the same unguarded
+  crash pattern as `portal-property.service.ts` before Phase B was
+  called done; see Phase B's own decisions log entry for the result.
+
+Mitigation, unchanged in spirit: the documented grep
+(`floor: { tower:` inside a `where`, broadened to also catch
+`.floor.tower.` property-chain reads) is the stop-and-verify check —
+run it, produce the list, don't proceed until every real hit is
+triaged into "fixed" or "deliberately untouched, and why," never
+silently ignored. Re-run periodically as new report/service code
+lands, since nothing enforces this as an ESLint rule.
 
 ### 13.2 The check constraint is now exact (upgrade from revision 1)
 

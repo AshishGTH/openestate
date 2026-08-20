@@ -13,7 +13,9 @@ interface ApplicantRow {
 interface BookingRow {
   id: string;
   bookingNumber: string;
-  unit: { number: string; floor: { tower: { name: string } } };
+  // floor is null for a LAND_BASED unit (Phase A) — every read must check
+  // it, not assume it, per plotted-farmhouse-inventory.md §13.1.
+  unit: { number: string; floor: { tower: { name: string } } | null };
 }
 
 interface Installment {
@@ -243,7 +245,7 @@ export default function ReceiptEntry() {
               <option value="">Select booking</option>
               {threeSixty?.bookings?.map((b) => (
                 <option key={b.id} value={b.id}>
-                  {b.bookingNumber} — {b.unit.floor.tower.name}/{b.unit.number}
+                  {b.bookingNumber} — {b.unit.floor ? `${b.unit.floor.tower.name}/` : ''}{b.unit.number}
                 </option>
               ))}
             </select>

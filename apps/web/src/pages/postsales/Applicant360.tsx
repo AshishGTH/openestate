@@ -17,7 +17,9 @@ interface Booking {
   bookingNumber: string;
   status: string;
   agreedPricePaise: string;
-  unit: { number: string; floor: { name: string; tower: { name: string } } };
+  // floor is null for a LAND_BASED unit (Phase A) — every read must check
+  // it, not assume it, per plotted-farmhouse-inventory.md §13.1.
+  unit: { number: string; floor: { name: string; tower: { name: string } } | null };
 }
 
 interface FollowUp {
@@ -232,7 +234,7 @@ export default function Applicant360() {
                 >
                   <div className="font-medium">{b.bookingNumber} — {b.status}</div>
                   <div className="text-xs text-slate-500">
-                    {b.unit.floor.tower.name}/{b.unit.floor.name}/{b.unit.number} · {formatInr(BigInt(b.agreedPricePaise))}
+                    {b.unit.floor ? `${b.unit.floor.tower.name}/${b.unit.floor.name}/` : ''}{b.unit.number} · {formatInr(BigInt(b.agreedPricePaise))}
                   </div>
                 </button>
               </li>
