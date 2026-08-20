@@ -30,7 +30,10 @@ export class PortalPropertyService {
           unit: {
             include: {
               unitType: true,
-              floor: { include: { tower: { include: { project: true } } } },
+              project: true,
+              // Nullable for a LAND_BASED unit — every read below must
+              // check b.unit.floor before touching .tower, not assume it.
+              floor: { include: { tower: true } },
             },
           },
         },
@@ -39,7 +42,10 @@ export class PortalPropertyService {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const properties = await Promise.all((bookings as any[]).map(async (b) => {
-        const projectId = b.unit.floor.tower.project.id;
+        // Unit.projectId (direct scalar, Phase A) — always set, for both
+        // shapes. Reading it off b.unit.floor.tower.project.id here would
+        // throw for a LAND_BASED unit (floor is null): that was the bug.
+        const projectId = b.unit.projectId;
         const [updates, projectMedia] = await Promise.all([
           tx.constructionUpdate.findMany({
             where: { projectId },
@@ -62,13 +68,16 @@ export class PortalPropertyService {
             typeName: b.unit.unitType?.name ?? null,
             carpetAreaSqft: b.unit.carpetAreaSqft,
           },
-          tower: { name: b.unit.floor.tower.name },
-          floor: { name: b.unit.floor.name },
+          // null for a LAND_BASED booking — no tower/floor exists. Phase D
+          // (portal UI) is where the shape-conditional rendering for this
+          // lands; this backend fix only has to stop crashing.
+          tower: b.unit.floor ? { name: b.unit.floor.tower.name } : null,
+          floor: b.unit.floor ? { name: b.unit.floor.name } : null,
           project: {
             id: projectId,
-            name: b.unit.floor.tower.project.name,
-            address: b.unit.floor.tower.project.address,
-            expectedEndDate: b.unit.floor.tower.project.expectedEndDate,
+            name: b.unit.project.name,
+            address: b.unit.project.address,
+            expectedEndDate: b.unit.project.expectedEndDate,
           },
           constructionUpdates: updates,
           projectMedia,

@@ -30,8 +30,9 @@ interface PropertyEntry {
   allotmentDate: string | null;
   registrationDate: string | null;
   unit: { number: string; typeName: string | null; carpetAreaSqft: string | null };
-  tower: { name: string };
-  floor: { name: string };
+  // null for a LAND_BASED booking (Phase A) — no tower/floor exists.
+  tower: { name: string } | null;
+  floor: { name: string } | null;
   project: { id: string; name: string; address: string | null; expectedEndDate: string | null };
   constructionUpdates: ConstructionUpdate[];
   projectMedia: ProjectMediaItem[];
@@ -96,7 +97,7 @@ export default function Property() {
               <span className="text-xs rounded-full bg-slate-100 text-slate-600 px-2 py-0.5 shrink-0">{p.status}</span>
             </div>
             <p className="text-sm text-slate-600 mt-1">
-              {p.tower.name} · {p.floor.name} · Unit {p.unit.number}
+              {p.tower && p.floor ? `${p.tower.name} · ${p.floor.name} · ` : ''}Unit {p.unit.number}
               {p.unit.typeName ? ` (${p.unit.typeName})` : ''}
             </p>
             {p.unit.carpetAreaSqft && (
