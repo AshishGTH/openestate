@@ -27,6 +27,15 @@ const describeIf = APP_URL && SYSTEM_URL ? describe : describe.skip;
 const STAFF_PASSWORD = 'StaffPass123';
 const TAG = Date.now();
 
+// Private throttle keyspace for this file, set BEFORE the app bootstraps
+// so RedisThrottlerStorage picks it up — see e2e-dashboard-hierarchy.test.ts's
+// identical comment and CLAUDE.md's Phase 8 entry: the default bucket is
+// IP-keyed (100/min) and every e2e file shares one loopback IP and one
+// Redis, so an unprefixed file's logins can push an already-near-limit
+// shared bucket over and cause UNRELATED files to 429 — this file was
+// caught doing exactly that in CI run 32400252992.
+process.env.THROTTLE_TEST_KEY_PREFIX = `e2e-company-update-${process.pid}-${Date.now()}-`;
+
 async function bootstrapApp(): Promise<INestApplication> {
   process.env.DATABASE_URL = APP_URL;
   process.env.DATABASE_URL_SYSTEM = SYSTEM_URL;
