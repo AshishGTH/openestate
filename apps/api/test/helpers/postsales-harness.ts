@@ -9,6 +9,7 @@ import { NumberSequenceService } from '../../src/postsales/number-sequence.servi
 import { LedgerService } from '../../src/postsales/ledger.service';
 import { BookingService } from '../../src/postsales/booking.service';
 import { PaymentPlanService } from '../../src/postsales/payment-plan.service';
+import { StageRaiseService } from '../../src/postsales/stage-raise.service';
 import { ReceiptService } from '../../src/postsales/receipt.service';
 import { InterestService } from '../../src/postsales/interest.service';
 import { TransferService } from '../../src/postsales/transfer.service';
@@ -25,6 +26,7 @@ export interface Services {
   stateMachine: UnitStateMachineService;
   bookings: BookingService;
   plans: PaymentPlanService;
+  stageRaises: StageRaiseService;
   receipts: ReceiptService;
   interest: InterestService;
   transfers: TransferService;
@@ -54,6 +56,7 @@ export function buildServices(
     stateMachine,
     bookings: new BookingService(tenantPrisma, systemPrisma, stateMachine, ledger, numbers),
     plans: new PaymentPlanService(tenantPrisma, systemPrisma),
+    stageRaises: new StageRaiseService(tenantPrisma, systemPrisma),
     receipts: new ReceiptService(tenantPrisma, systemPrisma, ledger, numbers, notifications),
     interest: new InterestService(tenantPrisma, systemPrisma, clock, ledger),
     transfers: new TransferService(tenantPrisma, stateMachine, ledger, numbers),
@@ -303,6 +306,12 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     'receipt_allocations', 'ledger_entries', 'payment_vouchers', 'refunds', 'cancellations',
     'transfers', 'extra_charges', 'receipts', 'installments', 'payment_plans',
     'booking_cost_lines', 'booking_co_applicants', 'bookings', 'unit_status_changes',
+    // stage_raises RESTRICTs directly onto both projects and companies,
+    // so it must go before the projects delete right below (installments
+    // referencing it are already gone from the delete two lines up —
+    // ON DELETE SET NULL would have covered it anyway, but ordering it
+    // here is what actually matters for the projects/companies RESTRICT).
+    'stage_raises',
     // v0.2.2: layout plan/brochure/photo rows — CASCADE from projects but
     // listed explicitly anyway, same discipline as construction_update_media.
     'units', 'floors', 'towers', 'project_media', 'projects',

@@ -139,6 +139,11 @@ export default function ProjectDetailPage() {
   const [mediaFile, setMediaFile] = useState<File | null>(null);
   const [mediaError, setMediaError] = useState('');
 
+  const [raisingStage, setRaisingStage] = useState<{ templateId: string; milestoneSeq: number; label: string } | null>(null);
+  const [stageCompletedOn, setStageCompletedOn] = useState(() => new Date().toISOString().slice(0, 10));
+  const [stageRaiseError, setStageRaiseError] = useState('');
+  const [stageRaiseResult, setStageRaiseResult] = useState('');
+
   const [newUpdateTitle, setNewUpdateTitle] = useState('');
   const [newUpdateDescription, setNewUpdateDescription] = useState('');
   const [newUpdatePublishedAt, setNewUpdatePublishedAt] = useState('');
@@ -202,6 +207,15 @@ export default function ProjectDetailPage() {
     queryKey: ['unit-plcs', id, pricingUnitId],
     queryFn: () => api(`/projects/${id}/units/${pricingUnitId}/plcs`),
     enabled: !!id && !!pricingUnitId,
+  });
+  // Distinct STAGE_LINKED milestones currently unraised somewhere in this
+  // project. See docs/plans/construction-linked-demand-fix.md §6.1.
+  const { data: pendingStages } = useQuery<
+    Array<{ templateId: string; milestoneSeq: number; label: string; pendingCount: number }>
+  >({
+    queryKey: ['stage-raises-pending', id],
+    queryFn: () => api(`/projects/${id}/stage-raises/pending`),
+    enabled: !!id,
   });
   const { data: unitCharges } = useQuery<UnitCharge[]>({
     queryKey: ['unit-charges', id, pricingUnitId],
@@ -401,6 +415,29 @@ export default function ProjectDetailPage() {
   const handleDeleteUpdate = async (updateId: string) => {
     await api(`/admin/construction-updates/${updateId}`, { method: 'DELETE' });
     qc.invalidateQueries({ queryKey: ['construction-updates', id] });
+  };
+
+  const handleRaiseStage = async () => {
+    if (!raisingStage) return;
+    setStageRaiseError('');
+    setStageRaiseResult('');
+    try {
+      const res = await api<{ raisedCount: number }>(`/projects/${id}/stage-raises`, {
+        method: 'POST',
+        body: JSON.stringify({
+          templateId: raisingStage.templateId,
+          milestoneSeq: raisingStage.milestoneSeq,
+          stageCompletedOn,
+        }),
+      });
+      setStageRaiseResult(
+        `${res.raisedCount} installment${res.raisedCount === 1 ? '' : 's'} raised for "${raisingStage.label}".`,
+      );
+      setRaisingStage(null);
+      qc.invalidateQueries({ queryKey: ['stage-raises-pending', id] });
+    } catch (err) {
+      setStageRaiseError((err as Error).message);
+    }
   };
 
   const createTowerMutation = useApiMutation<Tower, Record<string, unknown>>(
@@ -1017,6 +1054,76 @@ export default function ProjectDetailPage() {
           </div>
           {updateError && <p className="mt-2 text-sm text-red-600">{updateError}</p>}
         </div>
+      </section>
+
+      <section>
+        <h2 className="text-lg font-medium text-slate-800">Construction Stages</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          A stage becomes due for every booking on it at once, when marked complete here — not before.
+          See the installment schedule for what "not yet due" means until then.
+        </p>
+        <div className="mt-3 rounded-lg border border-slate-200 bg-white p-4">
+          {!pendingStages || pendingStages.length === 0 ? (
+            <p className="text-sm text-slate-500">No unraised construction stages in this project.</p>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {pendingStages.map((s) => (
+                <li key={`${s.templateId}-${s.milestoneSeq}`} className="flex items-center justify-between gap-2 py-2">
+                  <span className="text-sm text-slate-700">
+                    {s.label} — {s.pendingCount} booking{s.pendingCount === 1 ? '' : 's'} waiting
+                  </span>
+                  <button
+                    onClick={() => {
+                      setRaisingStage({ templateId: s.templateId, milestoneSeq: s.milestoneSeq, label: s.label });
+                      setStageRaiseError('');
+                    }}
+                    className="rounded-md bg-slate-800 px-3 py-1 text-xs font-medium text-white hover:bg-slate-700"
+                  >
+                    Mark stage complete
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {stageRaiseResult && <p className="mt-2 text-sm text-emerald-700">{stageRaiseResult}</p>}
+        </div>
+
+        {raisingStage && (
+          <div className="mt-3 rounded-lg border border-slate-200 bg-white p-4">
+            <h3 className="text-sm font-medium text-slate-800">Raise "{raisingStage.label}"</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              This sets a real due date for every waiting booking on this stage. Interest can start
+              accruing from that date once time passes.
+            </p>
+            <div className="mt-2 flex items-end gap-2">
+              <div>
+                <label htmlFor="stage-completed-on" className="block text-xs font-medium text-slate-700">
+                  Stage completed on
+                </label>
+                <input
+                  id="stage-completed-on"
+                  type="date"
+                  value={stageCompletedOn}
+                  onChange={(e) => setStageCompletedOn(e.target.value)}
+                  className="mt-1 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                />
+              </div>
+              <button
+                onClick={handleRaiseStage}
+                className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-700"
+              >
+                Confirm raise
+              </button>
+              <button
+                onClick={() => setRaisingStage(null)}
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+            </div>
+            {stageRaiseError && <p className="mt-2 text-sm text-red-600">{stageRaiseError}</p>}
+          </div>
+        )}
       </section>
     </div>
   );

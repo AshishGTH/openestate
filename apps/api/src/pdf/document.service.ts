@@ -337,6 +337,15 @@ export class DocumentService {
         where: { id: installmentId, companyId, bookingId: booking.id },
       });
       if (!installment) throw new NotFoundException('Installment not found');
+      // Defense in depth: the frontend picker already excludes unraised
+      // (dueDate === null) installments, but this endpoint must not trust
+      // that — an unraised installment has nothing to demand payment
+      // against yet. See docs/plans/construction-linked-demand-fix.md §2.
+      if (installment.dueDate === null) {
+        throw new BadRequestException(
+          'This installment has not been raised — it has no due date to demand payment against',
+        );
+      }
       const dueAmountPaise = installment.amountPaise - installment.allocatedPaise;
       const overdueDays = Math.max(
         0,

@@ -6,8 +6,9 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
-import { allocate, type CreatePaymentPlanDto, type InstallmentInput } from '@openestate/shared';
+import { allocate, MILESTONE_TYPE, type CreatePaymentPlanDto, type InstallmentInput } from '@openestate/shared';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
+import { computeRaisedDueDate, findStageRaise } from './stage-raise.util';
 
 function addDays(date: Date, days: number): Date {
   const d = new Date(date);
@@ -57,6 +58,37 @@ export class PaymentPlanService {
 
         for (let i = 0; i < template.milestones.length; i++) {
           const m = template.milestones[i];
+
+          if (m.milestoneType === MILESTONE_TYPE.STAGE_LINKED) {
+            // Self-raise-at-instantiation: if this project's stage was
+            // already completed and raised for OTHER bookings before this
+            // one existed, this installment must not sit stuck unraised
+            // forever — nothing else will ever come back for it, since a
+            // second manual raise of an already-raised stage finds
+            // nothing left to do (idempotent by design, see
+            // StageRaiseService). See
+            // docs/plans/construction-linked-demand-fix.md §1.7.1.
+            const existingRaise = await findStageRaise(tx, companyId, booking.projectId, templateId, m.seq);
+            await tx.installment.create({
+              data: {
+                companyId,
+                bookingId,
+                planId: plan.id,
+                seq: m.seq,
+                label: m.label,
+                milestoneType: MILESTONE_TYPE.STAGE_LINKED,
+                milestoneSeq: m.seq,
+                dueDate: existingRaise
+                  ? computeRaisedDueDate(existingRaise.stageCompletedOn, m.graceDaysAfterRaise)
+                  : null,
+                stageRaiseId: existingRaise?.id ?? null,
+                amountPaise: amounts[i],
+                milestonePercent: m.percent,
+              },
+            });
+            continue;
+          }
+
           await tx.installment.create({
             data: {
               companyId,
@@ -64,6 +96,8 @@ export class PaymentPlanService {
               planId: plan.id,
               seq: m.seq,
               label: m.label,
+              milestoneType: MILESTONE_TYPE.DATE_LINKED,
+              milestoneSeq: m.seq,
               dueDate: addDays(booking.bookingDate, m.dueOffsetDays),
               amountPaise: amounts[i],
               milestonePercent: m.percent,
@@ -103,6 +137,15 @@ export class PaymentPlanService {
               planId: plan.id,
               seq: i + 1,
               label: inst.label,
+              // Explicit, not the schema default — a human choosing a
+              // specific due date on a custom-plan row IS date-linked
+              // semantics. See
+              // docs/plans/construction-linked-demand-fix.md revision 2,
+              // clarification 2: relying on the column default here would
+              // be exactly how a future change (e.g. adding STAGE_LINKED
+              // support to custom plans) could silently reintroduce this
+              // fix's own bug for rows nobody meant to leave undecided.
+              milestoneType: MILESTONE_TYPE.DATE_LINKED,
               dueDate: inst.dueDate,
               amountPaise: amounts[i],
               milestonePercent: inst.milestonePercent ?? null,
@@ -163,6 +206,9 @@ export class PaymentPlanService {
               planId: plan.id,
               seq: maxFrozenSeq + i + 1,
               label: inst.label,
+              // Explicit, not the schema default — see the identical
+              // comment in createCustomPlan above.
+              milestoneType: MILESTONE_TYPE.DATE_LINKED,
               dueDate: inst.dueDate,
               amountPaise: amounts[i],
               milestonePercent: inst.milestonePercent ?? null,
@@ -247,9 +293,17 @@ export class PaymentPlanService {
     tx: Prisma.TransactionClient,
     companyId: string,
     bookingId: string,
-  ): Promise<{ id: string; agreedPricePaise: bigint; bookingDate: Date }> {
-    const booking = await tx.booking.findFirst({ where: { id: bookingId, companyId } });
+  ): Promise<{ id: string; agreedPricePaise: bigint; bookingDate: Date; projectId: string }> {
+    const booking = await tx.booking.findFirst({
+      where: { id: bookingId, companyId },
+      include: { unit: { select: { projectId: true } } },
+    });
     if (!booking) throw new NotFoundException('Booking not found');
-    return booking;
+    return {
+      id: booking.id,
+      agreedPricePaise: booking.agreedPricePaise,
+      bookingDate: booking.bookingDate,
+      projectId: booking.unit.projectId,
+    };
   }
 }

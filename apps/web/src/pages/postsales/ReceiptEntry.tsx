@@ -20,7 +20,8 @@ interface Installment {
   id: string;
   seq: number;
   label: string;
-  dueDate: string;
+  /** Null for an unraised STAGE_LINKED installment. */
+  dueDate: string | null;
   amountPaise: string;
   allocatedPaise: string;
   status: string;
@@ -76,10 +77,17 @@ export default function ReceiptEntry() {
   });
 
   const activePlan = planVersions?.find((v) => v.isActive);
+  // An unraised STAGE_LINKED installment (dueDate === null) is excluded
+  // here at ALLOCATION time, not at receipt-creation time — the receipt
+  // itself is never refused (a customer paying ahead of a milestone is
+  // normal); what's refused is applying that money against a stage the
+  // builder hasn't reached yet, since nothing is actually due against it.
+  // See docs/plans/construction-linked-demand-fix.md revision 2,
+  // clarification 1.
   const dueInstallments = useMemo(
     () =>
       (activePlan?.installments ?? [])
-        .filter((i) => BigInt(i.amountPaise) - BigInt(i.allocatedPaise) > 0n)
+        .filter((i): i is Installment & { dueDate: string } => i.dueDate !== null && BigInt(i.amountPaise) - BigInt(i.allocatedPaise) > 0n)
         .sort((a, b) => a.dueDate.localeCompare(b.dueDate)),
     [activePlan],
   );

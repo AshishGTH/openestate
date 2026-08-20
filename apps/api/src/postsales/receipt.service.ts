@@ -84,6 +84,22 @@ export class ReceiptService {
             where: { id: a.installmentId, companyId, bookingId: dto.bookingId },
           });
           if (!inst) throw new NotFoundException(`Installment ${a.installmentId} not found on this booking`);
+          // The receipt itself is never rejected for this — a customer
+          // transferring money ahead of a milestone is normal. What's
+          // rejected is ALLOCATING it against an installment that hasn't
+          // been raised yet: nothing is due, so there's nothing to apply
+          // the payment "against" in the ledger sense. The real fix for
+          // "customer paid early, nowhere raised to put it yet" is a
+          // suspense account (competitive-gap-analysis.md names this gap;
+          // not built in this pass) — see
+          // docs/plans/construction-linked-demand-fix.md §revision 2 for
+          // why this rejection is deliberately narrow and where a future
+          // suspense sweep would hook in.
+          if (inst.dueDate === null) {
+            throw new BadRequestException(
+              `Installment ${a.installmentId} has not been raised yet — it cannot receive an allocation`,
+            );
+          }
           installments.set(a.installmentId, inst);
         }
         // No over-allocation beyond an installment's amount.

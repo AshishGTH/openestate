@@ -33,9 +33,16 @@ export class PortalAccountService {
           this.ledger.balanceInTx(tx, companyId, b.id),
         ]);
 
+        // dueDate === null excludes an unraised STAGE_LINKED installment —
+        // it is definitionally never "next due" (nothing is due yet), so
+        // it must be excluded from the candidate set before the sort, not
+        // merely sorted safely. This code path is `tenantPrisma: any`, so
+        // TypeScript's own null-check on the schema's now-nullable dueDate
+        // does NOT catch this site — it was found by manual audit, not by
+        // tsc. See docs/plans/construction-linked-demand-fix.md §2 (consumer #6).
         const nextDue = installments
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .filter((i: any) => i.status !== 'PAID')
+          .filter((i: any) => i.status !== 'PAID' && i.dueDate !== null)
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           .sort((a: any, b2: any) => a.dueDate.getTime() - b2.dueDate.getTime())[0];
 

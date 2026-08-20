@@ -9,7 +9,9 @@ interface Installment {
   id: string;
   seq: number;
   label: string;
-  dueDate: string;
+  /** Null for an unraised STAGE_LINKED installment — see
+   * docs/plans/construction-linked-demand-fix.md §2. */
+  dueDate: string | null;
   amountPaise: string;
   allocatedPaise: string;
   status: string;
@@ -76,7 +78,20 @@ export default function InstallmentSchedule() {
   const columns: Column<Installment>[] = [
     { key: 'seq', header: '#', render: (i) => i.seq },
     { key: 'label', header: 'Installment', render: (i) => i.label },
-    { key: 'dueDate', header: 'Due Date', render: (i) => new Date(i.dueDate).toLocaleDateString('en-IN') },
+    {
+      key: 'dueDate',
+      header: 'Due Date',
+      // new Date(null) silently resolves to 1970-01-01 in JavaScript — it
+      // does NOT throw — so this branch is not defensive decoration, it's
+      // the actual fix. See docs/plans/construction-linked-demand-fix.md
+      // §2, consumer #10.
+      render: (i) =>
+        i.dueDate ? (
+          new Date(i.dueDate).toLocaleDateString('en-IN')
+        ) : (
+          <span className="italic text-slate-400">Not yet due — awaiting stage completion</span>
+        ),
+    },
     { key: 'amount', header: 'Amount', className: 'text-right', render: (i) => formatInr(BigInt(i.amountPaise)) },
     { key: 'allocated', header: 'Received', className: 'text-right', render: (i) => formatInr(BigInt(i.allocatedPaise)) },
     {

@@ -75,6 +75,20 @@ export const INSTALLMENT_STATUS = {
 } as const;
 export type InstallmentStatusValue = (typeof INSTALLMENT_STATUS)[keyof typeof INSTALLMENT_STATUS];
 
+/**
+ * DATE_LINKED: due at bookingDate + dueOffsetDays (original behaviour).
+ * STAGE_LINKED: no due date until a staff user raises the construction
+ * stage it represents. See docs/plans/construction-linked-demand-fix.md —
+ * this distinction is the fix for a real correctness bug where every
+ * milestone previously behaved as DATE_LINKED regardless of what it was
+ * actually meant to represent.
+ */
+export const MILESTONE_TYPE = {
+  DATE_LINKED: 'DATE_LINKED',
+  STAGE_LINKED: 'STAGE_LINKED',
+} as const;
+export type MilestoneTypeValue = (typeof MILESTONE_TYPE)[keyof typeof MILESTONE_TYPE];
+
 export const COST_LINE_KIND = {
   BASE: 'BASE',
   PLC: 'PLC',
@@ -239,6 +253,17 @@ export const createPaymentPlanSchema = z
   })
   .strict();
 export type CreatePaymentPlanDto = z.infer<typeof createPaymentPlanSchema>;
+
+/** Bulk-raise a STAGE_LINKED milestone for every eligible booking in one
+ * project. See docs/plans/construction-linked-demand-fix.md §1.5-1.6. */
+export const raiseStageSchema = z
+  .object({
+    templateId: z.string().uuid(),
+    milestoneSeq: z.coerce.number().int().min(1),
+    stageCompletedOn: isoDate(),
+  })
+  .strict();
+export type RaiseStageDto = z.infer<typeof raiseStageSchema>;
 
 export const receiptAllocationInputSchema = z
   .object({
