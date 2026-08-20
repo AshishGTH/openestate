@@ -106,7 +106,7 @@ ORDER BY c.name, b.booking_number, MIN(ia.period_start);
 "
 
 if [ "$FORMAT" = "csv" ]; then
-  psql "$DATABASE_URL_SYSTEM" -v ON_ERROR_STOP=1 --csv -c "$QUERY"
+  psql "$DATABASE_URL_SYSTEM" -v ON_ERROR_STOP=1 -P pager=off --csv -c "$QUERY"
 else
-  psql "$DATABASE_URL_SYSTEM" -v ON_ERROR_STOP=1 -c "$QUERY"
+  psql "$DATABASE_URL_SYSTEM" -v ON_ERROR_STOP=1 -P pager=off -c "$QUERY"
 fi
