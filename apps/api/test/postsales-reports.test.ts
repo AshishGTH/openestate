@@ -216,3 +216,78 @@ describe('CSV streaming: real HTTP wire behavior', () => {
     expect(lines[1]).toBe('row0,"value with, comma",plain');
   });
 });
+
+describeIf('Postsales reports: LAND_BASED unit/booking visibility (plotted-farmhouse-inventory §13.1)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let tenantPrisma: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let systemPrisma: any;
+  let reports: PostsalesReportsService;
+  let fx: CompanyFixture;
+  let landProjectId: string;
+
+  beforeAll(async () => {
+    ({ tenantPrisma, systemPrisma } = makeClients());
+    reports = new PostsalesReportsService(systemPrisma, SYSTEM_CLOCK, new LedgerService(tenantPrisma));
+    fx = await seedCompany(systemPrisma);
+
+    // A separate LAND_BASED project — Project.shape is immutable per
+    // §13.3, so this can't reuse fx.projectId (HIGH_RISE by default).
+    const landProject = await systemPrisma.project.create({
+      data: { companyId: fx.companyId, name: 'Land Rollup Project', code: `LRP-${Date.now()}`, shape: 'LAND_BASED' },
+    });
+    landProjectId = landProject.id;
+    const landUnit = await systemPrisma.unit.create({
+      data: {
+        companyId: fx.companyId,
+        projectId: landProjectId,
+        shape: 'LAND_BASED',
+        floorId: null,
+        number: `PLOT-${Date.now()}`,
+        status: 'BOOKED',
+      },
+    });
+    const applicantId = await makeApplicant(systemPrisma, fx.companyId);
+    await systemPrisma.booking.create({
+      data: {
+        companyId: fx.companyId,
+        unitId: landUnit.id,
+        primaryApplicantId: applicantId,
+        bookingNumber: `LAND-ROLLUP-${Date.now()}`,
+        agreedPricePaise: L(1500000),
+        bookingDate: new Date('2026-06-01'),
+        status: 'BOOKED',
+      },
+    });
+  });
+
+  afterAll(async () => {
+    await cleanupCompany(systemPrisma, fx.companyId);
+    await systemPrisma.$disconnect();
+    await tenantPrisma.$disconnect();
+  });
+
+  // The old floor.tower.projectId traversal these three methods shared
+  // (bookingWhere() and two inline copies) silently returned zero rows
+  // for a LAND_BASED project — this asserts the OUTCOME (the plot and
+  // its booking actually show up), not just that the query runs.
+  it('unitStatusRollup counts the LAND_BASED unit', async () => {
+    const rows = await reports.unitStatusRollup(fx.companyId, landProjectId);
+    const booked = rows.find((r) => r.status === 'BOOKED');
+    expect(booked?.count).toBe(1);
+  });
+
+  it('bookingStatusRollup counts the LAND_BASED booking', async () => {
+    const rows = await reports.bookingStatusRollup(fx.companyId, landProjectId);
+    const booked = rows.find((r) => r.status === 'BOOKED');
+    expect(booked?.count).toBe(1);
+  });
+
+  it('projectRollup includes the LAND_BASED project with its real unit/booking counts', async () => {
+    const rows = await reports.projectRollup(fx.companyId);
+    const landRow = rows.find((r) => r.projectId === landProjectId);
+    expect(landRow).toBeDefined();
+    expect(landRow!.totalUnits).toBe(1);
+    expect(landRow!.bookedOrBeyond).toBe(1);
+  });
+});
