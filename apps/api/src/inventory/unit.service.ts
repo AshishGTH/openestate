@@ -101,13 +101,13 @@ export class UnitService {
         await this.validateTowerScopedUniqueness(tx, companyId, floor.tower.id, [rest.number]);
 
         return tx.unit.create({
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           data: {
             ...rest,
             companyId,
             projectId: floor.tower.projectId,
             shape: 'HIGH_RISE',
             floorId,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             customFields: customFields as any,
           },
         });
