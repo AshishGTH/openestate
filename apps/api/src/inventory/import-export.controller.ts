@@ -38,6 +38,24 @@ export class ImportExportController {
     return this.importExportService.importUnits(user.companyId, projectId, file.buffer);
   }
 
+  @Get('import-template')
+  @RequirePermissions(PERMISSIONS.INVENTORY_UNIT_IMPORT)
+  @ApiOperation({ summary: 'Download a blank import template — column set matches the project shape' })
+  async importTemplate(
+    @Param('projectId') projectId: string,
+    @Req() req: Request,
+    @Res() res: Response,
+  ) {
+    const user = req.user as JwtPayload;
+    const buffer = await this.importExportService.getImportTemplate(user.companyId, projectId);
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="unit-import-template-${projectId}.xlsx"`,
+      'Content-Length': buffer.length,
+    });
+    res.send(buffer);
+  }
+
   @Get('export')
   @RequirePermissions(PERMISSIONS.INVENTORY_UNIT_EXPORT)
   @ApiOperation({ summary: 'Export units to Excel file' })

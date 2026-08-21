@@ -199,6 +199,152 @@ describeIf('e2e plotted-farmhouse-inventory Phase B', () => {
     expect(onHighRise.body.message).toContain('HIGH_RISE');
   });
 
+  // Phase C: the create-project surface never had a shape field at all
+  // before this — every project the API could create was HIGH_RISE by
+  // the DB default, regardless of what a caller sent. This is what
+  // actually unblocks Project.shape being settable at all, and confirms
+  // it's immutable afterwards (excluded from updateProjectSchema, same
+  // treatment as `code`).
+  it('POST /projects accepts shape: LAND_BASED, and PATCH /projects/:id rejects a shape key', async () => {
+    const create = await agent
+      .post('/api/v1/projects')
+      .set(auth)
+      .send({ name: `Phase C Land ${TAG}`, code: `PCL-${TAG}`, shape: 'LAND_BASED', landAreaDefaultUnit: 'ACRE' })
+      .expect(201);
+    expect(create.body.shape).toBe('LAND_BASED');
+    expect(create.body.landAreaDefaultUnit).toBe('ACRE');
+
+    // updateProjectSchema (.strict(), shape omitted — immutable per
+    // plotted-farmhouse-inventory.md §13.3) rejects the unrecognized key
+    // before the handler ever runs. The e2e harness's ZodValidationPipe
+    // is the bare nestjs-zod one (every e2e bootstrap in this suite uses
+    // it, not the custom-message wrapper main.ts uses in production —
+    // see CLAUDE.md), so the message is the generic "Validation failed",
+    // not a field-specific one; the 400 itself is what proves rejection.
+    await agent
+      .patch(`/api/v1/projects/${create.body.id}`)
+      .set(auth)
+      .send({ shape: 'HIGH_RISE' })
+      .expect(400);
+  });
+
+  it('GET /projects/:id/units filters by inventoryGroupId', async () => {
+    const group = await agent
+      .post(`/api/v1/projects/${landProjectId}/inventory-groups`)
+      .set(auth)
+      .send({ name: `Filter Group ${TAG}`, code: `FG-${TAG}` })
+      .expect(201);
+    const grouped = await agent
+      .post(`/api/v1/projects/${landProjectId}/units/land-based`)
+      .set(auth)
+      .send({
+        number: `GROUPED-${TAG}`,
+        inventoryGroupId: group.body.id,
+        landAreaEntered: 0.1,
+        landAreaEnteredUnit: 'ACRE',
+        rateUnit: 'ACRE',
+        baseRatePaise: '1000000',
+      })
+      .expect(201);
+
+    const filtered = await agent
+      .get(`/api/v1/projects/${landProjectId}/units?inventoryGroupId=${group.body.id}`)
+      .set(auth)
+      .expect(200);
+    const ids = filtered.body.data.map((u: { id: string }) => u.id as string);
+    expect(ids).toContain(grouped.body.id);
+    // Every row returned actually belongs to the filtered group — not
+    // just that the one grouped unit happens to be present among an
+    // unfiltered list.
+    for (const unit of filtered.body.data as Array<{ inventoryGroup: { id: string } | null }>) {
+      expect(unit.inventoryGroup?.id).toBe(group.body.id);
+    }
+  });
+
+  describe('LAND_BASED bulk import/export template', () => {
+    it('GET /projects/:id/units/import-template on a LAND_BASED project returns the LAND_BASED header row, not the HIGH_RISE one', async () => {
+      const res = await agent
+        .get(`/api/v1/projects/${landProjectId}/units/import-template`)
+        .set(auth)
+        .buffer(true)
+        .parse((r, cb) => {
+          const chunks: Buffer[] = [];
+          r.on('data', (c) => chunks.push(c));
+          r.on('end', () => cb(null, Buffer.concat(chunks)));
+        })
+        .expect(200);
+      expect(res.headers['content-type']).toContain('spreadsheetml');
+
+      const ExcelJS = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(res.body as Buffer);
+      const headerRow = workbook.getWorksheet('Units')!.getRow(1);
+      const headers: string[] = [];
+      headerRow.eachCell((cell) => headers.push(String(cell.value)));
+      expect(headers).toContain('Group Code');
+      expect(headers).toContain('Unit Number');
+      expect(headers).not.toContain('Tower Code');
+    });
+
+    it('POST /projects/:id/units/import on a LAND_BASED project creates a plot from an XLSX row', async () => {
+      const ExcelJS = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      const sheet = workbook.addWorksheet('Units');
+      const importUnitNumber = `IMPORTED-${TAG}`;
+      sheet.addRow([
+        'Group Code',
+        'Unit Number',
+        'Unit Type',
+        'Land Area Entered',
+        'Land Area Unit (SQFT/SQYD/SQM/ACRE/GUNTA)',
+        'Rate Unit (SQFT/SQYD/SQM/ACRE/GUNTA)',
+        'Base Rate (paise, per Rate Unit)',
+      ]);
+      sheet.addRow(['', importUnitNumber, '', 5, 'GUNTA', 'GUNTA', 100000]);
+      const buffer = await workbook.xlsx.writeBuffer();
+
+      const res = await agent
+        .post(`/api/v1/projects/${landProjectId}/units/import`)
+        .set(auth)
+        .attach('file', Buffer.from(buffer), 'import.xlsx')
+        .expect(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.createdCount).toBe(1);
+
+      const listRes = await agent
+        .get(`/api/v1/projects/${landProjectId}/units?search=${importUnitNumber}`)
+        .set(auth)
+        .expect(200);
+      expect(listRes.body.data).toHaveLength(1);
+      // 5 gunta = 5,445 sqft (1 gunta = 1,089 sqft), matched-unit pricing —
+      // confirms the import path derives landAreaSqft server-side same as
+      // the direct create route, not trusting a client-supplied value.
+      expect(Number(listRes.body.data[0].landAreaSqft)).toBeCloseTo(5445, 1);
+    });
+
+    it('GET /projects/:id/units/export on a LAND_BASED project returns the LAND_BASED column layout', async () => {
+      const res = await agent
+        .get(`/api/v1/projects/${landProjectId}/units/export`)
+        .set(auth)
+        .buffer(true)
+        .parse((r, cb) => {
+          const chunks: Buffer[] = [];
+          r.on('data', (c) => chunks.push(c));
+          r.on('end', () => cb(null, Buffer.concat(chunks)));
+        })
+        .expect(200);
+
+      const ExcelJS = await import('exceljs');
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(res.body as Buffer);
+      const headerRow = workbook.getWorksheet('Units')!.getRow(1);
+      const headers: string[] = [];
+      headerRow.eachCell((cell) => headers.push(String(cell.value)));
+      expect(headers).toContain('Group Code');
+      expect(headers).not.toContain('Tower Code');
+    });
+  });
+
   describe('BookingCostLineVerifier gate on POST /bookings', () => {
     let landUnitId: string;
     let applicantId: string;

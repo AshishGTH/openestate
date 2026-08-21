@@ -103,6 +103,46 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   crashing, which is why they went unnoticed until this audit rather
   than being reported. All now resolve via `Unit.projectId` directly.
 
+- **Phase C of two-shape inventory: staff app UI, and the create-project
+  API gap this finally exposed.** `POST /projects` never accepted a
+  `shape` field at all before this — every project has been HIGH_RISE
+  by the database default, regardless of what a caller sent, since
+  Phase A shipped the schema. The project-create wizard now has a
+  shape picker (High-rise / Land-based, high-rise the default) and a
+  default land-area unit shown only for a land-based project; `shape`
+  is immutable after creation (rejected by the update endpoint, same
+  treatment as the project code). Project detail's inventory tab is
+  now shape-conditional — Towers for high-rise, Inventory Groups
+  (Sector/Block/Cluster) for land-based, with its own plot create form
+  (land area entered + unit, land record ref, facing, dimensions, rate
+  unit, built-up rate) and a flat plot list with group and status
+  filters. The booking wizard's unit-selection step gained an optional
+  group filter for land-based projects, and — the one that actually
+  protects real money — no longer pre-fills the agreed base price from
+  a land-based unit's raw `baseRatePaise`, which is paise PER the
+  unit's rate unit (e.g. per acre), not a flat price the way it is for
+  a high-rise unit; it now computes the real total client-side (the
+  same `computeBaseAmountPaise` formula the server's
+  `BookingCostLineVerifier` already used to check it), with the server
+  verifier remaining the authoritative check at submit either way.
+  LAND_BASED bulk import/export gained its own XLSX column layout (no
+  tower/floor columns, an optional group code and the entered-area
+  pair instead) and a `GET /projects/:id/units/import-template`
+  endpoint so the template can never drift from what a real upload
+  requires — column choice is derived from the schema, not a real
+  client sheet (none was available for this release); flagged as
+  needing validation against a real LAND_BASED inventory sheet before
+  a pilot import.
+
+  Also fixed, found registering the new import-template route: `GET
+  /projects/:id/units/export` and the new `import-template` route
+  would have been silently swallowed by `UnitController`'s `GET :id`
+  route (matching `id="export"`/`id="import-template"`) — the exact
+  route-registration-order bug class this project's own v0.3.1 lesson
+  documents for `GET /inquiries/import-template`. Reordered the
+  controllers array with a comment explaining why the order is
+  load-bearing, so a future cleanup doesn't silently reintroduce it.
+
 ### Fixed
 
 - **Reloading a few times, or letting your browser restore several tabs,

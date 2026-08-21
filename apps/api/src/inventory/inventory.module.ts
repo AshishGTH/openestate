@@ -22,8 +22,14 @@ import { InventoryGroupService } from './inventory-group.service';
   controllers: [
     ProjectController,
     TowerController,
-    UnitController,
+    // Registered BEFORE UnitController: both mount under
+    // projects/:projectId/units, and UnitController's GET ':id' would
+    // otherwise swallow GET .../units/export and .../units/import-template
+    // as id="export"/"import-template" — Express/Nest match routes in
+    // registration order, first pattern wins (the exact bug class
+    // CLAUDE.md's v0.3.1 GET /inquiries/import-template entry documents).
     ImportExportController,
+    UnitController,
     ProjectMediaController,
     InventoryGroupController,
   ],

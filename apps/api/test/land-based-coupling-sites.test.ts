@@ -132,16 +132,27 @@ describeIf('LAND_BASED coupling sites (plotted-farmhouse-inventory §13.1)', () 
   });
 
   it('ImportExportService.exportUnits includes the LAND_BASED unit in the workbook, not an empty export', async () => {
+    // Phase C gave LAND_BASED its own column layout (Group Code, Unit
+    // Number, ... — no tower/floor columns at all), dispatched by
+    // project.shape inside exportUnits() itself — read the header row
+    // rather than hardcoding a column index shared with the HIGH_RISE
+    // layout, so this test can't silently drift from either.
     const buffer = await importExport.exportUnits(fx.companyId, landProjectId);
     expect(buffer.length).toBeGreaterThan(0);
     const ExcelJS = await import('exceljs');
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(buffer as never);
     const sheet = workbook.getWorksheet('Units')!;
+    const headers: string[] = [];
+    sheet.getRow(1).eachCell((cell, colNum) => {
+      headers[colNum] = String(cell.value ?? '');
+    });
+    const unitNumberCol = headers.indexOf('Unit Number');
+    expect(unitNumberCol).toBeGreaterThan(0);
     const unitNumbers: string[] = [];
     sheet.eachRow((row, rowNumber) => {
       if (rowNumber === 1) return;
-      unitNumbers.push(String(row.getCell(5).value)); // column 5 = Unit Number
+      unitNumbers.push(String(row.getCell(unitNumberCol).value));
     });
     expect(unitNumbers).toContain(landUnitNumber);
   });

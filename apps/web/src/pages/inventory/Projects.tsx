@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
+import { AREA_UNITS, displayLabel, type AreaUnit } from '@openestate/shared';
 import { usePaginatedQuery, useApiMutation } from '../../lib/hooks';
 import { api } from '../../lib/api';
 import DataTable, { type Column } from '../../components/DataTable';
@@ -13,6 +14,7 @@ interface Project {
   code: string;
   reraNumber: string | null;
   isActive: boolean;
+  shape: 'HIGH_RISE' | 'LAND_BASED';
 }
 
 interface MasterOption {
@@ -30,6 +32,8 @@ export default function ProjectsPage() {
   const [projectTypeId, setProjectTypeId] = useState('');
   const [areaLocationId, setAreaLocationId] = useState('');
   const [address, setAddress] = useState('');
+  const [shape, setShape] = useState<'HIGH_RISE' | 'LAND_BASED'>('HIGH_RISE');
+  const [landAreaDefaultUnit, setLandAreaDefaultUnit] = useState<AreaUnit | ''>('');
   const [customFieldValues, setCustomFieldValues] = useState<Record<string, unknown>>({});
 
   const { definitions: projectDefs } = useCustomFieldDefinitions('PROJECT');
@@ -57,6 +61,8 @@ export default function ProjectsPage() {
         projectTypeId: projectTypeId === '' ? undefined : projectTypeId,
         areaLocationId: areaLocationId === '' ? undefined : areaLocationId,
         address: address.trim() === '' ? undefined : address.trim(),
+        shape,
+        landAreaDefaultUnit: shape === 'LAND_BASED' && landAreaDefaultUnit !== '' ? landAreaDefaultUnit : undefined,
         customFields: buildCustomFieldPayload(projectDefs, customFieldValues),
       });
       setShowForm(false);
@@ -66,6 +72,8 @@ export default function ProjectsPage() {
       setProjectTypeId('');
       setAreaLocationId('');
       setAddress('');
+      setShape('HIGH_RISE');
+      setLandAreaDefaultUnit('');
       setCustomFieldValues({});
     } catch (err) {
       setError((err as Error).message);
@@ -76,6 +84,7 @@ export default function ProjectsPage() {
     { key: 'name', header: 'Name', render: (p) => <Link to={`/inventory/projects/${p.id}`} className="text-blue-600 hover:underline">{p.name}</Link> },
     { key: 'code', header: 'Code', render: (p) => p.code },
     { key: 'rera', header: 'RERA Number', render: (p) => p.reraNumber ?? '—' },
+    { key: 'shape', header: 'Shape', render: (p) => (p.shape === 'LAND_BASED' ? 'Land-based' : 'High-rise') },
     { key: 'active', header: 'Active', render: (p) => (p.isActive ? 'Yes' : 'No') },
   ];
 
@@ -120,6 +129,34 @@ export default function ProjectsPage() {
                 {areaLocations?.data?.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Inventory Shape</label>
+              <select
+                value={shape}
+                onChange={(e) => setShape(e.target.value as 'HIGH_RISE' | 'LAND_BASED')}
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+              >
+                <option value="HIGH_RISE">High-rise (Tower / Floor / Unit)</option>
+                <option value="LAND_BASED">Land-based (plots, farmhouses, villas)</option>
+              </select>
+              <p className="mt-1 text-xs text-slate-500">Cannot be changed after the project is created.</p>
+            </div>
+            {shape === 'LAND_BASED' && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Default Land Area Unit</label>
+                <select
+                  value={landAreaDefaultUnit}
+                  onChange={(e) => setLandAreaDefaultUnit(e.target.value as AreaUnit | '')}
+                  className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
+                >
+                  <option value="">Select…</option>
+                  {AREA_UNITS.map((u) => (
+                    <option key={u} value={u}>{displayLabel(u)}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-slate-500">Default unit shown when entering a plot's land area.</p>
+              </div>
+            )}
             <div className="sm:col-span-2">
               <label className="block text-sm font-medium text-slate-700">Address</label>
               <input type="text" value={address} onChange={(e) => setAddress(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />

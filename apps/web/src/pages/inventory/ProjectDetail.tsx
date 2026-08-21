@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { AREA_UNITS, displayLabel, formatArea, toAreaScaled, type AreaUnit } from '@openestate/shared';
 import { api, downloadFile } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 import CustomFieldInputs, {
@@ -20,6 +21,8 @@ interface Project {
   description: string | null;
   startDate: string | null;
   expectedEndDate: string | null;
+  shape: 'HIGH_RISE' | 'LAND_BASED';
+  landAreaDefaultUnit: AreaUnit | null;
   customFields?: Record<string, unknown> | null;
 }
 
@@ -44,6 +47,21 @@ interface Unit {
   status: string;
   baseRatePaise: string;
   carpetAreaSqft: string | null;
+  // LAND_BASED only — null on HIGH_RISE.
+  landAreaEntered: string | null;
+  landAreaEnteredUnit: AreaUnit | null;
+  facing: string | null;
+  landRecordRef: string | null;
+  inventoryGroup: { id: string; name: string } | null;
+}
+
+interface InventoryGroup {
+  id: string;
+  name: string;
+  code: string;
+  kind: string | null;
+  isActive: boolean;
+  _count?: { units: number };
 }
 
 interface RateRevision {
@@ -121,6 +139,42 @@ export default function ProjectDetailPage() {
 
   const [selectedTowerFilter, setSelectedTowerFilter] = useState('');
   const [selectedUnitIds, setSelectedUnitIds] = useState<Set<string>>(new Set());
+
+  // ── LAND_BASED: inventory groups ──────────────────────────
+  const [showGroupForm, setShowGroupForm] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupCode, setGroupCode] = useState('');
+  const [groupKind, setGroupKind] = useState('');
+  const [groupError, setGroupError] = useState('');
+  const [selectedGroupFilter, setSelectedGroupFilter] = useState('');
+
+  // ── LAND_BASED: plot (unit) create form ───────────────────
+  const [showLandUnitForm, setShowLandUnitForm] = useState(false);
+  const [landUnitNumber, setLandUnitNumber] = useState('');
+  const [landUnitGroupId, setLandUnitGroupId] = useState('');
+  const [landUnitTypeId, setLandUnitTypeId] = useState('');
+  const [landAreaEntered, setLandAreaEntered] = useState('');
+  const [landAreaEnteredUnit, setLandAreaEnteredUnit] = useState<AreaUnit>('ACRE');
+  const [landRateUnit, setLandRateUnit] = useState<AreaUnit>('ACRE');
+  const [landBaseRateRupees, setLandBaseRateRupees] = useState('');
+  const [landBuiltUpAreaSqft, setLandBuiltUpAreaSqft] = useState('');
+  const [landBuiltUpRateRupees, setLandBuiltUpRateRupees] = useState('');
+  const [landRecordRef, setLandRecordRef] = useState('');
+  const [landFacing, setLandFacing] = useState('');
+  const [landLengthFeet, setLandLengthFeet] = useState('');
+  const [landBreadthFeet, setLandBreadthFeet] = useState('');
+  const [landUnitError, setLandUnitError] = useState('');
+
+  // ── XLSX import ────────────────────────────────────────────
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importError, setImportError] = useState('');
+  const [importResult, setImportResult] = useState<{
+    createdCount: number;
+    skippedCount: number;
+    errorCount: number;
+    errors: Array<{ row: number; field: string; message: string }>;
+    skipped: Array<{ row: number; unitNumber: string; reason: string }>;
+  } | null>(null);
   const [revisionRateRupees, setRevisionRateRupees] = useState('');
   const [revisionEffectiveFrom, setRevisionEffectiveFrom] = useState('');
   const [revisionReason, setRevisionReason] = useState('');
@@ -177,15 +231,29 @@ export default function ProjectDetailPage() {
   });
   const towers = towersRes?.data;
 
+  const { data: groupsRes } = useQuery<{ data: InventoryGroup[] }>({
+    queryKey: ['inventory-groups', id],
+    queryFn: () => api(`/projects/${id}/inventory-groups?page=1&limit=100`),
+    enabled: !!id && project?.shape === 'LAND_BASED',
+  });
+  const groups = groupsRes?.data;
+
   const { data: unitTypes } = useQuery<{ data: MasterOption[] }>({
     queryKey: ['masters', 'unit-types', 'all'],
     queryFn: () => api('/masters/unit-types?limit=100'),
   });
 
+  const [unitStatusFilter, setUnitStatusFilter] = useState('');
+
   const { data: units, isLoading: unitsLoading } = useQuery<{ data: Unit[] }>({
-    queryKey: ['units', id, selectedTowerFilter],
-    queryFn: () =>
-      api(`/projects/${id}/units?page=1&limit=100${selectedTowerFilter ? `&towerId=${selectedTowerFilter}` : ''}`),
+    queryKey: ['units', id, selectedTowerFilter, selectedGroupFilter, unitStatusFilter],
+    queryFn: () => {
+      const params = new URLSearchParams({ page: '1', limit: '100' });
+      if (selectedTowerFilter) params.set('towerId', selectedTowerFilter);
+      if (selectedGroupFilter) params.set('inventoryGroupId', selectedGroupFilter);
+      if (unitStatusFilter) params.set('status', unitStatusFilter);
+      return api(`/projects/${id}/units?${params.toString()}`);
+    },
     enabled: !!id,
   });
 
@@ -480,6 +548,102 @@ export default function ProjectDetailPage() {
     }
   };
 
+  const handleCreateGroup = async () => {
+    setGroupError('');
+    try {
+      await api(`/projects/${id}/inventory-groups`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: groupName,
+          code: groupCode,
+          kind: groupKind.trim() === '' ? undefined : groupKind.trim(),
+        }),
+      });
+      qc.invalidateQueries({ queryKey: ['inventory-groups', id] });
+      setShowGroupForm(false);
+      setGroupName('');
+      setGroupCode('');
+      setGroupKind('');
+    } catch (err) {
+      setGroupError((err as Error).message);
+    }
+  };
+
+  const handleDeactivateGroup = async (groupId: string) => {
+    await api(`/inventory-groups/${groupId}`, { method: 'DELETE' });
+    qc.invalidateQueries({ queryKey: ['inventory-groups', id] });
+  };
+
+  const handleOpenLandUnitForm = () => {
+    if (!project) return;
+    setLandUnitError('');
+    setLandUnitNumber('');
+    setLandUnitGroupId('');
+    setLandUnitTypeId('');
+    setLandAreaEntered('');
+    setLandAreaEnteredUnit(project.landAreaDefaultUnit ?? 'ACRE');
+    setLandRateUnit(project.landAreaDefaultUnit ?? 'ACRE');
+    setLandBaseRateRupees('');
+    setLandBuiltUpAreaSqft('');
+    setLandBuiltUpRateRupees('');
+    setLandRecordRef('');
+    setLandFacing('');
+    setLandLengthFeet('');
+    setLandBreadthFeet('');
+    setShowLandUnitForm(true);
+  };
+
+  const handleCreateLandUnit = async () => {
+    setLandUnitError('');
+    try {
+      await api(`/projects/${id}/units/land-based`, {
+        method: 'POST',
+        body: JSON.stringify({
+          number: landUnitNumber,
+          inventoryGroupId: landUnitGroupId === '' ? undefined : landUnitGroupId,
+          unitTypeId: landUnitTypeId === '' ? undefined : landUnitTypeId,
+          landAreaEntered: Number(landAreaEntered),
+          landAreaEnteredUnit,
+          rateUnit: landRateUnit,
+          baseRatePaise: landBaseRateRupees.trim() === '' ? undefined : String(Math.round(Number(landBaseRateRupees) * 100)),
+          builtUpAreaSqft: landBuiltUpAreaSqft.trim() === '' ? undefined : Number(landBuiltUpAreaSqft),
+          builtUpRatePaise: landBuiltUpRateRupees.trim() === '' ? undefined : String(Math.round(Number(landBuiltUpRateRupees) * 100)),
+          landRecordRef: landRecordRef.trim() === '' ? undefined : landRecordRef.trim(),
+          facing: landFacing.trim() === '' ? undefined : landFacing.trim(),
+          lengthFeet: landLengthFeet.trim() === '' ? undefined : Number(landLengthFeet),
+          breadthFeet: landBreadthFeet.trim() === '' ? undefined : Number(landBreadthFeet),
+        }),
+      });
+      qc.invalidateQueries({ queryKey: ['units', id] });
+      setShowLandUnitForm(false);
+    } catch (err) {
+      setLandUnitError((err as Error).message);
+    }
+  };
+
+  const handleDownloadTemplate = () => {
+    downloadFile(`/projects/${id}/units/import-template`, `unit-import-template-${project?.code ?? id}.xlsx`);
+  };
+
+  const handleImportUnits = async () => {
+    setImportError('');
+    setImportResult(null);
+    if (!importFile) {
+      setImportError('Choose a file first');
+      return;
+    }
+    try {
+      const formData = new FormData();
+      formData.append('file', importFile);
+      const result = await api<typeof importResult>(`/projects/${id}/units/import`, { method: 'POST', body: formData });
+      setImportResult(result);
+      setImportFile(null);
+      qc.invalidateQueries({ queryKey: ['units', id] });
+    } catch (err) {
+      setImportError((err as Error).message);
+    }
+  };
+
   const toggleUnit = (unitId: string) => {
     setSelectedUnitIds((prev) => {
       const next = new Set(prev);
@@ -623,54 +787,177 @@ export default function ProjectDetailPage() {
         </div>
       )}
 
+      {project.shape === 'HIGH_RISE' ? (
+        <section className="mt-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-medium text-slate-800">Towers</h2>
+            <button onClick={() => setShowTowerForm(true)} className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+              Add Tower
+            </button>
+          </div>
+          {showTowerForm && (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-white p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Name</label>
+                  <input type="text" value={towerName} onChange={(e) => setTowerName(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Code</label>
+                  <input type="text" value={towerCode} onChange={(e) => setTowerCode(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Total Floors</label>
+                  <input type="number" value={towerFloors} onChange={(e) => setTowerFloors(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <div className="mt-3 flex gap-3">
+                <button onClick={handleCreateTower} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Create</button>
+                <button onClick={() => setShowTowerForm(false)} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+              </div>
+              {towerError && <p className="mt-2 text-sm text-red-600">{towerError}</p>}
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {towers?.map((t) => (
+              <span key={t.id} className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
+                {t.name} ({t.code}) — {t._count?.floors ?? 0} floors
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : (
+        <section className="mt-6">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-medium text-slate-800">Inventory Groups</h2>
+            <button onClick={() => setShowGroupForm(true)} className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+              Add Group
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-slate-500">Sector / Block / Cluster — optional. Plots can also be left ungrouped.</p>
+          {showGroupForm && (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-white p-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Name</label>
+                  <input type="text" value={groupName} onChange={(e) => setGroupName(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Code</label>
+                  <input type="text" value={groupCode} onChange={(e) => setGroupCode(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700">Kind (e.g. Sector, Block)</label>
+                  <input type="text" value={groupKind} onChange={(e) => setGroupKind(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                </div>
+              </div>
+              <div className="mt-3 flex gap-3">
+                <button onClick={handleCreateGroup} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Create</button>
+                <button onClick={() => setShowGroupForm(false)} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+              </div>
+              {groupError && <p className="mt-2 text-sm text-red-600">{groupError}</p>}
+            </div>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {groups?.filter((g) => g.isActive).map((g) => (
+              <span key={g.id} className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
+                {g.name} ({g.code}){g.kind ? ` — ${g.kind}` : ''} — {g._count?.units ?? 0} plots
+                <button onClick={() => handleDeactivateGroup(g.id)} className="text-xs text-red-600 hover:text-red-800">✕</button>
+              </span>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section className="mt-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-medium text-slate-800">Towers</h2>
-          <button onClick={() => setShowTowerForm(true)} className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
-            Add Tower
-          </button>
+          <h2 className="text-lg font-medium text-slate-800">{project.shape === 'HIGH_RISE' ? 'Units' : 'Plots'}</h2>
+          {project.shape === 'HIGH_RISE' ? (
+            <button onClick={() => setShowBulkForm(true)} className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+              Bulk-Generate Units
+            </button>
+          ) : (
+            <button onClick={handleOpenLandUnitForm} className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+              Add Plot
+            </button>
+          )}
         </div>
-        {showTowerForm && (
+
+        {project.shape === 'LAND_BASED' && showLandUnitForm && (
           <div className="mt-3 rounded-lg border border-slate-200 bg-white p-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-sm font-medium text-slate-700">Name</label>
-                <input type="text" value={towerName} onChange={(e) => setTowerName(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                <label className="block text-sm font-medium text-slate-700">Plot Number</label>
+                <input type="text" value={landUnitNumber} onChange={(e) => setLandUnitNumber(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700">Code</label>
-                <input type="text" value={towerCode} onChange={(e) => setTowerCode(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                <label className="block text-sm font-medium text-slate-700">Group (optional)</label>
+                <select value={landUnitGroupId} onChange={(e) => setLandUnitGroupId(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                  <option value="">Ungrouped</option>
+                  {groups?.filter((g) => g.isActive).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+                </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700">Total Floors</label>
-                <input type="number" value={towerFloors} onChange={(e) => setTowerFloors(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+                <label className="block text-sm font-medium text-slate-700">Unit Type</label>
+                <select value={landUnitTypeId} onChange={(e) => setLandUnitTypeId(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                  <option value="">Select…</option>
+                  {unitTypes?.data?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Land Area Entered</label>
+                <input type="number" step="any" value={landAreaEntered} onChange={(e) => setLandAreaEntered(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Land Area Unit</label>
+                <select value={landAreaEnteredUnit} onChange={(e) => setLandAreaEnteredUnit(e.target.value as AreaUnit)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                  {AREA_UNITS.map((u) => <option key={u} value={u}>{displayLabel(u)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Rate Unit</label>
+                <select value={landRateUnit} onChange={(e) => setLandRateUnit(e.target.value as AreaUnit)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                  {AREA_UNITS.map((u) => <option key={u} value={u}>{displayLabel(u)}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Base Rate (₹ per Rate Unit)</label>
+                <input type="number" value={landBaseRateRupees} onChange={(e) => setLandBaseRateRupees(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Land Record Ref</label>
+                <input type="text" value={landRecordRef} onChange={(e) => setLandRecordRef(e.target.value)} placeholder="Khasra / survey no." className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Facing</label>
+                <input type="text" value={landFacing} onChange={(e) => setLandFacing(e.target.value)} placeholder="e.g. North-East" className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Length (feet)</label>
+                <input type="number" value={landLengthFeet} onChange={(e) => setLandLengthFeet(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Breadth (feet)</label>
+                <input type="number" value={landBreadthFeet} onChange={(e) => setLandBreadthFeet(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Built-up Area (sqft, farmhouse only)</label>
+                <input type="number" value={landBuiltUpAreaSqft} onChange={(e) => setLandBuiltUpAreaSqft(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Built-up Rate (₹/sqft)</label>
+                <input type="number" value={landBuiltUpRateRupees} onChange={(e) => setLandBuiltUpRateRupees(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
               </div>
             </div>
             <div className="mt-3 flex gap-3">
-              <button onClick={handleCreateTower} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Create</button>
-              <button onClick={() => setShowTowerForm(false)} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+              <button onClick={handleCreateLandUnit} className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700">Create</button>
+              <button onClick={() => setShowLandUnitForm(false)} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
             </div>
-            {towerError && <p className="mt-2 text-sm text-red-600">{towerError}</p>}
+            {landUnitError && <p className="mt-2 text-sm text-red-600">{landUnitError}</p>}
           </div>
         )}
-        <div className="mt-3 flex flex-wrap gap-2">
-          {towers?.map((t) => (
-            <span key={t.id} className="rounded-full bg-slate-100 px-3 py-1 text-sm text-slate-700">
-              {t.name} ({t.code}) — {t._count?.floors ?? 0} floors
-            </span>
-          ))}
-        </div>
-      </section>
 
-      <section className="mt-6">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-medium text-slate-800">Units</h2>
-          <button onClick={() => setShowBulkForm(true)} className="rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
-            Bulk-Generate Units
-          </button>
-        </div>
-
-        {showBulkForm && (
+        {project.shape === 'HIGH_RISE' && showBulkForm && (
           <div className="mt-3 rounded-lg border border-slate-200 bg-white p-4">
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
@@ -720,11 +1007,30 @@ export default function ProjectDetailPage() {
           </div>
         )}
 
-        <div className="mt-3 flex items-center gap-3">
-          <label className="text-sm font-medium text-slate-700">Filter by Tower</label>
-          <select value={selectedTowerFilter} onChange={(e) => setSelectedTowerFilter(e.target.value)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm">
-            <option value="">All towers</option>
-            {towers?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          {project.shape === 'HIGH_RISE' ? (
+            <>
+              <label className="text-sm font-medium text-slate-700">Filter by Tower</label>
+              <select value={selectedTowerFilter} onChange={(e) => setSelectedTowerFilter(e.target.value)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm">
+                <option value="">All towers</option>
+                {towers?.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </>
+          ) : (
+            <>
+              <label className="text-sm font-medium text-slate-700">Filter by Group</label>
+              <select value={selectedGroupFilter} onChange={(e) => setSelectedGroupFilter(e.target.value)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm">
+                <option value="">All plots</option>
+                {groups?.filter((g) => g.isActive).map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </select>
+            </>
+          )}
+          <label className="text-sm font-medium text-slate-700">Status</label>
+          <select value={unitStatusFilter} onChange={(e) => setUnitStatusFilter(e.target.value)} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm">
+            <option value="">Any status</option>
+            {['AVAILABLE', 'HELD', 'BLOCKED', 'BOOKED', 'ALLOTTED', 'REGISTERED', 'CANCELLED'].map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
           </select>
         </div>
 
@@ -733,18 +1039,28 @@ export default function ProjectDetailPage() {
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-4 py-3"></th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Unit Number</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">{project.shape === 'HIGH_RISE' ? 'Unit Number' : 'Plot Number'}</th>
+                {project.shape === 'LAND_BASED' && (
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Group</th>
+                )}
                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Status</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Rate</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Carpet Area</th>
+                {project.shape === 'HIGH_RISE' ? (
+                  <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Carpet Area</th>
+                ) : (
+                  <>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Land Area</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">Facing</th>
+                  </>
+                )}
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
               {unitsLoading ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">Loading…</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">Loading…</td></tr>
               ) : (units?.data ?? []).length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-sm text-slate-500">No units yet</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-500">No {project.shape === 'HIGH_RISE' ? 'units' : 'plots'} yet</td></tr>
               ) : (
                 units!.data.map((u) => (
                   <tr key={u.id} className="hover:bg-slate-50">
@@ -752,9 +1068,23 @@ export default function ProjectDetailPage() {
                       <input type="checkbox" checked={selectedUnitIds.has(u.id)} onChange={() => toggleUnit(u.id)} className="h-4 w-4 rounded border-slate-300 text-blue-600" />
                     </td>
                     <td className="px-4 py-3 text-sm text-slate-700">{u.number}</td>
+                    {project.shape === 'LAND_BASED' && (
+                      <td className="px-4 py-3 text-sm text-slate-700">{u.inventoryGroup?.name ?? '—'}</td>
+                    )}
                     <td className="px-4 py-3 text-sm text-slate-700">{u.status}</td>
                     <td className="px-4 py-3 text-sm text-slate-700">{rupees(u.baseRatePaise)}</td>
-                    <td className="px-4 py-3 text-sm text-slate-700">{u.carpetAreaSqft ?? '—'}</td>
+                    {project.shape === 'HIGH_RISE' ? (
+                      <td className="px-4 py-3 text-sm text-slate-700">{u.carpetAreaSqft ?? '—'}</td>
+                    ) : (
+                      <>
+                        <td className="px-4 py-3 text-sm text-slate-700">
+                          {u.landAreaEntered && u.landAreaEnteredUnit
+                            ? formatArea(toAreaScaled(u.landAreaEntered), u.landAreaEnteredUnit)
+                            : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-slate-700">{u.facing ?? '—'}</td>
+                      </>
+                    )}
                     <td className="px-4 py-3 text-right space-x-3">
                       <button onClick={() => setHistoryUnitId(u.id)} className="text-blue-600 hover:text-blue-800 text-xs">
                         Rate History
@@ -769,6 +1099,43 @@ export default function ProjectDetailPage() {
             </tbody>
           </table>
         </div>
+
+        <div className="mt-3 flex items-center gap-3 rounded-lg border border-slate-200 bg-white p-4">
+          <span className="text-sm font-medium text-slate-700">Bulk import / export</span>
+          <button onClick={handleDownloadTemplate} className="text-xs font-medium text-blue-600 hover:text-blue-800">
+            Download template
+          </button>
+          <input type="file" accept=".xlsx" onChange={(e) => setImportFile(e.target.files?.[0] ?? null)} className="text-xs" />
+          <button onClick={handleImportUnits} disabled={!importFile} className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+            Import
+          </button>
+          <button
+            onClick={() => downloadFile(`/projects/${id}/units/export`, `units-${project.code}.xlsx`)}
+            className="text-xs font-medium text-blue-600 hover:text-blue-800"
+          >
+            Export current list
+          </button>
+        </div>
+        {importError && <p className="mt-2 text-sm text-red-600">{importError}</p>}
+        {importResult && (
+          <div className="mt-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+            {importResult.errorCount > 0 ? (
+              <>
+                <p className="font-medium text-red-600">{importResult.errorCount} error(s), nothing imported</p>
+                <ul className="mt-1 list-disc pl-5 text-xs">
+                  {importResult.errors.map((e, i) => (
+                    <li key={i}>Row {e.row}: {e.field} — {e.message}</li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p>
+                {importResult.createdCount} created
+                {importResult.skippedCount > 0 ? `, ${importResult.skippedCount} skipped` : ''}.
+              </p>
+            )}
+          </div>
+        )}
 
         {selectedUnitIds.size > 0 && (
           <div className="mt-3 rounded-lg border border-slate-200 bg-white p-4">

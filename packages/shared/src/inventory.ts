@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import { AREA_UNITS } from './area';
 
+// ── Inventory Shape ─────────────────────────────────────────
+
+export const INVENTORY_SHAPES = ['HIGH_RISE', 'LAND_BASED'] as const;
+export type InventoryShape = (typeof INVENTORY_SHAPES)[number];
+
 // ── Unit Status ─────────────────────────────────────────────
 
 export const UNIT_STATUS = {
@@ -84,6 +89,14 @@ export const createProjectSchema = z
     // of clearing the (nullable) column.
     startDate: z.coerce.date().nullable().optional(),
     expectedEndDate: z.coerce.date().nullable().optional(),
+    // Immutable after creation (plotted-farmhouse-inventory.md §13.3) —
+    // excluded from updateProjectSchema below, same treatment as `code`.
+    shape: z.enum(INVENTORY_SHAPES).default('HIGH_RISE'),
+    // Default entered-unit picker for the LAND_BASED unit-create form.
+    // Meaningless for HIGH_RISE; left optional rather than validated
+    // against shape here since it's purely a UI default, never read by
+    // any pricing/validation logic.
+    landAreaDefaultUnit: z.enum(AREA_UNITS).optional(),
     isActive: z.boolean().default(true),
     // v0.2.3: admin-defined custom field values. Deliberately untyped
     // here — the real shape is per-company runtime data, so it is
@@ -101,7 +114,7 @@ export type CreateProjectDto = z.infer<typeof createProjectSchema>;
 // this path today — changing it has no real use case for the RERA/address/
 // location typo-fix this endpoint exists for, so it's simplest to make it
 // immutable rather than add P2002 handling for a field nobody needs to edit.
-export const updateProjectSchema = createProjectSchema.omit({ code: true }).partial().strict();
+export const updateProjectSchema = createProjectSchema.omit({ code: true, shape: true }).partial().strict();
 export type UpdateProjectDto = z.infer<typeof updateProjectSchema>;
 
 // ── Zod Schemas: Tower ──────────────────────────────────────
@@ -302,3 +315,26 @@ export const importUnitRowSchema = z.object({
 });
 
 export type ImportUnitRow = z.infer<typeof importUnitRowSchema>;
+
+// LAND_BASED counterpart — no tower/floor columns, an optional group
+// code instead. Schema-derived (§14 Phase C item 7): built against
+// createLandBasedUnitSchema's own fields, not a real client sheet
+// (none was available) — flag this needs validating against a real
+// LAND_BASED inventory sheet before relying on it for a pilot import.
+export const importLandBasedUnitRowSchema = z.object({
+  groupCode: z.string().max(50).optional(),
+  unitNumber: z.string().min(1).max(50),
+  unitType: z.string().max(255).optional(),
+  landAreaEntered: z.coerce.number().positive(),
+  landAreaEnteredUnit: z.enum(AREA_UNITS),
+  rateUnit: z.enum(AREA_UNITS),
+  baseRatePaise: z.coerce.number().int().min(0).optional(),
+  builtUpAreaSqft: z.coerce.number().positive().optional(),
+  builtUpRatePaise: z.coerce.number().int().min(0).optional(),
+  landRecordRef: z.string().max(100).optional(),
+  facing: z.string().max(20).optional(),
+  lengthFeet: z.coerce.number().positive().optional(),
+  breadthFeet: z.coerce.number().positive().optional(),
+});
+
+export type ImportLandBasedUnitRow = z.infer<typeof importLandBasedUnitRowSchema>;

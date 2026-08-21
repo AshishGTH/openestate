@@ -60,10 +60,11 @@ export class UnitController {
     @Query('towerId') towerId: string | undefined,
     @Query('floorId') floorId: string | undefined,
     @Query('status') status: string | undefined,
+    @Query('inventoryGroupId') inventoryGroupId: string | undefined,
     @Req() req: Request,
   ) {
     const user = req.user as JwtPayload;
-    return this.unitService.findAll(user.companyId, projectId, { ...query, towerId, floorId, status });
+    return this.unitService.findAll(user.companyId, projectId, { ...query, towerId, floorId, status, inventoryGroupId });
   }
 
   @Get(':id')
