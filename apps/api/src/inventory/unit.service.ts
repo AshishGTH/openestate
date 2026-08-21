@@ -27,7 +27,7 @@ export class UnitService {
     private readonly customFields: CustomFieldsService,
   ) {}
 
-  async findAll(companyId: string, projectId: string, query: PaginationQuery & { towerId?: string; floorId?: string; status?: string }) {
+  async findAll(companyId: string, projectId: string, query: PaginationQuery & { towerId?: string; floorId?: string; status?: string; inventoryGroupId?: string }) {
     const { page, limit, search, sortBy, sortOrder } = query;
     const skip = (page - 1) * limit;
 
@@ -45,6 +45,9 @@ export class UnitService {
     if (query.floorId) {
       where.floorId = query.floorId;
     }
+    if (query.inventoryGroupId) {
+      where.inventoryGroupId = query.inventoryGroupId;
+    }
     if (query.status) {
       where.status = query.status;
     }
@@ -61,6 +64,10 @@ export class UnitService {
         include: {
           unitType: true,
           floor: { include: { tower: { select: { id: true, name: true, code: true } } } },
+          // Nullable — HIGH_RISE units never have one, LAND_BASED units
+          // may be ungrouped. See portal-property.service.ts for the
+          // same null-checked pattern.
+          inventoryGroup: { select: { id: true, name: true } },
         },
       }),
       this.systemPrisma.unit.count({ where }),

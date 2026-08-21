@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { formatInr } from '@openestate/shared';
+import { formatInr, computeBaseAmountPaise, toAreaScaled, type AreaUnit } from '@openestate/shared';
 import { api } from '../../lib/api';
 
 interface ApplicantRow {
@@ -15,6 +15,7 @@ interface ProjectRow {
   id: string;
   name: string;
   code: string;
+  shape: 'HIGH_RISE' | 'LAND_BASED';
 }
 
 interface UnitRow {
@@ -25,10 +26,40 @@ interface UnitRow {
   // null for a LAND_BASED unit (Phase A) — every read must check it, not
   // assume it, per plotted-farmhouse-inventory.md §13.1.
   floor: { name: string; tower: { name: string } } | null;
+  inventoryGroup: { id: string; name: string } | null;
+  // LAND_BASED only — null on HIGH_RISE. baseRatePaise for a LAND_BASED
+  // unit is paise PER rateUnit (e.g. per acre), not the flat unit price
+  // HIGH_RISE units use it as — the wizard must compute the actual total
+  // via computeBaseAmountPaise, never pre-fill baseRatePaise directly.
+  landAreaEntered: string | null;
+  landAreaEnteredUnit: AreaUnit | null;
+  rateUnit: AreaUnit | null;
+}
+
+/** The agreed base price for a unit: the flat baseRatePaise for HIGH_RISE,
+ * or ratePaise × entered area for LAND_BASED (§7.1 of the plotted-inventory
+ * plan) — client-side preview only, the server's BookingCostLineVerifier
+ * is the authoritative check at submit. */
+function baseAmountForUnit(u: UnitRow): string {
+  if (u.landAreaEntered && u.landAreaEnteredUnit && u.rateUnit) {
+    return computeBaseAmountPaise({
+      ratePaise: BigInt(u.baseRatePaise),
+      rateUnit: u.rateUnit,
+      landAreaEnteredScaled: toAreaScaled(u.landAreaEntered),
+      landAreaEnteredUnit: u.landAreaEnteredUnit,
+    }).toString();
+  }
+  return u.baseRatePaise;
+}
+
+interface InventoryGroupRow {
+  id: string;
+  name: string;
 }
 
 function unitLabel(u: UnitRow): string {
-  return u.floor ? `${u.floor.tower.name} / ${u.floor.name} / ${u.number}` : u.number;
+  if (u.floor) return `${u.floor.tower.name} / ${u.floor.name} / ${u.number}`;
+  return u.inventoryGroup ? `${u.inventoryGroup.name} / ${u.number}` : u.number;
 }
 
 // The generic master-factory list endpoint returns plain PaymentPlanTemplate
@@ -79,6 +110,7 @@ interface DraftData {
   coApplicantIds: string[];
   coApplicantNames: string[];
   projectId?: string;
+  groupId?: string;
   unitId?: string;
   unitLabel?: string;
   bookingDate: string;
@@ -265,9 +297,20 @@ export default function BookingWizard() {
     queryFn: () => api('/projects?limit=100'),
   });
 
+  const selectedProject = projects?.data?.find((p) => p.id === draft.projectId);
+
+  const { data: groups } = useQuery<{ data: InventoryGroupRow[] }>({
+    queryKey: ['booking-wizard-groups', draft.projectId],
+    queryFn: () => api(`/projects/${draft.projectId}/inventory-groups?limit=100`),
+    enabled: !!draft.projectId && selectedProject?.shape === 'LAND_BASED',
+  });
+
   const { data: units } = useQuery<{ data: UnitRow[] }>({
-    queryKey: ['available-units', draft.projectId],
-    queryFn: () => api(`/projects/${draft.projectId}/units?status=AVAILABLE&limit=100`),
+    queryKey: ['available-units', draft.projectId, draft.groupId],
+    queryFn: () =>
+      api(
+        `/projects/${draft.projectId}/units?status=AVAILABLE&limit=100${draft.groupId ? `&inventoryGroupId=${draft.groupId}` : ''}`,
+      ),
     enabled: !!draft.projectId,
   });
 
@@ -517,7 +560,7 @@ export default function BookingWizard() {
             <div className="mt-3 space-y-3">
               <select
                 value={draft.projectId ?? ''}
-                onChange={(e) => setDraft({ ...draft, projectId: e.target.value, unitId: undefined })}
+                onChange={(e) => setDraft({ ...draft, projectId: e.target.value, groupId: undefined, unitId: undefined })}
                 className="block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 <option value="">Select a project</option>
@@ -528,6 +571,19 @@ export default function BookingWizard() {
                 ))}
               </select>
 
+              {draft.projectId && selectedProject?.shape === 'LAND_BASED' && (
+                <select
+                  value={draft.groupId ?? ''}
+                  onChange={(e) => setDraft({ ...draft, groupId: e.target.value || undefined, unitId: undefined })}
+                  className="block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="">All groups</option>
+                  {groups?.data?.map((g) => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+              )}
+
               {draft.projectId && (
                 <select
                   value={draft.unitId ?? ''}
@@ -537,7 +593,7 @@ export default function BookingWizard() {
                       ...draft,
                       unitId: e.target.value,
                       unitLabel: u ? unitLabel(u) : undefined,
-                      basePricePaise: draft.basePricePaise || (u ? u.baseRatePaise : ''),
+                      basePricePaise: draft.basePricePaise || (u ? baseAmountForUnit(u) : ''),
                     });
                   }}
                   className="block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -545,7 +601,7 @@ export default function BookingWizard() {
                   <option value="">Select an available unit</option>
                   {units?.data?.map((u) => (
                     <option key={u.id} value={u.id}>
-                      {unitLabel(u)} — {formatInr(BigInt(u.baseRatePaise))}
+                      {unitLabel(u)} — {formatInr(BigInt(baseAmountForUnit(u)))}
                     </option>
                   ))}
                 </select>
