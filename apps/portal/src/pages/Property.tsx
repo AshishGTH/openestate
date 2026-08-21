@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { formatArea, toAreaScaled, type AreaUnit } from '@openestate/shared';
 import { api, downloadFile, fetchAsObjectUrl } from '../lib/api';
 
 interface ConstructionMedia {
@@ -29,10 +30,19 @@ interface PropertyEntry {
   status: string;
   allotmentDate: string | null;
   registrationDate: string | null;
-  unit: { number: string; typeName: string | null; carpetAreaSqft: string | null };
+  unit: {
+    number: string;
+    typeName: string | null;
+    carpetAreaSqft: string | null;
+    // LAND_BASED only — the client's own entered (value, unit) pair.
+    landAreaEntered: string | null;
+    landAreaEnteredUnit: AreaUnit | null;
+  };
   // null for a LAND_BASED booking (Phase A) — no tower/floor exists.
   tower: { name: string } | null;
   floor: { name: string } | null;
+  // LAND_BASED only, and only when the plot is grouped.
+  inventoryGroup: { name: string } | null;
   project: { id: string; name: string; address: string | null; expectedEndDate: string | null };
   constructionUpdates: ConstructionUpdate[];
   projectMedia: ProjectMediaItem[];
@@ -97,11 +107,20 @@ export default function Property() {
               <span className="text-xs rounded-full bg-slate-100 text-slate-600 px-2 py-0.5 shrink-0">{p.status}</span>
             </div>
             <p className="text-sm text-slate-600 mt-1">
-              {p.tower && p.floor ? `${p.tower.name} · ${p.floor.name} · ` : ''}Unit {p.unit.number}
+              {p.tower && p.floor
+                ? `${p.tower.name} · ${p.floor.name} · Unit ${p.unit.number}`
+                : p.inventoryGroup
+                  ? `${p.inventoryGroup.name} · Plot ${p.unit.number}`
+                  : `Plot ${p.unit.number}`}
               {p.unit.typeName ? ` (${p.unit.typeName})` : ''}
             </p>
             {p.unit.carpetAreaSqft && (
               <p className="text-xs text-slate-500 mt-0.5">{p.unit.carpetAreaSqft} sqft carpet area</p>
+            )}
+            {p.unit.landAreaEntered && p.unit.landAreaEnteredUnit && (
+              <p className="text-xs text-slate-500 mt-0.5">
+                {formatArea(toAreaScaled(p.unit.landAreaEntered), p.unit.landAreaEnteredUnit)}
+              </p>
             )}
             {p.project.address && <p className="text-xs text-slate-500 mt-0.5">{p.project.address}</p>}
             {p.project.expectedEndDate && (

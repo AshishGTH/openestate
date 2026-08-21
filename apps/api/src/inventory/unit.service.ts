@@ -7,10 +7,12 @@ import {
 import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
+import { toAreaScaled, convertToSqftScaled, fromAreaScaled } from '@openestate/shared';
 import type {
   CreateUnitDto,
   UpdateUnitDto,
   BulkGenerateUnitsDto,
+  CreateLandBasedUnitDto,
   PaginationQuery,
 } from '@openestate/shared';
 
@@ -97,9 +99,18 @@ export class UnitService {
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
         const floor = await tx.floor.findFirst({
           where: { id: floorId, companyId },
-          include: { tower: true },
+          include: { tower: { include: { project: { select: { shape: true } } } } },
         });
         if (!floor) throw new NotFoundException('Floor not found');
+        // Structurally unreachable today (a tower can only exist under a
+        // HIGH_RISE project — see TowerService.create's own guard — and
+        // Project.shape is immutable per §13.3), but stated explicitly
+        // per plotted-farmhouse-inventory.md §8 rather than left implicit.
+        if (floor.tower.project.shape !== 'HIGH_RISE') {
+          throw new BadRequestException(
+            'This project is LAND_BASED. Use POST /projects/:id/units/land-based instead.',
+          );
+        }
 
         await this.validateTowerScopedUniqueness(tx, companyId, floor.tower.id, [rest.number]);
 
@@ -110,6 +121,63 @@ export class UnitService {
             projectId: floor.tower.projectId,
             shape: 'HIGH_RISE',
             floorId,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            customFields: customFields as any,
+          },
+        });
+      }),
+    );
+  }
+
+  /**
+   * Sibling to create() above, not a branch on it — a LAND_BASED unit has
+   * no floor to be created "on", so a distinct route/DTO keeps validation
+   * clean (plotted-farmhouse-inventory.md §8). floorId/inventoryGroupId
+   * shape is enforced by the units_shape_hierarchy_chk CHECK constraint
+   * at the DB level too — this is the belt to that suspenders.
+   */
+  async createLandBased(companyId: string, projectId: string, dto: CreateLandBasedUnitDto) {
+    const { customFields: incoming, ...rest } = dto;
+    const customFields = await this.customFields.resolveValuesForWrite(companyId, 'UNIT', incoming);
+
+    return runWithTenant({ companyId }, () =>
+      withTenantTx(this.tenantPrisma, companyId, async (tx) => {
+        const project = await tx.project.findFirst({ where: { id: projectId, companyId } });
+        if (!project) throw new NotFoundException('Project not found');
+        if (project.shape !== 'LAND_BASED') {
+          throw new BadRequestException(
+            'This project is HIGH_RISE. Use POST /projects/:id/units/floors/:floorId instead.',
+          );
+        }
+        if (rest.inventoryGroupId) {
+          const group = await tx.inventoryGroup.findFirst({ where: { id: rest.inventoryGroupId, companyId, projectId } });
+          if (!group) throw new NotFoundException('Inventory group not found in this project');
+        }
+
+        // Project-scoped uniqueness — units_number_floor_id_key (the DB
+        // constraint on [floorId, number]) gives ZERO protection here:
+        // Postgres never treats two NULL floorId rows as equal, so every
+        // LAND_BASED unit's number would otherwise be uncontested.
+        const numberTaken = await tx.unit.findFirst({ where: { companyId, projectId, number: rest.number } });
+        if (numberTaken) {
+          throw new BadRequestException(`Unit number already exists in this project: ${rest.number}`);
+        }
+
+        // landAreaSqft is DERIVED, never accepted from the client — the
+        // invariant landAreaSqft === convertToSqft(landAreaEntered,
+        // landAreaEnteredUnit) is enforced by computing it here, not by
+        // trusting a submitted value (§7.1).
+        const enteredScaled = toAreaScaled(rest.landAreaEntered);
+        const sqftScaled = convertToSqftScaled(enteredScaled, rest.landAreaEnteredUnit);
+
+        return tx.unit.create({
+          data: {
+            ...rest,
+            companyId,
+            projectId,
+            shape: 'LAND_BASED',
+            floorId: null,
+            landAreaSqft: fromAreaScaled(sqftScaled),
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             customFields: customFields as any,
           },

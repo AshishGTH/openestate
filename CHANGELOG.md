@@ -56,6 +56,53 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   release only lands the schema so those follow-ups can be reviewed
   in isolation.
 
+- **Phase B of two-shape inventory: LAND_BASED create/booking paths
+  are now wired.** `POST /projects/:id/units/land-based` creates a
+  plot directly on a project (no floor); `landAreaSqft` is always
+  derived server-side from the entered (value, unit) pair, never
+  accepted from the client. `GET/POST /projects/:id/inventory-groups`
+  and `PATCH/DELETE /inventory-groups/:id` manage Sector/Block/Cluster
+  grouping (deactivate, not hard-delete — a group's units simply
+  ungroup, never silently vanish). The existing tower/floor-scoped
+  endpoints now 400 with a clear message on a LAND_BASED project
+  instead of creating an unreachable row. A new `BookingCostLineVerifier`
+  recomputes a LAND_BASED booking's BASE cost line from the unit's own
+  stored rate/area and rejects the request if the client's submitted
+  amount is off by more than 1 paise — closes the same "trust the
+  client's JS math" gap this project already tightened for GST
+  place-of-supply, specifically for the harder LAND_BASED arithmetic
+  (Decimal areas, per-acre rates in the tens of millions of paise).
+  HIGH_RISE pricing is deliberately untouched — it has never been a
+  computed rate-times-area value in this codebase, staff routinely
+  negotiate an agreed price different from a unit's listed rate, and a
+  strict verifier there would reject legitimate pricing, not catch a
+  bug. The customer portal's property page now renders a LAND_BASED
+  booking correctly (group name + plot number, or bare "Plot N" when
+  ungrouped, plus the entered land area) instead of the raw tower/floor
+  layout HIGH_RISE uses. New permission `inventory.inventory-group.manage`
+  (granted to `company_admin` automatically via its existing wildcard;
+  `sales_manager` gets it too, but — matching this project's own
+  privilege-escalation-on-upgrade lesson — only on a fresh install or
+  an explicit role edit, never auto-granted to an existing install's
+  role on upgrade).
+
+  Also fixed, found auditing every remaining `floor.tower.projectId`
+  traversal for this release: a customer whose booking is against a
+  LAND_BASED unit previously got a raw 500 on their own property page
+  (`PortalPropertyService` read `.floor.tower...` unguarded) — worse,
+  even a null-safe read would have found nothing, because four portal
+  RLS policies (`projects_portal_scope` and three others) only reached
+  a project via the same floor/tower chain, invisible to Postgres for a
+  floorless unit. Both layers fixed; a LAND_BASED customer can now
+  actually see their own project. Several report/list queries
+  (`postsales-reports.service.ts`'s rollups and dues report,
+  `unit.service.ts`'s list, `rate-revision.service.ts`, the units XLSX
+  export, the construction-update notification fan-out, the project-edit
+  confirmation dialog's booking count) had the identical traversal bug —
+  silently returning zero rows for a LAND_BASED project instead of
+  crashing, which is why they went unnoticed until this audit rather
+  than being reported. All now resolve via `Unit.projectId` directly.
+
 ### Fixed
 
 - **Reloading a few times, or letting your browser restore several tabs,

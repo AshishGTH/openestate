@@ -20,6 +20,7 @@ import {
   changeRateSchema,
   createUnitPlcSchema,
   createUnitChargeSchema,
+  createLandBasedUnitSchema,
   paginationQuerySchema,
   PERMISSIONS,
 } from '@openestate/shared';
@@ -37,6 +38,7 @@ class UnitStatusTransitionDto extends createZodDto(unitStatusTransitionSchema) {
 class ChangeRateDto extends createZodDto(changeRateSchema) {}
 class CreateUnitPlcDto extends createZodDto(createUnitPlcSchema) {}
 class CreateUnitChargeDto extends createZodDto(createUnitChargeSchema) {}
+class CreateLandBasedUnitDto extends createZodDto(createLandBasedUnitSchema) {}
 class PaginationQueryDto extends createZodDto(paginationQuerySchema) {}
 
 @ApiTags('Units')
@@ -82,6 +84,18 @@ export class UnitController {
   ) {
     const user = req.user as JwtPayload;
     return this.unitService.create(user.companyId, floorId, dto);
+  }
+
+  @Post('land-based')
+  @RequirePermissions(PERMISSIONS.INVENTORY_UNIT_CREATE)
+  @ApiOperation({ summary: 'Create a LAND_BASED unit (plot) directly on a project — no floor' })
+  createLandBased(
+    @Param('projectId') projectId: string,
+    @Body() dto: CreateLandBasedUnitDto,
+    @Req() req: Request,
+  ) {
+    const user = req.user as JwtPayload;
+    return this.unitService.createLandBased(user.companyId, projectId, dto);
   }
 
   @Patch(':id')

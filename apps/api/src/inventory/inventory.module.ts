@@ -14,6 +14,8 @@ import { ImportExportService } from './import-export.service';
 import { UploadService } from './upload.service';
 import { ProjectMediaController } from './project-media.controller';
 import { ProjectMediaService } from './project-media.service';
+import { InventoryGroupController } from './inventory-group.controller';
+import { InventoryGroupService } from './inventory-group.service';
 
 @Module({
   imports: [CustomFieldsModule],
@@ -23,6 +25,7 @@ import { ProjectMediaService } from './project-media.service';
     UnitController,
     ImportExportController,
     ProjectMediaController,
+    InventoryGroupController,
   ],
   providers: [
     ProjectService,
@@ -34,6 +37,7 @@ import { ProjectMediaService } from './project-media.service';
     ImportExportService,
     UploadService,
     ProjectMediaService,
+    InventoryGroupService,
   ],
   exports: [
     UnitStateMachineService,

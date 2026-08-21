@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Inject,
   Injectable,
   NotFoundException,
@@ -67,11 +68,18 @@ export class TowerService {
 
   async create(companyId: string, projectId: string, dto: CreateTowerDto) {
     return runWithTenant({ companyId }, () =>
-      withTenantTx(this.tenantPrisma, companyId, (tx) =>
-        tx.tower.create({
+      withTenantTx(this.tenantPrisma, companyId, async (tx) => {
+        const project = await tx.project.findFirst({ where: { id: projectId, companyId } });
+        if (!project) throw new NotFoundException('Project not found');
+        if (project.shape !== 'HIGH_RISE') {
+          throw new BadRequestException(
+            'This project is LAND_BASED. Towers/floors are for HIGH_RISE projects. Use POST /projects/:id/inventory-groups instead.',
+          );
+        }
+        return tx.tower.create({
           data: { ...dto, companyId, projectId },
-        }),
-      ),
+        });
+      }),
     );
   }
 

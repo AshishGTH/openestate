@@ -9,11 +9,11 @@ a decision was made, see CLAUDE.md's Decisions log — this file is only
 ## Verification VMs
 
 IPs on this project drift session to session — always confirm current
-before trusting this table, but as of 2026-08-20:
+before trusting this table, but as of 2026-08-21:
 
 | Box | IP | User | Role |
 |---|---|---|---|
-| Upgraded / walkthrough | 192.168.1.21 | `newopen` | Long-lived, carries real demo data + upgrade history. **Unreachable across 5 consecutive SSH attempts on 2026-08-20** (`Connection timed out`) — treat as a real outage, not necessarily permanent; re-confirm before assuming it's gone for good. |
+| Upgraded / walkthrough | 192.168.1.5 | `newopen` | Long-lived, carries real demo data + upgrade history. IP changed again (was 192.168.1.21, unreachable across 5 attempts on 2026-08-20 — assumed to be the same box moved to a new address within the same /24, not independently re-confirmed this session). SSH method (key vs password) for this address not yet re-verified — check both before assuming the old key-only setup still applies. |
 | New (fresh install) | 10.50.132.78 | `newopen` | Password-auth only (no key installed yet) — SSH via `plink -ssh -batch -hostkey "<fingerprint>" -pw '<password>' newopen@10.50.132.78`, same `sudo -u postgres` pty requirement as below. Also `sudo-rs`. Verified working end-to-end on 2026-08-20: `git pull` + `upgrade-native.sh` to `99a625e`, and a real-browser live verification of the construction-linked-demand-fix (STAGE_LINKED installment shows "Not yet due" until raised, then the correct computed date). Demo admin `admin@demo-realty.com` password was reset via `reset-admin-password.sh` for that check — rotated since, not recorded here. |
 
 **VM credentials (SSH login password, demo-admin app password) are kept
