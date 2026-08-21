@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { formatArea, toAreaScaled, type AreaUnit } from '@openestate/shared';
+import { formatArea, toAreaScaled, convertFromSqftScaled, type AreaUnit } from '@openestate/shared';
 import { api, downloadFile, fetchAsObjectUrl } from '../lib/api';
 
 interface ConstructionMedia {
@@ -34,16 +34,26 @@ interface PropertyEntry {
     number: string;
     typeName: string | null;
     carpetAreaSqft: string | null;
-    // LAND_BASED only — the client's own entered (value, unit) pair.
+    // LAND_BASED only — the client's own entered (value, unit) pair,
+    // plus the derived canonical sqft used to display in the project's
+    // default unit (falls back to the entered pair if the project has
+    // none set).
     landAreaEntered: string | null;
     landAreaEnteredUnit: AreaUnit | null;
+    landAreaSqft: string | null;
   };
   // null for a LAND_BASED booking (Phase A) — no tower/floor exists.
   tower: { name: string } | null;
   floor: { name: string } | null;
   // LAND_BASED only, and only when the plot is grouped.
   inventoryGroup: { name: string } | null;
-  project: { id: string; name: string; address: string | null; expectedEndDate: string | null };
+  project: {
+    id: string;
+    name: string;
+    address: string | null;
+    expectedEndDate: string | null;
+    landAreaDefaultUnit: AreaUnit | null;
+  };
   constructionUpdates: ConstructionUpdate[];
   projectMedia: ProjectMediaItem[];
 }
@@ -119,7 +129,12 @@ export default function Property() {
             )}
             {p.unit.landAreaEntered && p.unit.landAreaEnteredUnit && (
               <p className="text-xs text-slate-500 mt-0.5">
-                {formatArea(toAreaScaled(p.unit.landAreaEntered), p.unit.landAreaEnteredUnit)}
+                {p.project.landAreaDefaultUnit && p.unit.landAreaSqft
+                  ? formatArea(
+                      convertFromSqftScaled(toAreaScaled(p.unit.landAreaSqft), p.project.landAreaDefaultUnit),
+                      p.project.landAreaDefaultUnit,
+                    )
+                  : formatArea(toAreaScaled(p.unit.landAreaEntered), p.unit.landAreaEnteredUnit)}
               </p>
             )}
             {p.project.address && <p className="text-xs text-slate-500 mt-0.5">{p.project.address}</p>}

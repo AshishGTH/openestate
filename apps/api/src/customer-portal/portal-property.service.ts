@@ -71,13 +71,15 @@ export class PortalPropertyService {
             number: b.unit.number,
             typeName: b.unit.unitType?.name ?? null,
             carpetAreaSqft: b.unit.carpetAreaSqft,
-            // LAND_BASED only — null on HIGH_RISE. Sent as the client's
-            // own entered (value, unit) pair rather than re-deriving a
-            // display value from the projected landAreaSqft column: no
-            // second unit-conversion rounding on top of the one already
-            // taken when landAreaSqft was computed at write time (§7.1).
+            // LAND_BASED only — null on HIGH_RISE. Both the client's own
+            // entered (value, unit) pair AND the derived canonical sqft —
+            // Property.tsx displays land area in the PROJECT's default
+            // unit (Phase D §14), which needs landAreaSqft to convert
+            // from; landAreaEntered/landAreaEnteredUnit stay available
+            // too, for the (rare) case a project has no default unit set.
             landAreaEntered: b.unit.landAreaEntered,
             landAreaEnteredUnit: b.unit.landAreaEnteredUnit,
+            landAreaSqft: b.unit.landAreaSqft,
           },
           // null for a LAND_BASED booking — no tower/floor exists.
           tower: b.unit.floor ? { name: b.unit.floor.tower.name } : null,
@@ -90,6 +92,10 @@ export class PortalPropertyService {
             name: b.unit.project.name,
             address: b.unit.project.address,
             expectedEndDate: b.unit.project.expectedEndDate,
+            // LAND_BASED only — null on HIGH_RISE and on any LAND_BASED
+            // project that never set one. Drives which unit the portal
+            // displays land area in.
+            landAreaDefaultUnit: b.unit.project.landAreaDefaultUnit,
           },
           constructionUpdates: updates,
           projectMedia,

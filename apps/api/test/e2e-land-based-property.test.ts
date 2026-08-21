@@ -95,7 +95,16 @@ describeIf('e2e GET /portal/property — LAND_BASED (floorless) unit', () => {
     // §13.3, so this can't be the same project seedCompany() already
     // created (that one defaults to HIGH_RISE).
     const landProject = await systemPrisma.project.create({
-      data: { companyId: fx.companyId, name: `Land Project ${TAG}`, code: `LP-${TAG}`, shape: 'LAND_BASED' },
+      data: {
+        companyId: fx.companyId,
+        name: `Land Project ${TAG}`,
+        code: `LP-${TAG}`,
+        shape: 'LAND_BASED',
+        // Phase D: the portal displays land area in THIS unit, not the
+        // unit's own entered unit below (ACRE) — deliberately different
+        // so the assertion can't pass by coincidence.
+        landAreaDefaultUnit: 'GUNTA',
+      },
     });
     landProjectId = landProject.id;
     landUnitNumber = `PLOT-${TAG}`;
@@ -109,6 +118,8 @@ describeIf('e2e GET /portal/property — LAND_BASED (floorless) unit', () => {
         status: 'AVAILABLE',
         landAreaEntered: 0.5,
         landAreaEnteredUnit: 'ACRE',
+        // 0.5 acre = 21,780 sqft exactly (43,560 sqft/acre ÷ 2).
+        landAreaSqft: 21780,
       },
     });
 
@@ -176,8 +187,8 @@ describeIf('e2e GET /portal/property — LAND_BASED (floorless) unit', () => {
       bookingNumber: string;
       tower: { name: string } | null;
       floor: { name: string } | null;
-      unit: { number: string };
-      project: { id: string };
+      unit: { number: string; landAreaSqft: string | null };
+      project: { id: string; landAreaDefaultUnit: string | null };
     }>;
 
     const landEntry = properties.find((p) => p.bookingNumber === `LAND-${TAG}`);
@@ -186,6 +197,11 @@ describeIf('e2e GET /portal/property — LAND_BASED (floorless) unit', () => {
     expect(landEntry!.floor).toBeNull();
     expect(landEntry!.unit.number).toBe(landUnitNumber);
     expect(landEntry!.project.id).toBe(landProjectId);
+    // Phase D: landAreaSqft and the project's landAreaDefaultUnit are
+    // both exposed so Property.tsx can display in the project's unit,
+    // not the plot's own entered unit.
+    expect(Number(landEntry!.unit.landAreaSqft)).toBe(21780);
+    expect(landEntry!.project.landAreaDefaultUnit).toBe('GUNTA');
 
     const hrEntry = properties.find((p) => p.bookingNumber === `HR-${TAG}`);
     expect(hrEntry).toBeDefined();
