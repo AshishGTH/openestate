@@ -34,6 +34,10 @@ export class PortalPropertyService {
               // Nullable for a LAND_BASED unit — every read below must
               // check b.unit.floor before touching .tower, not assume it.
               floor: { include: { tower: true } },
+              // Nullable — a LAND_BASED unit may have no group at all
+              // (§9: "InventoryGroup list, or 'all units' if the project
+              // uses no groups"). null renders as bare "Plot {number}".
+              inventoryGroup: { select: { name: true } },
             },
           },
         },
@@ -67,12 +71,20 @@ export class PortalPropertyService {
             number: b.unit.number,
             typeName: b.unit.unitType?.name ?? null,
             carpetAreaSqft: b.unit.carpetAreaSqft,
+            // LAND_BASED only — null on HIGH_RISE. Sent as the client's
+            // own entered (value, unit) pair rather than re-deriving a
+            // display value from the projected landAreaSqft column: no
+            // second unit-conversion rounding on top of the one already
+            // taken when landAreaSqft was computed at write time (§7.1).
+            landAreaEntered: b.unit.landAreaEntered,
+            landAreaEnteredUnit: b.unit.landAreaEnteredUnit,
           },
-          // null for a LAND_BASED booking — no tower/floor exists. Phase D
-          // (portal UI) is where the shape-conditional rendering for this
-          // lands; this backend fix only has to stop crashing.
+          // null for a LAND_BASED booking — no tower/floor exists.
           tower: b.unit.floor ? { name: b.unit.floor.tower.name } : null,
           floor: b.unit.floor ? { name: b.unit.floor.name } : null,
+          // LAND_BASED only, and only when the plot is grouped — null
+          // otherwise (§9: ungrouped LAND_BASED projects are valid).
+          inventoryGroup: b.unit.inventoryGroup ? { name: b.unit.inventoryGroup.name } : null,
           project: {
             id: projectId,
             name: b.unit.project.name,

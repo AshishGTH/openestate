@@ -22,6 +22,7 @@ import { InterestScheduler, InterestProcessor } from './interest.scheduler';
 import { TransferService } from './transfer.service';
 import { CancellationService } from './cancellation.service';
 import { RefundService } from './refund.service';
+import { BookingCostLineVerifier } from './booking-cost-line-verifier.service';
 
 @Module({
   imports: [InventoryModule, BrokersModule, CommissionModule],
@@ -42,6 +43,7 @@ import { RefundService } from './refund.service';
     CancellationService,
     RefundService,
     BookingDraftService,
+    BookingCostLineVerifier,
   ],
   exports: [LedgerService, BookingService, ReceiptService, InterestService],
 })

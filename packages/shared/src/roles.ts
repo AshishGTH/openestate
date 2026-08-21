@@ -38,6 +38,9 @@ export const ROLE_PERMISSIONS: Record<SystemRoleSlug, readonly string[]> = {
     P.INVENTORY_UNIT_EXPORT,
     P.INVENTORY_RATE_READ,
     P.INVENTORY_UPLOAD_READ,
+    // Mirrors inventory.tower.* above — the LAND_BASED analog of tower
+    // management. plotted-farmhouse-inventory.md §8.
+    P.INVENTORY_INVENTORY_GROUP_MANAGE,
     ...Object.values(P).filter((p) => p.startsWith('presales.')),
     P.POSTSALES_BOOKING_READ,
     P.POSTSALES_BOOKING_CREATE,

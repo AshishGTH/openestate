@@ -62,6 +62,11 @@ export const PERMISSIONS = {
   INVENTORY_TOWER_CREATE: 'inventory.tower.create',
   INVENTORY_TOWER_UPDATE: 'inventory.tower.update',
   INVENTORY_TOWER_DELETE: 'inventory.tower.delete',
+  // LAND_BASED-project analog of tower management — Sector/Block/Cluster
+  // create/edit/deactivate. See plotted-farmhouse-inventory.md §8; no
+  // separate READ permission — Unit read already covers groups via the
+  // Unit-list response.
+  INVENTORY_INVENTORY_GROUP_MANAGE: 'inventory.inventory-group.manage',
   INVENTORY_UNIT_READ: 'inventory.unit.read',
   INVENTORY_UNIT_CREATE: 'inventory.unit.create',
   INVENTORY_UNIT_UPDATE: 'inventory.unit.update',

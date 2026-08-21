@@ -26,6 +26,7 @@ import { CancellationService } from './cancellation.service';
 import { BrokerService } from '../brokers/broker.service';
 import { NocService } from '../brokers/noc.service';
 import { CommissionService } from '../commission/commission.service';
+import { BookingCostLineVerifier } from './booking-cost-line-verifier.service';
 
 class CreateBookingDto extends createZodDto(createBookingSchema) {}
 class AssignBrokerDto extends createZodDto(z.object({ brokerId: z.string().uuid() }).strict()) {}
@@ -54,13 +55,18 @@ export class BookingController {
     private readonly brokerService: BrokerService,
     private readonly nocs: NocService,
     private readonly commissions: CommissionService,
+    private readonly costLineVerifier: BookingCostLineVerifier,
   ) {}
 
   @Post()
   @RequirePermissions(PERMISSIONS.POSTSALES_BOOKING_CREATE)
   @ApiOperation({ summary: 'Create a booking (books the unit; posts the cost breakup to the ledger)' })
-  create(@Body() dto: CreateBookingDto, @Req() req: Request) {
+  async create(@Body() dto: CreateBookingDto, @Req() req: Request) {
     const u = req.user as JwtPayload;
+    // Precondition check on the DTO, upstream of the frozen BookingService
+    // — see BookingCostLineVerifier's own doc comment for why this isn't
+    // inside the service itself (plotted-farmhouse-inventory.md §7.4).
+    await this.costLineVerifier.verifyForCreate(u.companyId, dto.unitId, dto.costLines);
     return this.bookings.createBooking(u.companyId, dto, u.sub);
   }
 

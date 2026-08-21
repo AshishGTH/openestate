@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AREA_UNITS } from './area';
 
 // ── Unit Status ─────────────────────────────────────────────
 
@@ -236,6 +237,54 @@ export const createUnitChargeSchema = z
   })
   .strict();
 export type CreateUnitChargeDto = z.infer<typeof createUnitChargeSchema>;
+
+// ── Zod Schemas: InventoryGroup (LAND_BASED — Sector/Block/Cluster) ──
+
+export const createInventoryGroupSchema = z
+  .object({
+    name: z.string().min(1).max(255),
+    code: z.string().min(1).max(50).regex(/^[A-Za-z0-9_-]+$/, 'Code must be alphanumeric with dashes/underscores'),
+    // Free-form per InventoryGroup.kind's own doc comment — vocabulary
+    // varies by developer (Sector/Block/Cluster/Phase), no logic branches
+    // on it, so no enum here either.
+    kind: z.string().max(50).optional(),
+    isActive: z.boolean().default(true),
+  })
+  .strict();
+export type CreateInventoryGroupDto = z.infer<typeof createInventoryGroupSchema>;
+
+// code excluded, not just optional — same immutable-lookup-key reasoning
+// as updateProjectSchema above (InventoryGroup.code is unique per project
+// and has no established use case for being edited after creation).
+export const updateInventoryGroupSchema = createInventoryGroupSchema.omit({ code: true }).partial().strict();
+export type UpdateInventoryGroupDto = z.infer<typeof updateInventoryGroupSchema>;
+
+// ── Zod Schemas: LAND_BASED Unit Create ─────────────────────
+
+export const createLandBasedUnitSchema = z
+  .object({
+    number: z.string().min(1).max(50),
+    inventoryGroupId: z.string().uuid().optional(),
+    unitTypeId: z.string().uuid().optional(),
+    // The pair the client actually entered — source of truth for
+    // pricing (plotted-farmhouse-inventory.md §7.1). landAreaSqft is
+    // DERIVED server-side from these two, never accepted from the client.
+    landAreaEntered: z.coerce.number().positive(),
+    landAreaEnteredUnit: z.enum(AREA_UNITS),
+    rateUnit: z.enum(AREA_UNITS),
+    baseRatePaise: z.coerce.bigint().min(0n).default(0n),
+    // Farmhouse-shaped units only (§7.5) — both null on plots-only.
+    builtUpAreaSqft: z.coerce.number().positive().optional(),
+    builtUpRatePaise: z.coerce.bigint().min(0n).optional(),
+    landRecordRef: z.string().max(100).optional(),
+    facing: z.string().max(20).optional(),
+    lengthFeet: z.coerce.number().positive().optional(),
+    breadthFeet: z.coerce.number().positive().optional(),
+    isActive: z.boolean().default(true),
+    customFields: z.record(z.unknown()).optional(),
+  })
+  .strict();
+export type CreateLandBasedUnitDto = z.infer<typeof createLandBasedUnitSchema>;
 
 // ── Zod Schemas: Import Row ─────────────────────────────────
 

@@ -232,3 +232,181 @@ describeIf('Ledger property: balance == Σ(ledger) for random sequences', () => 
     return systemPrisma.ledgerEntry.count({ where: { companyId: fx.companyId, bookingId } });
   }
 });
+
+/**
+ * Ledger byte-identity — plotted-farmhouse-inventory.md §11.2, the merge
+ * gate for BookingService's one-line change (place-of-supply now resolves
+ * via unit.project.areaLocation instead of unit.floor.tower.project
+ * .areaLocation — see that plan's §10). Proves the frozen service treats a
+ * LAND_BASED unit's booking identically to a HIGH_RISE one: same cost
+ * lines, same custom plan, same receipt/bounce/reversal sequence in, same
+ * ledger out — types, signed amounts, allocations, and cheque status
+ * events byte-identical once ids/timestamps/labels are stripped.
+ *
+ * Calls BookingService directly (not through HTTP), so
+ * BookingCostLineVerifier — wired into BookingController.create, upstream
+ * of this service — never runs here; that's correct, not a gap, since
+ * this test's whole point is proving the SERVICE is shape-agnostic given
+ * identical inputs, independent of the new controller-level verifier.
+ */
+describeIf('Ledger byte-identity: HIGH_RISE vs LAND_BASED booking, identical operations', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let tenantPrisma: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let systemPrisma: any;
+  let svc: Services;
+  let fx: CompanyFixture;
+
+  beforeAll(async () => {
+    ({ tenantPrisma, systemPrisma } = makeClients());
+    svc = buildServices(tenantPrisma, systemPrisma, SYSTEM_CLOCK);
+    fx = await seedCompany(systemPrisma);
+  });
+
+  afterAll(async () => {
+    await cleanupCompany(systemPrisma, fx.companyId);
+    await systemPrisma.$disconnect();
+    await tenantPrisma.$disconnect();
+  });
+
+  it('produces byte-identical ledger entries, allocations, and cheque events for both shapes', async () => {
+    const applicantId = await makeApplicant(systemPrisma, fx.companyId);
+
+    // HIGH_RISE unit: seedCompany()'s own project defaults to HIGH_RISE.
+    const highRiseUnitId = await makeUnit(systemPrisma, fx);
+    const highRiseProject = await systemPrisma.project.findUniqueOrThrow({ where: { id: fx.projectId } });
+
+    // LAND_BASED unit: a separate project — Project.shape is immutable
+    // per §13.3, so this can't reuse fx.projectId. Same areaLocationId as
+    // the HIGH_RISE project, or GST place-of-supply resolution 400s (and,
+    // if it silently didn't, would make the two sequences NOT actually
+    // identical inputs) — see finance.ts's isIntraStateSupply fail-loud
+    // check.
+    const landProject = await systemPrisma.project.create({
+      data: {
+        companyId: fx.companyId,
+        name: 'Equivalence Land Project',
+        code: `ELP-${Date.now()}`,
+        shape: 'LAND_BASED',
+        areaLocationId: highRiseProject.areaLocationId,
+      },
+    });
+    const landUnit = await systemPrisma.unit.create({
+      data: {
+        companyId: fx.companyId,
+        projectId: landProject.id,
+        shape: 'LAND_BASED',
+        floorId: null,
+        number: `PLOT-${Date.now()}`,
+        status: 'AVAILABLE',
+      },
+    });
+
+    async function runSequence(unitId: string) {
+      const booking = await svc.bookings.createBooking(
+        fx.companyId,
+        {
+          unitId,
+          primaryApplicantId: applicantId,
+          coApplicantIds: [],
+          bookingDate: new Date('2026-06-01'),
+          costLines: [{ kind: 'BASE', label: 'Base', baseAmountPaise: 30_00_000n * 100n, gstRateId: fx.defaultGstRateId }],
+        },
+        fx.userId,
+      );
+      const plan = await svc.plans.createCustomPlan(
+        fx.companyId,
+        booking.id,
+        {
+          name: 'P',
+          isCustom: true,
+          installments: [
+            { label: 'I1', dueDate: new Date('2026-06-15'), amountPaise: 15_00_000n * 100n },
+            { label: 'I2', dueDate: new Date('2026-07-15'), amountPaise: 15_00_000n * 100n },
+          ],
+        },
+        fx.userId,
+      );
+      const [inst1, inst2] = plan.installments as Array<{ id: string }>;
+
+      // Identical receipt sequence: one NEFT receipt against I1 (later
+      // reversed), one CHEQUE receipt against I2 (later bounced).
+      const neftReceipt = await svc.receipts.createReceipt(
+        fx.companyId,
+        {
+          bookingId: booking.id,
+          receiptDate: new Date('2026-06-20'),
+          mode: 'NEFT',
+          grossAmountPaise: 15_00_000n * 100n,
+          allocations: [{ installmentId: inst1.id, amountPaise: 15_00_000n * 100n }],
+          tdsDeductedPaise: 0n,
+        },
+        fx.userId,
+      );
+      const chequeReceipt = await svc.receipts.createReceipt(
+        fx.companyId,
+        {
+          bookingId: booking.id,
+          receiptDate: new Date('2026-06-21'),
+          mode: 'CHEQUE',
+          grossAmountPaise: 15_00_000n * 100n,
+          allocations: [{ installmentId: inst2.id, amountPaise: 15_00_000n * 100n }],
+          tdsDeductedPaise: 0n,
+        },
+        fx.userId,
+      );
+
+      // Identical bounce.
+      await svc.receipts.recordChequeEvent(
+        fx.companyId,
+        chequeReceipt.id,
+        { status: 'BOUNCED', eventDate: new Date('2026-06-25'), reason: 'insufficient funds' },
+        fx.userId,
+      );
+
+      // Identical reversal.
+      await svc.receipts.reverseReceipt(fx.companyId, neftReceipt.id, 'duplicate entry', fx.userId);
+
+      return booking.id;
+    }
+
+    const highRiseBookingId = await runSequence(highRiseUnitId);
+    const landBookingId = await runSequence(landUnit.id);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async function normalizedLedger(bookingId: string): Promise<any[]> {
+      const rows = await systemPrisma.ledgerEntry.findMany({
+        where: { companyId: fx.companyId, bookingId },
+        orderBy: [{ entryType: 'asc' }, { createdAt: 'asc' }],
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return rows.map((r: any) => ({ entryType: r.entryType, signedAmountPaise: r.signedAmountPaise.toString() }));
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async function normalizedAllocations(bookingId: string): Promise<any[]> {
+      const rows = await systemPrisma.receiptAllocation.findMany({
+        where: { companyId: fx.companyId, receipt: { bookingId } },
+        orderBy: [{ amountPaise: 'asc' }, { createdAt: 'asc' }],
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return rows.map((r: any) => ({ amountPaise: r.amountPaise.toString() }));
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    async function normalizedChequeEvents(bookingId: string): Promise<any[]> {
+      const rows = await systemPrisma.chequeStatusEvent.findMany({
+        where: { companyId: fx.companyId, receipt: { bookingId } },
+        orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return rows.map((r: any) => ({ status: r.status, reason: r.reason ?? null }));
+    }
+
+    expect(await normalizedLedger(landBookingId)).toEqual(await normalizedLedger(highRiseBookingId));
+    expect(await normalizedAllocations(landBookingId)).toEqual(await normalizedAllocations(highRiseBookingId));
+    expect(await normalizedChequeEvents(landBookingId)).toEqual(await normalizedChequeEvents(highRiseBookingId));
+
+    // Sanity: both actually produced real, non-trivial ledger activity —
+    // an equality check between two empty arrays would pass vacuously.
+    expect((await normalizedLedger(highRiseBookingId)).length).toBeGreaterThan(0);
+  });
+});
