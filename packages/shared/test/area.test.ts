@@ -5,6 +5,7 @@ import {
   AREA_SCALE,
   computeBaseAmountPaise,
   convertToSqftScaled,
+  convertFromSqftScaled,
   fromAreaScaled,
   toAreaScaled,
   type AreaUnit,
@@ -184,6 +185,40 @@ describe('AreaUnit — canonical sqft (derived column) invariant', () => {
     // scaled value should be ~10_763_910.
     expect(sqftScaled).toBeGreaterThan(10_763_909n);
     expect(sqftScaled).toBeLessThan(10_763_912n);
+  });
+});
+
+describe('AreaUnit — canonical sqft to display unit (portal default-unit display)', () => {
+  it('convertFromSqftScaled is the exact inverse of convertToSqftScaled for the four integer-factor units', () => {
+    // 0.372 acre === 14.88 gunta exactly (16,204.32 sqft either way) —
+    // the same fixture value plotted-farmhouse-inventory.md's own tests
+    // use for the ACRE side; this is the portal's GUNTA-display side.
+    const sqftScaled = convertToSqftScaled(toAreaScaled('0.372'), 'ACRE');
+    const guntaScaled = convertFromSqftScaled(sqftScaled, 'GUNTA');
+    expect(guntaScaled).toBe(toAreaScaled('14.88'));
+
+    const cases: Array<{ sqft: string; unit: AreaUnit; expected: string }> = [
+      { sqft: '43560', unit: 'ACRE', expected: '1' },
+      { sqft: '43560', unit: 'GUNTA', expected: '40' },
+      { sqft: '43560', unit: 'SQYD', expected: '4840' },
+      { sqft: '1000', unit: 'SQFT', expected: '1000' },
+    ];
+    for (const c of cases) {
+      expect(convertFromSqftScaled(toAreaScaled(c.sqft), c.unit)).toBe(toAreaScaled(c.expected));
+    }
+  });
+
+  it('every AreaUnit value round-trips through sqft and back within 0.01 (the display-precision tolerance)', () => {
+    fc.assert(
+      fc.property(fc.constantFrom(...AREA_UNITS), fc.integer({ min: 1, max: 100_000 }), (unit, whole) => {
+        const original = toAreaScaled(String(whole));
+        const sqft = convertToSqftScaled(original, unit);
+        const roundTripped = convertFromSqftScaled(sqft, unit);
+        const diff = original > roundTripped ? original - roundTripped : roundTripped - original;
+        expect(diff).toBeLessThanOrEqual(toAreaScaled('0.01'));
+      }),
+      { numRuns: 500 },
+    );
   });
 });
 

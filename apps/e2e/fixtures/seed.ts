@@ -26,17 +26,31 @@ export interface E2eFixture {
   chargeTypeGstRatePercent?: number;
   // Only set when opts.withPortalTicketSetup is passed — a portal-login-
   // capable Applicant plus a ticket category, for the customer-raises /
-  // staff-replies round-trip scenario.
+  // staff-replies round-trip scenario. The SAME applicant also gets a
+  // second, LAND_BASED booking (landProjectName/landPlotNumber/
+  // landGroupName below) — deliberately folded into this one fixture
+  // rather than a separate login: the whole Playwright suite finishes in
+  // under 2 minutes, so every portal login in the harness shares the same
+  // 5-requests/5-minutes portal-auth throttle bucket (IP-keyed) — a
+  // second standalone fixture+login tipped it over 5 and caused real,
+  // intermittent 429s on unrelated spec files (found live, not guessed).
   portalIdentifier?: string;
   portalPassword?: string;
   ticketCategoryName?: string;
+  landProjectName?: string;
+  landPlotNumber?: string;
+  landGroupName?: string;
 }
 
 const rnd = () => Math.random().toString(36).slice(2, 8);
 
 export async function seedE2eFixture(
   databaseUrlSystem: string,
-  opts: { forcePasswordChange?: boolean; withPricingMasters?: boolean; withPortalTicketSetup?: boolean } = {},
+  opts: {
+    forcePasswordChange?: boolean;
+    withPricingMasters?: boolean;
+    withPortalTicketSetup?: boolean;
+  } = {},
 ): Promise<E2eFixture> {
   const prisma = createSystemPrismaClient(databaseUrlSystem);
   const tag = `${Date.now()}-${rnd()}`;
@@ -178,6 +192,9 @@ export async function seedE2eFixture(
     let portalIdentifier: string | undefined;
     let portalPassword: string | undefined;
     let ticketCategoryName: string | undefined;
+    let landProjectName: string | undefined;
+    let landPlotNumber: string | undefined;
+    let landGroupName: string | undefined;
     if (opts.withPortalTicketSetup) {
       const customerRole = await prisma.role.create({
         data: {
@@ -246,6 +263,58 @@ export async function seedE2eFixture(
           bookingDate: new Date(),
         },
       });
+
+      // A second booking for the SAME portal applicant, against a
+      // LAND_BASED plot — Phase D (plotted-farmhouse-inventory.md §14):
+      // media-gallery.spec.ts's already-authenticated portal session
+      // reads these fields off this SAME fixture rather than a separate
+      // login, per this file's own throttle-budget comment above.
+      const landProject = await prisma.project.create({
+        data: {
+          companyId: company.id,
+          name: `E2E Land Project ${tag}`,
+          code: `E2ELAND-${tag}`,
+          shape: 'LAND_BASED',
+          landAreaDefaultUnit: 'GUNTA',
+          areaLocationId: areaLocation.id,
+        },
+      });
+      landProjectName = landProject.name;
+
+      const group = await prisma.inventoryGroup.create({
+        data: { companyId: company.id, projectId: landProject.id, name: `Sector A ${tag}`, code: `SECA-${tag}` },
+      });
+      landGroupName = group.name;
+
+      const plotNumber = `PLOT-${tag}`;
+      const landUnit = await prisma.unit.create({
+        data: {
+          companyId: company.id,
+          projectId: landProject.id,
+          shape: 'LAND_BASED',
+          floorId: null,
+          inventoryGroupId: group.id,
+          number: plotNumber,
+          status: 'BOOKED',
+          landAreaEntered: 0.372,
+          landAreaEnteredUnit: 'ACRE',
+          landAreaSqft: 16204.32,
+          rateUnit: 'ACRE',
+          baseRatePaise: BigInt(5_00_000_00),
+        },
+      });
+      landPlotNumber = landUnit.number;
+
+      await prisma.booking.create({
+        data: {
+          companyId: company.id,
+          unitId: landUnit.id,
+          primaryApplicantId: applicant.id,
+          bookingNumber: `E2E-LAND-BOOKING-${tag}`,
+          agreedPricePaise: BigInt(18_60_000_00),
+          bookingDate: new Date(),
+        },
+      });
     }
 
     return {
@@ -262,6 +331,9 @@ export async function seedE2eFixture(
       portalIdentifier,
       portalPassword,
       ticketCategoryName,
+      landProjectName,
+      landPlotNumber,
+      landGroupName,
     };
   } finally {
     await prisma.$disconnect();

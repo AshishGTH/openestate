@@ -124,6 +124,21 @@ export function convertToSqftScaled(enteredScaled: bigint, enteredUnit: AreaUnit
 }
 
 /**
+ * Inverse of `convertToSqftScaled` — converts the canonical sqft
+ * projection back into an arbitrary display unit (e.g. a project's
+ * `landAreaDefaultUnit`, for the customer portal). Display-only, like
+ * `fromAreaScaled`/`formatArea` — pricing never goes through this
+ * either (§7.1's "no second unit-conversion rounding" reasoning is
+ * specifically about the ENTERED pair driving `baseAmountPaise`, not
+ * about a read-only display value derived from the already-derived
+ * sqft column).
+ */
+export function convertFromSqftScaled(sqftScaled: bigint, targetUnit: AreaUnit): bigint {
+  const numerator = sqftScaled * SQFT_SCALE;
+  return divRoundHalfUp(numerator, SQFT_PER_UNIT_SCALED[targetUnit]);
+}
+
+/**
  * The pricing function. Given a Unit's stored rate + rateUnit and
  * entered area + enteredUnit, computes the exact `baseAmountPaise`
  * that the ledger should record.

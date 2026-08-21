@@ -47,6 +47,21 @@ test('staff uploads a layout plan through the real UI; the customer sees and dow
   await page.goto(`${PORTAL_URL}/portal/property`);
   await expect(page.getByText('Layout plans & brochures')).toBeVisible();
 
+  // Phase D (plotted-farmhouse-inventory.md §14): the SAME portal session
+  // also has a LAND_BASED booking (this fixture's own withPortalTicketSetup
+  // block) — piggybacked on this already-authenticated visit to
+  // /portal/property rather than a fresh spec+login, since the whole
+  // Playwright suite finishes well inside the portal-auth throttle's
+  // 5-minute window and every login in the harness shares that one
+  // 5-request budget (found live: a standalone fixture+login here
+  // intermittently 429'd OTHER spec files' logins).
+  // Shape-conditional rendering: "group · Plot N", not "tower · floor · Unit N".
+  await expect(page.getByText(`${fixture.landGroupName} · Plot ${fixture.landPlotNumber}`)).toBeVisible();
+  await expect(page.getByText(fixture.landProjectName!)).toBeVisible();
+  // Land area shown in the PROJECT's default unit (GUNTA), not the plot's
+  // own entered unit (ACRE) — 0.372 acre === 14.88 gunta exactly.
+  await expect(page.getByText('14.88 gunta')).toBeVisible();
+
   const downloadLink = page.getByRole('button', { name: `Layout Plan: ${fileName}` });
   await expect(downloadLink).toBeVisible();
   const [download] = await Promise.all([page.waitForEvent('download'), downloadLink.click()]);
