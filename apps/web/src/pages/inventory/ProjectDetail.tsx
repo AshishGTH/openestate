@@ -615,6 +615,8 @@ export default function ProjectDetailPage() {
         }),
       });
       qc.invalidateQueries({ queryKey: ['units', id] });
+      // A grouped plot changes the group's own displayed plot count.
+      qc.invalidateQueries({ queryKey: ['inventory-groups', id] });
       setShowLandUnitForm(false);
     } catch (err) {
       setLandUnitError((err as Error).message);
@@ -639,6 +641,7 @@ export default function ProjectDetailPage() {
       setImportResult(result);
       setImportFile(null);
       qc.invalidateQueries({ queryKey: ['units', id] });
+      qc.invalidateQueries({ queryKey: ['inventory-groups', id] });
     } catch (err) {
       setImportError((err as Error).message);
     }
