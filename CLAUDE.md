@@ -5376,3 +5376,55 @@ legitimate races. Genuine replay — after the window, or once the
 token's family has been revoked outright — still revokes the entire
 family exactly as before; the grace window narrows WHEN reuse is
 forgiven, it does not weaken the theft-detection mechanism itself.
+
+### Standing rule: `apps/e2e`'s shared `portal-auth` throttle bucket is near its ceiling — extend an existing fixture's login, don't add a new one
+
+Found the hard way during the LAND_BASED-portal Playwright work (Phase D
+of plotted-farmhouse-inventory.md §14). A first attempt added a
+standalone fixture (`withLandBasedPortalProperty`) plus a standalone
+spec file with its own fresh `POST /portal/auth/login` call. It passed
+in isolation. Running the FULL suite made two previously-reliable,
+unrelated specs fail intermittently — `ticket-reply.spec.ts` and
+`rapid-reload-session.spec.ts`'s `'portal: a burst of full page loads
+does not end the session'` test — both stuck on `/portal/login` instead
+of reaching their expected authenticated route.
+
+Root-caused by counting every login call across every existing spec
+file, not guessed: the `portal-auth` throttle bucket (`ttl: 300_000,
+limit: 5`, IP-keyed — Phase 6 commit 1) was already sitting at exactly
+5 logins across the pre-existing suite (`media-gallery.spec.ts` ×2,
+`ticket-reply.spec.ts` ×1, `rapid-reload-session.spec.ts` ×2); the new
+spec's login became the 6th within the same 5-minute window, since the
+whole Playwright suite finishes in under 2 minutes locally — every
+login in the harness genuinely shares that one 5-request budget.
+
+Considered and rejected: raising the production throttle limit to suit
+the test suite (security-relevant, must not be weakened for test
+convenience); `THROTTLE_TEST_KEY_PREFIX` (the mechanism that gives the
+separate Vitest e2e suite per-file throttle isolation — doesn't apply
+here, since Playwright's `webServer` runs ONE shared API process for
+the entire run, not one process per spec file the way Vitest's forked
+model does).
+
+**Fixed by extending an already-authenticated fixture instead of
+adding a new login**: merged the LAND_BASED plot/booking into the
+existing `withPortalTicketSetup` fixture block (same applicant, zero
+new logins), and added the new assertions to `media-gallery.spec.ts`'s
+already-passing, already-authenticated first test rather than a fresh
+spec with its own login. Verified by running the full suite twice
+after the change — 35/35 both times, including the two previously-flaky
+specs now stable.
+
+**Standing rule for any future `apps/e2e` addition that needs a real
+portal session**: do not add a new `POST /portal/auth/login` call if it
+can be avoided. Check whether an existing fixture in `fixtures/seed.ts`
+already produces an authenticated session that can be extended with the
+new data, and add the new assertion into that fixture's own spec's
+already-logged-in flow — exactly the pattern this fix used. Only add a
+genuinely new login when the scenario needs a DIFFERENT identity (a
+different role, a fresh 2FA enrollment, a session that must NOT share
+state with another spec) that structurally cannot reuse an existing
+session — and if so, budget it explicitly against the bucket (5 logins
+already spoken for, per the count above; a 6th consumes the bucket's
+entire remaining headroom for the whole run) rather than discovering
+the ceiling by breaking unrelated specs, the way this session did.

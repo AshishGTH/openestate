@@ -57,6 +57,76 @@ for the full writeup). Three things that entry deliberately left open:
   different people" costs a re-ask later, a wrong auto-merge costs a
   business potentially servicing the wrong person's booking.
 
+## Plotted inventory (plan §14) — three findings from the Phase E walkthrough
+
+Found during Phase E's real-browser LAND_BASED lifecycle walkthrough
+(create project → group → plots → book → receipt → generate documents →
+cancel) on the verification VM, v0.4.0, commit `d118d89`.
+
+**Allotment letter renders "Tower , Floor ," for a LAND_BASED booking.**
+`ALLOTMENT_LETTER`'s `MERGE_FIELD_REGISTRY` entry
+(`packages/shared/src/documents.ts`) includes `towerName`/`floorLabel`;
+`buildLetterContext()` (`apps/api/src/pdf/document.service.ts`) resolves
+both to `''` when the booking's unit has no floor
+(`booking.unit.floor?.tower.name ?? ''`) — a plot has no tower/floor by
+definition. This is NOT a crash and NOT a literal `{{token}}` leak (both
+were explicitly checked, live, against a real generated PDF) — the merge
+resolves cleanly to an empty string, exactly as the code is written to
+do. But a template phrased the way an admin would naturally write one
+("Tower {{towerName}}, Floor {{floorLabel}}") renders with a visible
+blank/dangling-comma gap: confirmed live by generating a real Allotment
+Letter against a real plot booking and reading the PDF directly.
+`DEMAND_LETTER` is unaffected — its own registry entry doesn't include
+`towerName`/`floorLabel` at all, so this is specific to
+`ALLOTMENT_LETTER`. The real fix is conditional merge-field syntax (a
+`{{#if fieldName}}...{{/if}}`-style block that omits a whole
+clause/line when its field(s) are empty) in `resolveMergeFields` and
+`validateTemplateMergeFields` — a genuine templating feature, not a bug
+fix, since the current mechanism is pure string substitution with no
+conditional construct at all. Until built, the workaround lives at the
+template-authoring layer: a company running both HIGH_RISE and
+LAND_BASED projects needs either two separate allotment-letter
+templates or one written to avoid tower/floor phrasing entirely.
+
+**No project delete or deactivate UI exists.** `DELETE /projects/:id`
+(`ProjectController`/`ProjectService.remove()`, a hard
+`tx.project.delete()`) has zero frontend callers anywhere in
+`apps/web` — confirmed by grep of `Projects.tsx` and
+`ProjectDetail.tsx`, not assumed. There is also no deactivate path:
+`Project.isActive` is set at creation but deliberately excluded from
+the edit form (see the `Project.isActive has no enforced meaning
+anywhere` entry above — it's enforced nowhere in the API either). A
+project created by mistake — wrong shape (immutable after creation),
+wrong code, wrong company — cannot be removed or even hidden through
+the product at all; this session's own walkthrough project
+("E2E Land Walkthrough Farms") is now permanently on the demo company's
+project list for exactly this reason, once it acquired a booking. Same
+class of gap as the project-edit gap already fixed this pass (backend
+capability existed, UI never wired it up), and it will bite a real
+pilot user during their own first-time setup — creating a throwaway
+project to learn the screen, or picking the wrong shape by mistake, is
+an entirely ordinary first action. Unblocked by: a Delete Project
+button (with a confirmation, reusing the booking-count-confirmation
+pattern already built for `areaLocationId` edits) for a project with
+zero bookings; for a project with any booking history the button
+should be disabled/explained rather than attempted-and-failed, since
+the ledger's append-only FK protection will very likely reject a hard
+delete once a booking exists (not independently re-verified this
+session — no delete control exists to click — but consistent with
+every other financial-linkage protection this codebase enforces).
+
+**No letter-template delete (or edit/deactivate) UI exists.**
+`apps/web/src/pages/admin/LetterTemplates.tsx` only supports create and
+list — confirmed by reading the file directly, during this walkthrough's
+own cleanup step, after creating two real templates
+("Standard Allotment Letter", "Standard Demand Letter") to generate the
+PDFs above and finding no way to remove them afterward. Every other
+master table in this codebase gets an Active checkbox + PATCH via the
+generic factory pattern (`Masters.tsx`); Letter Templates has its own
+dedicated page that never wired the equivalent in. Cosmetic/tidiness
+gap, not a correctness or security issue. Unblocked by wiring the same
+generic-master PATCH pattern into this page.
+
 ## Must-fix-before-pilot (found on the pre-pilot walkthrough)
 
 Three gaps found walking a realistic project through the real product.
