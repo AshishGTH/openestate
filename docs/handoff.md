@@ -13,7 +13,7 @@ before trusting this table, but as of 2026-08-21:
 
 | Box | IP | User | Role |
 |---|---|---|---|
-| Upgraded / walkthrough | 192.168.1.5 | `newopen` | Long-lived, carries real demo data + upgrade history. IP changed again (was 192.168.1.21, unreachable across 5 attempts on 2026-08-20 — assumed to be the same box moved to a new address within the same /24, not independently re-confirmed this session). SSH method (key vs password) for this address not yet re-verified — check both before assuming the old key-only setup still applies. |
+| Upgraded / walkthrough | 192.168.1.100 | `newopen` | Long-lived, carries real demo data + upgrade history. IP changed again (was 192.168.1.5, confirmed same box — identical SSH host key fingerprint `SHA256:c4scFWfwogyn6lSHSvVAClCA6jXGD0ZEh4x04SGi6tw` — moved within the same /24 on 2026-08-21). Password-auth only via plink (no working key for this session) — see the credentials note below for where the password lives. Currently v0.4.0 (Phase D of plotted-farmhouse-inventory), health endpoint confirmed. |
 | New (fresh install) | 10.50.132.78 | `newopen` | Password-auth only (no key installed yet) — SSH via `plink -ssh -batch -hostkey "<fingerprint>" -pw '<password>' newopen@10.50.132.78`, same `sudo -u postgres` pty requirement as below. Also `sudo-rs`. Verified working end-to-end on 2026-08-20: `git pull` + `upgrade-native.sh` to `99a625e`, and a real-browser live verification of the construction-linked-demand-fix (STAGE_LINKED installment shows "Not yet due" until raised, then the correct computed date). Demo admin `admin@demo-realty.com` password was reset via `reset-admin-password.sh` for that check — rotated since, not recorded here. |
 
 **VM credentials (SSH login password, demo-admin app password) are kept
