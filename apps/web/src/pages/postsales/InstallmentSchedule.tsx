@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatInr } from '@openestate/shared';
 import { api } from '../../lib/api';
 import DataTable, { type Column } from '../../components/DataTable';
@@ -29,7 +29,11 @@ interface PlanVersion {
 
 interface BookingRow {
   brokerId: string | null;
+  status: string;
 }
+
+// Mirrors CANCELLABLE_FROM in apps/api/src/postsales/cancellation.service.ts.
+const CANCELABLE_STATUSES = new Set(['BOOKED', 'ALLOTTED', 'REGISTERED']);
 
 const STATUS_STYLE: Record<string, string> = {
   PAID: 'bg-emerald-50 text-emerald-700',
@@ -40,6 +44,7 @@ const STATUS_STYLE: Record<string, string> = {
 export default function InstallmentSchedule() {
   const { bookingId } = useParams<{ bookingId: string }>();
   const [showHistory, setShowHistory] = useState(false);
+  const qc = useQueryClient();
 
   const { data: versions, isLoading } = useQuery<PlanVersion[]>({
     queryKey: ['plan-history', bookingId],
@@ -66,6 +71,28 @@ export default function InstallmentSchedule() {
       setAccrueMessage((err as Error).message);
     } finally {
       setAccruing(false);
+    }
+  }
+
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelMessage, setCancelMessage] = useState('');
+
+  async function cancelBooking() {
+    setCancelling(true);
+    setCancelMessage('');
+    try {
+      await api(`/bookings/${bookingId}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ cancellationType: 'CANCEL', reason: cancelReason || undefined }),
+      });
+      setCancelMessage('Booking cancelled.');
+      qc.invalidateQueries({ queryKey: ['booking', bookingId] });
+      qc.invalidateQueries({ queryKey: ['plan-history', bookingId] });
+    } catch (err) {
+      setCancelMessage((err as Error).message);
+    } finally {
+      setCancelling(false);
     }
   }
 
@@ -142,6 +169,32 @@ export default function InstallmentSchedule() {
             {accruing ? 'Accruing…' : 'Accrue Broker Commission'}
           </button>
           {accrueMessage && <span className="text-sm text-slate-600">{accrueMessage}</span>}
+        </div>
+      )}
+
+      {booking && CANCELABLE_STATUSES.has(booking.status) && (
+        <div className="mt-4 flex items-center gap-3">
+          <input
+            type="text"
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value)}
+            placeholder="Cancellation reason (optional)"
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          />
+          <button
+            onClick={cancelBooking}
+            disabled={cancelling}
+            className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+          >
+            {cancelling ? 'Cancelling…' : 'Cancel Booking'}
+          </button>
+          {cancelMessage && <span className="text-sm text-slate-600">{cancelMessage}</span>}
+        </div>
+      )}
+
+      {booking?.status === 'CANCELLED' && (
+        <div className="mt-4 rounded-md bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-600">
+          This booking has been cancelled.
         </div>
       )}
 
