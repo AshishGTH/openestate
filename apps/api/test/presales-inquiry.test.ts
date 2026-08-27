@@ -11,6 +11,7 @@ import { InquiryService } from '../src/presales/inquiry.service';
 import { CustomFieldsService } from '../src/custom-fields/custom-fields.service';
 import { AssignmentService } from '../src/presales/assignment.service';
 import { InquiryImportService } from '../src/presales/inquiry-import.service';
+import { LeadStageTransitionService } from '../src/presales/lead-stage-transition.service';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -42,8 +43,15 @@ describeIf('Inquiry role scoping and import', () => {
       // call site already passed only four arguments.
       undefined as never,
       new CustomFieldsService(tenantPrisma, systemPrisma),
+      new LeadStageTransitionService(),
     );
-    importService = new InquiryImportService(tenantPrisma);
+    // assignmentService/leadStageTransition were previously omitted here
+    // entirely (assignmentService undefined) — this file's own rows never
+    // carry a projectId, so autoAssign() was never reached. Passing the
+    // already-constructed assignmentService now costs nothing and is more
+    // correct; leadStageTransition is newly required (every row now
+    // resolves/logs a stage, unconditionally, unlike assignment).
+    importService = new InquiryImportService(tenantPrisma, assignmentService, new LeadStageTransitionService());
 
     const company = await systemPrisma.company.create({
       data: { name: 'Scope Test Co', slug: `scope-test-${Date.now()}` },
@@ -67,6 +75,15 @@ describeIf('Inquiry role scoping and import', () => {
     await systemPrisma.applicant.deleteMany({ where: { companyId } });
     await systemPrisma.user.deleteMany({ where: { companyId } });
     await systemPrisma.role.deleteMany({ where: { companyId } });
+    // This fixture never seeds lead stages itself — but under a
+    // full-suite run, syncLeadStages' deliberately unscoped
+    // company.findMany() (packages/db/prisma/sync-permissions.ts) can
+    // race in and seed both a CompanyConfig row and 6 LeadStage rows for
+    // this company too, if a sync test happens to run concurrently.
+    // Delete both unconditionally so the company delete below never
+    // depends on that race.
+    await systemPrisma.leadStage.deleteMany({ where: { companyId } });
+    await systemPrisma.companyConfig.deleteMany({ where: { companyId } });
     await systemPrisma.company.delete({ where: { id: companyId } });
     await systemPrisma.$disconnect();
     await tenantPrisma.$disconnect();

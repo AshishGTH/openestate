@@ -69,6 +69,15 @@ describeIf('refresh-token rotation: reuse grace window', () => {
     await prisma.refreshToken.deleteMany({ where: { userId } });
     await prisma.user.deleteMany({ where: { companyId } });
     await prisma.role.deleteMany({ where: { companyId } });
+    // This fixture never seeds lead stages itself — but under a
+    // full-suite run, syncLeadStages' deliberately unscoped
+    // company.findMany() (packages/db/prisma/sync-permissions.ts) can
+    // race in and seed both a CompanyConfig row and 6 LeadStage rows for
+    // this company too, if a sync test happens to run concurrently.
+    // Delete both unconditionally so the company delete below never
+    // depends on that race.
+    await prisma.leadStage.deleteMany({ where: { companyId } });
+    await prisma.companyConfig.deleteMany({ where: { companyId } });
     await prisma.company.delete({ where: { id: companyId } });
     await prisma.$disconnect();
   });

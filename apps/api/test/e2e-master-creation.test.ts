@@ -209,6 +209,16 @@ const MASTER_CASES: MasterCase[] = [
     },
     assertExtra: (b) => expect(b.entityType).toBe('ALLOTMENT_LETTER'),
   },
+  // Bespoke module (Phase 0 of feature-completion-plan.md), not a
+  // SIMPLE_MASTERS entry — no `description` field at all (createLeadStageSchema
+  // is .strict() with only name/sortOrder/isActive/isDefault), unlike every
+  // simpleBase() case above.
+  {
+    label: 'LeadStage',
+    path: 'lead-stages',
+    payload: { name: `E2E Stage ${TAG}`, sortOrder: 1, isActive: true, isDefault: false },
+    assertExtra: (b) => expect(b.isDefault).toBe(false),
+  },
 ];
 
 describeIf('e2e master/admin-entity creation: real HTTP through the full guard pipeline', () => {

@@ -9,6 +9,7 @@ import { FollowUpService } from '../src/presales/follow-up.service';
 import { CustomFieldsService } from '../src/custom-fields/custom-fields.service';
 import { InquiryService } from '../src/presales/inquiry.service';
 import { AssignmentService } from '../src/presales/assignment.service';
+import { LeadStageTransitionService } from '../src/presales/lead-stage-transition.service';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -39,6 +40,7 @@ describeIf('Follow-ups: timeline, site visit, my day', () => {
       // call site already passed only four arguments.
       undefined as never,
       new CustomFieldsService(tenantPrisma, systemPrisma),
+      new LeadStageTransitionService(),
     );
     followUpService = new FollowUpService(tenantPrisma, systemPrisma, inquiryService);
 
@@ -62,6 +64,15 @@ describeIf('Follow-ups: timeline, site visit, my day', () => {
     await systemPrisma.applicant.deleteMany({ where: { companyId } });
     await systemPrisma.user.deleteMany({ where: { companyId } });
     await systemPrisma.role.deleteMany({ where: { companyId } });
+    // This fixture never seeds lead stages itself — but under a
+    // full-suite run, syncLeadStages' deliberately unscoped
+    // company.findMany() (packages/db/prisma/sync-permissions.ts) can
+    // race in and seed both a CompanyConfig row and 6 LeadStage rows for
+    // this company too, if a sync test happens to run concurrently.
+    // Delete both unconditionally so the company delete below never
+    // depends on that race.
+    await systemPrisma.leadStage.deleteMany({ where: { companyId } });
+    await systemPrisma.companyConfig.deleteMany({ where: { companyId } });
     await systemPrisma.company.delete({ where: { id: companyId } });
     await systemPrisma.$disconnect();
     await tenantPrisma.$disconnect();

@@ -12,6 +12,7 @@ import {
   withTenantTx,
   runWithTenant,
 } from '../src/index';
+import { deleteCompaniesSafely } from './helpers/delete-company-safely';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -150,9 +151,10 @@ describeIf('Inventory tenant isolation (RLS)', () => {
     await systemPrisma.$executeRaw`
       DELETE FROM audit_logs WHERE company_id IN (${companyAId}::uuid, ${companyBId}::uuid)
     `;
-    await systemPrisma.company.deleteMany({
-      where: { id: { in: [companyAId, companyBId] } },
-    });
+    // Retries on syncLeadStages' own race — see delete-company-safely.ts's
+    // doc comment for the exact mechanism (a single delete-then-delete
+    // sequence is not enough).
+    await deleteCompaniesSafely(systemPrisma, [companyAId, companyBId]);
     await systemPrisma.$disconnect();
     await (tenantPrisma as PrismaClient).$disconnect();
   });

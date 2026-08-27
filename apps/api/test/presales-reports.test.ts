@@ -43,6 +43,15 @@ describeIf('Presales reports: ageing buckets + funnel reconciliation', () => {
   afterAll(async () => {
     await systemPrisma.inquiry.deleteMany({ where: { companyId } });
     await systemPrisma.applicant.deleteMany({ where: { companyId } });
+    // This fixture never seeds lead stages itself — but under a
+    // full-suite run, syncLeadStages' deliberately unscoped
+    // company.findMany() (packages/db/prisma/sync-permissions.ts) can
+    // race in and seed both a CompanyConfig row and 6 LeadStage rows for
+    // this company too, if a sync test happens to run concurrently.
+    // Delete both unconditionally so the company delete below never
+    // depends on that race.
+    await systemPrisma.leadStage.deleteMany({ where: { companyId } });
+    await systemPrisma.companyConfig.deleteMany({ where: { companyId } });
     await systemPrisma.company.delete({ where: { id: companyId } });
     await systemPrisma.$disconnect();
   });
@@ -131,6 +140,9 @@ describeIf('Presales reports: ageing buckets + funnel reconciliation', () => {
     afterAll(async () => {
       await systemPrisma.inquiry.deleteMany({ where: { companyId: funnelCompanyId } });
       await systemPrisma.applicant.deleteMany({ where: { companyId: funnelCompanyId } });
+      // See the outer afterAll's comment above — same syncLeadStages race.
+      await systemPrisma.leadStage.deleteMany({ where: { companyId: funnelCompanyId } });
+      await systemPrisma.companyConfig.deleteMany({ where: { companyId: funnelCompanyId } });
       await systemPrisma.company.delete({ where: { id: funnelCompanyId } });
     });
 

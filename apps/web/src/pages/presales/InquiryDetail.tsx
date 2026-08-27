@@ -10,6 +10,7 @@ import {
 interface Inquiry {
   id: string;
   status: string;
+  stageId: string | null;
   applicant: {
     id: string;
     name: string;
@@ -62,6 +63,7 @@ export default function InquiryDetailPage() {
   const [assignError, setAssignError] = useState('');
 
   const [statusError, setStatusError] = useState('');
+  const [stageError, setStageError] = useState('');
 
   const { data: inquiry } = useQuery<Inquiry>({
     queryKey: ['inquiry', id],
@@ -83,6 +85,11 @@ export default function InquiryDetailPage() {
   const { data: users } = useQuery<{ data: UserOption[] }>({
     queryKey: ['users', 'all'],
     queryFn: () => api('/users?page=1&limit=100'),
+  });
+
+  const { data: leadStages } = useQuery<{ data: MasterOption[] }>({
+    queryKey: ['masters', 'lead-stages', 'all'],
+    queryFn: () => api('/masters/lead-stages?limit=100'),
   });
 
   const handleAddFollowUp = async () => {
@@ -132,6 +139,22 @@ export default function InquiryDetailPage() {
     }
   };
 
+  const handleStageChange = async (stageId: string) => {
+    // "No stage" (value="") only ever reflects an inquiry that has no
+    // stage yet — it isn't a selectable target. updateInquirySchema's
+    // stageId is deliberately never nullable (a lead's stage is only
+    // ever moved, never cleared once set — see LeadStage's own doc
+    // comment), so submitting an empty string would just 400.
+    if (stageId === '') return;
+    setStageError('');
+    try {
+      await api(`/inquiries/${id}`, { method: 'PATCH', body: JSON.stringify({ stageId }) });
+      qc.invalidateQueries({ queryKey: ['inquiry', id] });
+    } catch (err) {
+      setStageError((err as Error).message);
+    }
+  };
+
   if (!inquiry) return <div className="text-slate-500">Loading…</div>;
 
   return (
@@ -156,6 +179,21 @@ export default function InquiryDetailPage() {
           ))}
         </div>
         {statusError && <p className="mt-2 text-sm text-red-600">{statusError}</p>}
+      </section>
+
+      <section className="mt-4">
+        <label className="block text-sm font-medium text-slate-700">Stage</label>
+        <select
+          value={inquiry.stageId ?? ''}
+          onChange={(e) => handleStageChange(e.target.value)}
+          className="mt-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+        >
+          <option value="">No stage</option>
+          {leadStages?.data?.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+        {stageError && <p className="mt-2 text-sm text-red-600">{stageError}</p>}
       </section>
 
       <section className="mt-6" data-testid="inquiry-custom-field-display">

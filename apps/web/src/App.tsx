@@ -15,6 +15,7 @@ import RoleForm from './pages/admin/RoleForm';
 import MastersPage from './pages/admin/Masters';
 import CustomFieldsPage from './pages/admin/CustomFields';
 import LetterTemplatesPage from './pages/admin/LetterTemplates';
+import LeadStagesPage from './pages/admin/LeadStages';
 import CompanyConfigPage from './pages/admin/CompanyConfig';
 import AuditLogPage from './pages/admin/AuditLog';
 import BookingWizard from './pages/postsales/BookingWizard';
@@ -56,6 +57,7 @@ export default function App() {
             <Route path="admin/masters" element={<RequirePermission perm={PERMISSIONS.ADMIN_MASTER_READ}><MastersPage /></RequirePermission>} />
             <Route path="admin/custom-fields" element={<RequirePermission perm={PERMISSIONS.ADMIN_CUSTOM_FIELD_READ}><CustomFieldsPage /></RequirePermission>} />
             <Route path="admin/letter-templates" element={<RequirePermission perm={PERMISSIONS.ADMIN_MASTER_READ}><LetterTemplatesPage /></RequirePermission>} />
+            <Route path="admin/lead-stages" element={<RequirePermission perm={PERMISSIONS.ADMIN_MASTER_READ}><LeadStagesPage /></RequirePermission>} />
             <Route path="admin/config" element={<RequirePermission perm={PERMISSIONS.ADMIN_CONFIG_READ}><CompanyConfigPage /></RequirePermission>} />
             <Route path="admin/audit" element={<RequirePermission perm={PERMISSIONS.ADMIN_AUDIT_READ}><AuditLogPage /></RequirePermission>} />
             <Route path="admin/plugins" element={<RequirePermission perm={PERMISSIONS.ADMIN_PLUGIN_READ}><PluginsPage /></RequirePermission>} />

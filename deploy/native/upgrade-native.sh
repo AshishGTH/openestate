@@ -150,13 +150,57 @@ rm -f "$MIGRATE_LOG"
 # early the moment any company exists, which is every install after its
 # first boot) — so without this, a release that adds a permission and a
 # UI gated on it would upgrade clean and heal nothing: no role could
-# ever be granted a permission row that was never inserted. This step is
-# scoped to permissions only (see sync-permissions.ts's own comment for
-# why roles/masters are deliberately excluded — both are per-company
-# data an admin may have already customised).
-log "Syncing permission rows added since the previous release..."
+# ever be granted a permission row that was never inserted. This step
+# also syncs any brand-new master TYPE gated by its own one-time
+# CompanyConfig marker (currently: LeadStage, via
+# CompanyConfig.leadStagesSeededAt) — deliberately NOT extended to
+# rows within an EXISTING master's list, nor to roles: both are
+# per-company data an admin may have already customised (see
+# sync-permissions.ts's own comments for the full reasoning on each).
+log "Syncing permission rows and any newly-added seeded master types..."
+# Same tee-to-a-log discipline as the migration step above, and for the
+# same reason: capture the output so a specific, known outcome can be
+# told apart from a generic failure and handled differently, without
+# losing live visibility in the terminal. `set -o pipefail` (top of this
+# script) is what makes `$?` right after the pipe reflect sync-
+# permissions.ts's own exit code rather than tee's.
+#
+# sync-permissions.ts's CLI entrypoint uses THREE exit codes (see its
+# own comment at the require.main===module block): 0 clean, 1 hard
+# failure, 2 completed-but-skipped-something. Only 1 is treated as fatal
+# here — a skip (2) is a narrow, near-impossible-in-production,
+# single-company edge case (see sync-permissions.ts's
+# isForeignKeyViolation doc comment), and this step is NOT the last one
+# in this script: cutover and the healthcheck both still run after it.
+# Dying here on a skip would abort the ENTIRE upgrade, for every
+# company, before cutover, over one company's edge case — worse than the
+# skip itself. Instead: let the rest of the sequence proceed, and report
+# it in an unmissable block at the very end of a successful run (below),
+# with a non-zero final exit so scripted/monitored upgrades still see a
+# signal — without leaving a half-applied upgrade stuck mid-sequence.
+SYNC_LOG="$(mktemp)"
+SYNC_STATUS=0
+# `SYNC_STATUS=$?` on the right of `||`, NOT `if ! pipeline; then
+# SYNC_STATUS=$?; fi` — verified directly (not assumed) that the `!`
+# form does NOT work for this: `!` negates the pipeline's status before
+# the `if` sees it, and `$?` inside that `then` block reflects the
+# ALREADY-NEGATED value (always 0 for any failure), not the real exit
+# code — which would have silently collapsed every SYNC_STATUS to 0,
+# defeating the whole point of distinguishing exit codes 1 vs 2 here.
+# The `||` form's right-hand side only runs on real failure and captures
+# the real, un-negated `$?` — confirmed under `set -e`+`pipefail` before
+# relying on it.
 run_as_superuser "${RELEASE_DIR}/api/node_modules/.bin/tsx" "${RELEASE_DIR}/api/packages/db/prisma/sync-permissions.ts" \
-  || die "Permission sync failed. Previous release (${PREVIOUS_RELEASE}) is untouched and still running. Inspect the backup taken above before retrying."
+  2>&1 | tee "$SYNC_LOG" || SYNC_STATUS=$?
+rm -f "$SYNC_LOG"
+
+SYNC_HAD_SKIPS=0
+if [ "$SYNC_STATUS" -eq 2 ]; then
+  warn "Permission sync completed but skipped one or more entities that vanished mid-sync — see the SYNC COMPLETED WITH ... block above. Continuing to cutover (this is a narrow, near-impossible-in-production edge case, not a reason to hold back the release) — this will be reported again, prominently, at the end of this run."
+  SYNC_HAD_SKIPS=1
+elif [ "$SYNC_STATUS" -ne 0 ]; then
+  die "Permission sync failed. Previous release (${PREVIOUS_RELEASE}) is untouched and still running. Inspect the backup taken above before retrying."
+fi
 
 log "Cutting over to the new release..."
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
@@ -172,4 +216,17 @@ else
   chown -h "${APP_USER}:${APP_GROUP}" "$CURRENT_LINK"
   systemctl restart openestate-api
   die "Rolled back to ${PREVIOUS_RELEASE}. The database schema migration was NOT rolled back (migrations are forward-only) — if you suspect the migration itself broke something, inspect the pre-upgrade backup and involve a human before doing anything destructive. Check: journalctl -u openestate-api -n 200"
+fi
+
+if [ "$SYNC_HAD_SKIPS" -eq 1 ]; then
+  warn ""
+  warn "================================================================"
+  warn "UPGRADE SUCCEEDED, but the permission/lead-stage sync earlier in"
+  warn "this run skipped one or more companies — see the warnings above."
+  warn "This should be near-impossible in production (it means a company"
+  warn "vanished mid-sync). Investigate, then simply re-run this script —"
+  warn "every step here, including the sync, is safe to run again."
+  warn "================================================================"
+  warn ""
+  exit 1
 fi

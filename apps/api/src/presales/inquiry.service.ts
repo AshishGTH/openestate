@@ -21,6 +21,7 @@ import { CLOCK } from '../common/clock.provider';
 import { AssignmentService } from './assignment.service';
 import { ApplicantService } from './applicant.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
+import { LeadStageTransitionService } from './lead-stage-transition.service';
 
 export interface InquiryScope {
   /**
@@ -61,6 +62,7 @@ export class InquiryService {
     private readonly assignmentService: AssignmentService,
     private readonly applicantService: ApplicantService,
     private readonly customFields: CustomFieldsService,
+    private readonly leadStageTransition: LeadStageTransitionService,
   ) {}
 
   async findAll(companyId: string, query: PaginationQuery, scope: InquiryScope) {
@@ -238,6 +240,7 @@ export class InquiryService {
           }
         }
 
+        const resolvedStageId = await this.leadStageTransition.resolveInitialStage(tx, companyId, dto.stageId);
         const inquiry = await tx.inquiry.create({
           data: {
             companyId,
@@ -249,12 +252,14 @@ export class InquiryService {
             budgetMaxPaise: dto.budgetMaxPaise,
             preferredUnitTypeId: dto.preferredUnitTypeId,
             temperatureId: dto.temperatureId,
+            stageId: resolvedStageId,
             nextFollowupAt: dto.nextFollowupAt,
             createdById,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             customFields: inquiryCustomFields as any,
           },
         });
+        await this.leadStageTransition.writeStageTransition(tx, companyId, inquiry.id, null, resolvedStageId, createdById);
 
         // Creator-retains-lead policy (default on): a rep's own inquiry
         // must never silently move to someone else via round-robin.
@@ -352,14 +357,19 @@ export class InquiryService {
           applicantId = created.id;
         }
 
+        const resolvedStageId = await this.leadStageTransition.resolveInitialStage(tx, companyId, undefined);
         const inquiry = await tx.inquiry.create({
           data: {
             companyId,
             applicantId,
             projectId: lead.projectId,
+            stageId: resolvedStageId,
             customFields: lead.note ? { leadNote: lead.note } : undefined,
           },
         });
+        // No human actor for machine-driven intake — same reasoning as
+        // this method's assignmentType: 'auto'/actorId: null below.
+        await this.leadStageTransition.writeStageTransition(tx, companyId, inquiry.id, null, resolvedStageId, null);
 
         if (lead.projectId) {
           const assignedToId = await this.assignmentService.autoAssign(tx, companyId, lead.projectId);
@@ -376,7 +386,13 @@ export class InquiryService {
     );
   }
 
-  async update(companyId: string, id: string, dto: UpdateInquiryDto, scope: InquiryScope) {
+  async update(
+    companyId: string,
+    id: string,
+    dto: UpdateInquiryDto,
+    scope: InquiryScope,
+    actorId: string,
+  ) {
     const existing = await this.findOne(companyId, id, scope);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any = { ...dto };
@@ -403,10 +419,30 @@ export class InquiryService {
         (existing as { customFields?: Record<string, unknown> | null }).customFields ?? null,
       );
     }
+    const existingStageId = (existing as { stageId: string | null }).stageId;
+    const stageChanged = dto.stageId !== undefined && dto.stageId !== existingStageId;
+
     return runWithTenant({ companyId }, () =>
-      withTenantTx(this.tenantPrisma, companyId, (tx) =>
-        tx.inquiry.update({ where: { id }, data }),
-      ),
+      withTenantTx(this.tenantPrisma, companyId, async (tx) => {
+        // RLS filters reads, not a client-supplied FK on write — must be
+        // checked before the update() call actually persists it, not
+        // after. See LeadStageTransitionService.assertStageBelongsToCompany.
+        if (stageChanged) {
+          await this.leadStageTransition.assertStageBelongsToCompany(tx, companyId, dto.stageId!);
+        }
+        const updated = await tx.inquiry.update({ where: { id }, data });
+        if (stageChanged) {
+          await this.leadStageTransition.writeStageTransition(
+            tx,
+            companyId,
+            id,
+            existingStageId,
+            dto.stageId!,
+            actorId,
+          );
+        }
+        return updated;
+      }),
     );
   }
 
