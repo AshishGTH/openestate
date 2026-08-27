@@ -81,18 +81,54 @@ password, no pty) works for the OUTER sudo call only; it does not help
 the inner ones.
 
 The source checkout lives at `/opt/openestate-src`
-(`git remote` → `https://github.com/AshishGTH/openestate.git`),
-**root-owned** (from the documented `sudo git clone`) — `git pull` as
-the regular SSH user fails with `Permission denied` on `.git/FETCH_HEAD`.
-Pull as root instead: `sudo git pull origin master` (needs the same
-`ssh -tt` + piped-password treatment as any other sudo call here).
-`upgrade-native.sh` builds and deploys FROM that checkout; it does not
-pull for you — do this first.
+(`git remote` → `https://github.com/AshishGTH/openestate.git`).
+**Now owned by `newopen`, not root** — was root-owned from the original
+`sudo git clone` (making `git pull` as the regular SSH user fail with
+`Permission denied` on `.git/FETCH_HEAD`, and `pnpm install`/`pnpm build`
+as `newopen` fail with EACCES against root-owned `node_modules`/`dist`
+build artifacts from earlier root-run production builds), `chown -R
+newopen:newopen /opt/openestate-src` was run during the `scripts/
+test-setup.sh` verification session (2026-08-23, see CLAUDE.md's
+decisions log entry for that session) specifically because that
+verification needed a normal, unprivileged `pnpm install`/`build`/`prisma
+generate` to work the way a real contributor's checkout would — plain
+`git pull`, `pnpm build`, etc. now work as `newopen`, no `sudo` needed for
+any of that. **`upgrade-native.sh` itself still needs `sudo`** (it writes
+to `/opt/openestate/releases`, `/etc/openestate`, and calls `systemctl` —
+none of that changed) — only the SOURCE checkout's own ownership changed.
+As of the same session: uncommitted, at `d118d89` (working tree carries
+~100+ changed paths — Docker removal plus lead-stage-foundation work —
+none of it pushed to origin, this is the SAME uncommitted state as the
+Windows dev machine this session ran from, synced over via `pscp`, not a
+`git pull`). `upgrade-native.sh` builds and deploys FROM that checkout; it
+does not pull for you.
 
 Native-install layout: deployed release symlink at
 `/opt/openestate/current` → `/opt/openestate/releases/<timestamp>-<sha>`;
 env file at `/etc/openestate/openestate.env`; nginx serves the built
 frontends. Health: `curl -s http://localhost/api/v1/health`.
+
+**192.168.1.100's system clock is ~4 days behind and NTP sync is failing**
+(`timedatectl` reports `System clock synchronized: no`; confirmed by
+`date` reading several days earlier than the box's own RTC/hardware
+clock). Found 2026-08-23, not fixed — `hwclock --hctosys` / `timedatectl
+set-ntp` are system-settings changes Claude sessions are not permitted to
+make; this needs a human (or `sudo timedatectl set-ntp true` re-run once
+whatever's blocking outbound NTP is fixed — unconfirmed whether that's a
+firewall rule, a stopped `chronyd`/`systemd-timesyncd`, or something
+else). **Concrete effect**: any TLS handshake to a server whose
+certificate's "not before" date is more recent than the drifted clock
+fails with `CERT_NOT_YET_VALID` — hit corepack's `registry.npmjs.org`
+fetch this way (worked around: root's already-cached corepack pnpm build
+copied to `newopen`'s cache); `cdn.playwright.dev` was unaffected (its
+cert chain tolerated the drift). Two CPU cores total, and the live
+production `openestate-api` service runs concurrently with anything else
+on this box — full `pnpm test` runs here hit real resource-contention
+timeouts that don't reproduce on a better-provisioned machine or in
+isolated per-file runs; see CLAUDE.md's `scripts/test-setup.sh`
+verification entry (2026-08-23) for the full read on which failures are
+contention vs. real bugs, before assuming a full-suite red run here means
+a regression.
 
 Browser automation against these VMs: the Browser pane's per-site
 approval gate has repeatedly blocked real-browser checks here across

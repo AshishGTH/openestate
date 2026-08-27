@@ -177,7 +177,7 @@ this is a log, not a design doc.
   differ per route. `nestjs-zod`'s `createZodDto` + global
   `ZodValidationPipe` gets the "global zod validation pipe" behavior
   the phase spec actually asked for. DTOs must use `.strict()` to get
-  the whitelist-unknown-fields behavior CLAUDE.md requires.
+  the whitelist-unknown-fields behavior AGENTS.md requires.
 - **`@nestjs/config` added even though Phase 0's spec didn't list it.**
   Without it, `.env` is only read by Docker Compose (which injects env
   vars directly); `pnpm dev` outside Docker had no way to load
@@ -199,7 +199,7 @@ this is a log, not a design doc.
   source files between full rebuilds — acceptable in dev, irrelevant
   in Docker/CI where the image is built fresh every time.
 - **Docker base images pinned by tag (`postgres:16-alpine`, etc.), not
-  by sha256 digest**, despite CLAUDE.md's "pinned Docker base images"
+  by sha256 digest**, despite AGENTS.md's "pinned Docker base images"
   rule. No verified way to confirm real digests without risking a
   fabricated/stale hash in a file meant to gate what actually runs.
   Revisit in Phase 8's security pass once there's a way to pull and
@@ -967,7 +967,7 @@ this is a log, not a design doc.
   then attach via `@UseGuards()` only on the specific routes that need
   them — staff routes are structurally unreachable by either bucket. Both
   use the package's in-memory storage (matching the existing staff
-  default bucket, not the Redis store CLAUDE.md's rules call for);
+  default bucket, not the Redis store AGENTS.md's rules call for);
   tracked in `docs/todo.md`, not silently done or silently skipped.
 - **Invite consumption re-issues credentials for an existing portal
   `User` rather than always creating a new one.** If staff re-invites an
@@ -1359,7 +1359,7 @@ this is a log, not a design doc.
   for `DEMAND_LETTER` only, `ConstructionUpdateService.create`,
   `TicketService.addMessage` for staff replies only,
   `CommissionPaymentService.pay`) fire strictly AFTER their transaction
-  commits — CLAUDE.md's Phase 1 "no external I/O inside `withTenantTx`"
+  commits — AGENTS.md's Phase 1 "no external I/O inside `withTenantTx`"
   rule applies to `provider.send()` exactly as it does to email/SMS/S3.
 
 - **Real bug, caught by the portal-read rate-limit test required by this
@@ -3302,7 +3302,7 @@ mutation can ever succeed, and no session can ever survive a page
 reload.
 
 This had been invisible for the project's entire history. Every prior
-"VM verification" (this session and, per the CLAUDE.md entries above,
+"VM verification" (this session and, per the AGENTS.md entries above,
 at least four before it) used curl or wget against the VM directly —
 neither enforces the Secure-cookie-requires-HTTPS rule, so neither
 could ever have caught this. The Browser pane's per-site approval gate
@@ -3805,7 +3805,7 @@ correct), Account (balance ₹20,00,000, next-due installment, cost
 breakup, payment plan, payment history, and a Documents list correctly
 filtered to STATEMENT/RECEIPT/DEMAND_LETTER only — confirmed
 deliberate via `document.service.ts`'s `listForPortal` filter and its
-"CLAUDE.md Phase 6" comment, not a bug — ALLOTMENT_LETTER and
+"AGENTS.md Phase 6" comment, not a bug — ALLOTMENT_LETTER and
 REMINDER_LETTER are intentionally staff-only), Support (created the
 missing Ticket Categories master, raised a real "Leaking tap in
 kitchen" query, confirmed it appears with status OPEN and the correct
@@ -4475,8 +4475,8 @@ install only, never an existing one" shape.
   inherits that row's isolation entirely: zero new tables, zero new
   policies, zero new registrations, and no new portal-scope analysis.
   EAV would have needed all four — and that is exactly the surface
-  where Phase 6 found two real IDOR-class bugs. CLAUDE.md principle 5
-  permits either ("EAV/JSONB per entity"), and CLAUDE.md's own
+  where Phase 6 found two real IDOR-class bugs. AGENTS.md principle 5
+  permits either ("EAV/JSONB per entity"), and AGENTS.md's own
   `cleanupCompany` note already asserted values "live inline as JSON on
   each entity," so EAV would have invalidated a documented assumption
   too. The honest cost is real: JSONB values are untyped at the SQL

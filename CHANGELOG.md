@@ -5,6 +5,39 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Removed
+
+- **Docker is gone as an install path.** `deploy/docker-compose.yml`, the
+  three Dockerfiles under `deploy/docker/`, `deploy/.env.example`,
+  `deploy/nginx/*.conf` and `.dockerignore` are deleted, along with CI's
+  container-build job and Dependabot's `docker` ecosystem entry.
+  OpenEstate installs natively — `sudo ./deploy/native/install-native.sh`
+  against a PostgreSQL/Redis/nginx you run yourself — which has been the
+  only supported production path since native install became primary; the
+  container stack had already been demoted to unsupported contributor
+  tooling and is now removed rather than left to rot untested.
+  **If you are still running the old Docker Compose stack**, nothing in
+  this release touches a running container and nothing is removed from
+  your server — but that stack will receive no further updates. Migrate
+  by standing up a native install against the same database
+  (`install-native.sh --skip-database` if your PostgreSQL is already
+  provisioned) and pointing your reverse proxy at it.
+- **Docker is gone from the repo entirely, including for tests.**
+  `deploy/docker-compose.test.yml` and `deploy/docker/init-db/` are
+  deleted too — no Dockerfile or Compose file exists anywhere in this
+  project now. `scripts/test-setup.sh` provisions the test database
+  against a PostgreSQL you already run, delegating role creation to
+  `deploy/native/setup-database.sh` (the same script a real install
+  uses) and writing a `.test-env` you `source` before `pnpm test`.
+  Test Postgres/Redis moved from 5433/6380 to the standard 5432/6379,
+  since the odd ports only ever existed to avoid colliding with the
+  host's own services from inside a container. Two guards come with it:
+  the script refuses to run on a cluster that also holds a database
+  named `openestate` (the `openestate_app`/`openestate_system` roles
+  are cluster-wide and shared with a real install — override with
+  `TEST_ALLOW_SHARED_CLUSTER=1`), and `teardown` drops only a database
+  whose name ends in `_test`, never the roles.
+
 ### Fixed
 
 - **Correctness bug: construction-linked payment plans could show a
