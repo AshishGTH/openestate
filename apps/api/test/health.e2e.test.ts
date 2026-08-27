@@ -10,7 +10,7 @@ import { INestApplication } from '@nestjs/common';
 import { HealthController } from '../src/health/health.controller';
 
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
-const REDIS_URL = process.env.REDIS_TEST_URL ?? 'redis://localhost:6380';
+const REDIS_URL = process.env.REDIS_TEST_URL ?? 'redis://localhost:6379';
 
 const shouldRun = !!SYSTEM_URL;
 

@@ -19,3 +19,4 @@ deploy/backups/
 apps/e2e/playwright-report/
 apps/e2e/test-results/
 apps/e2e/.fixture-state.json
+.test-env

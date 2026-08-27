@@ -20,7 +20,7 @@ import { makeClients, seedCompany, makeApplicant, makePortalRole, cleanupCompany
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
-const REDIS_TEST_URL = process.env.REDIS_TEST_URL ?? 'redis://localhost:6380';
+const REDIS_TEST_URL = process.env.REDIS_TEST_URL ?? 'redis://localhost:6379';
 const describeIf = APP_URL && SYSTEM_URL ? describe : describe.skip;
 
 function newRedis() {

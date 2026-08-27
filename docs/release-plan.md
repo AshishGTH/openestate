@@ -177,9 +177,9 @@ caught:
 ### Built: a small Playwright suite against the real dev stack
 
 Reuse what already exists rather than add a parallel mocking layer:
-this project already runs a disposable test Postgres
-(`scripts/test-setup.sh` / `deploy/docker-compose.test.yml`) and a
-culture of real through-the-wire backend tests. The harness is
+this project already has a one-command test-database setup
+(`scripts/test-setup.sh`) and a culture of real through-the-wire
+backend tests. The harness is
 **Playwright driving the real `apps/web` Vite dev server against that
 same test Postgres and the real NestJS API, served over plain HTTP** —
 deliberately not HTTPS, so it reproduces the VM's actual default and
