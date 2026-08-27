@@ -4,6 +4,71 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## Two known-timing-sensitive test failures, not re-investigated (contention-class, evidence already in hand)
+
+Found in a real full-`pnpm test` run on the walkthrough VM (2 CPU cores,
+live production traffic sharing the box — see CLAUDE.md's `scripts/
+test-setup.sh` verification entry for the full context): `e2e-portal-
+throttle.test.ts`'s "throttle state survives a fresh app instance" test and
+`webhook-delivery.test.ts`'s "N concurrent exhausted deliveries produce
+exactly N counted failures" test both failed, once each, in that run only.
+
+**Why not chased further**: both are pre-existing tests whose own names
+describe exactly the kind of race/timing assertion this project's history
+(Phase 7→8, Phase-0-follow-up) already treats as expected to flake under
+real resource contention, not something to re-diagnose from a single
+occurrence. The same session's isolated re-runs of three OTHER files that
+failed in the same full run (`e2e-master-creation`, `e2e-tickets`,
+`presales-reports`) all passed cleanly once contention was removed,
+which is the standard diagnostic this project uses to tell "real bug"
+from "contention flake" — that evidence was judged sufficient without
+repeating it for these two as well.
+
+**What would actually close this**: re-run each of these two files in
+isolation (not the full suite) two or three times; if they pass every
+time, that confirms contention and this entry can be deleted; if either
+fails again in isolation, it is real and needs its own investigation.
+
+## Guard on `scripts/test-setup.sh`'s "differently-named production database" case — verified by direct SQL only, not by full reproduction
+
+The script's shared-cluster guard was strengthened to check for existing
+`openestate_app`/`openestate_system` roles (cluster-wide) in addition to a
+database literally named `openestate` — closing the gap where a
+production install using `deploy/native/setup-database.sh --db
+<other-name>` was reachable and undetected. The underlying `pg_roles`
+existence queries were verified directly against a real cluster, and the
+new check was confirmed not to interfere with the normal (super-role-
+already-exists) path via a live re-run.
+
+**What was NOT done**: an actual end-to-end reproduction of "a production
+install on a differently-named database, then run test-setup.sh with no
+override, confirm it refuses." The only VM available for this session's
+verification already uses the default `openestate` name for its real
+install, so that exact scenario couldn't be constructed without either a
+second cluster or renaming/disrupting the live one. If a second
+throwaway Postgres instance is ever available, this is the one thing
+left to prove that hasn't been.
+
+## `ci.yml`'s `scripts/test-setup.sh` wiring — not verified by an actual GitHub Actions run
+
+`integration-tests` now calls `scripts/test-setup.sh` (with
+`TEST_PG_ADMIN_USER=openestate_super`/`PGPASSWORD` routing it into TCP
+mode against the service container) instead of carrying a second,
+hand-maintained copy of the same role/migrate/seed SQL. Validated by YAML
+parse, step-order inspection, and tracing the exact code path the script
+takes in TCP mode against known-good behavior verified elsewhere in the
+same session — but not by an actual push. Creating a throwaway
+non-`postgres`-named superuser role to structurally rehearse the
+container-admin shape locally was blocked by the same system-settings-
+adjacent safety boundary that blocked fixing the VM's clock drift in the
+same session. **The real proof is the next push's `integration-tests`
+run** — if it goes red, read this entry first before assuming a fresh
+bug: the most likely failure modes are (a) `openestate_super`'s password
+not matching `POSTGRES_PASSWORD` on the service container (verified
+identical by direct comparison of both hardcoded values, but worth
+re-checking first) or (b) `$GITHUB_ENV` not receiving the three
+`DATABASE_URL_TEST*`/`REDIS_TEST_URL` lines from `.test-env` correctly.
+
 ## Built: lead ownership & manager hierarchy (v0.4) — what's still open from that work
 
 `User.managerId` + `TeamScopeService` + the CI guard landed in v0.4 (see
