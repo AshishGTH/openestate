@@ -30,6 +30,32 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Bitten twice by the same bug: deploy/native/*.sh (Phase 8) and
+      # scripts/test-setup.sh (this session) were both committed as mode
+      # 644 from a Windows checkout, invisible locally (core.filemode is
+      # false there), and only failed with exit 126 the moment a real
+      # Linux runner tried `./the-script.sh`. Checked before any
+      # dependency install so a broken mode fails in seconds, not after
+      # a multi-minute pnpm install. deploy/native/lib.sh is the one
+      # deliberate exception - it's only ever `source`d (see its own
+      # header comment), never invoked directly, so it needs no execute
+      # bit and stays 644.
+      - name: Verify every tracked .sh script is executable
+        run: |
+          fail=0
+          for f in $(git ls-files '*.sh'); do
+            mode=$(git ls-files -s "$f" | cut -d' ' -f1)
+            if [ "$mode" = "100755" ]; then
+              continue
+            fi
+            if [ "$f" = "deploy/native/lib.sh" ]; then
+              continue
+            fi
+            echo "::error file=$f::$f is tracked as mode $mode, not 100755 - a script invoked directly (./$f) fails with 'Permission denied' on a real Linux runner even though it can look executable on a Windows checkout. Fix: git update-index --chmod=+x $f"
+            fail=1
+          done
+          exit $fail
+
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
