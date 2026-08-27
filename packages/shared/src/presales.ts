@@ -84,6 +84,25 @@ export const INQUIRY_STATUS = {
 } as const;
 export type InquiryStatusValue = (typeof INQUIRY_STATUS)[keyof typeof INQUIRY_STATUS];
 
+/** An inquiry counts as "actively worked" — the axis overdueOnly filters
+ *  and escalation eligibility both key off — whenever status is one of
+ *  these. An OPEN lead with a slipped follow-up and a CONTINUED lead with
+ *  a slipped follow-up are equally overdue; DUMPED/SUCCESSFUL are terminal
+ *  and never overdue regardless of nextFollowupAt. */
+export const ACTIVE_INQUIRY_STATUSES = [INQUIRY_STATUS.OPEN, INQUIRY_STATUS.CONTINUED] as const;
+
+/** Seeded default pipeline — India-first per CLAUDE.md, matches the set
+ *  the requester approved for Phase 0 of the lead-stage foundation.
+ *  "New" is the isDefault stage. Order is the seeded sortOrder. */
+export const DEFAULT_LEAD_STAGES = [
+  'New',
+  'Contacted',
+  'Site Visit Scheduled',
+  'Site Visit Done',
+  'Negotiation',
+  'Documentation',
+] as const;
+
 export const FOLLOW_UP_OUTCOME = {
   COMPLETED: 'COMPLETED',
   NO_RESPONSE: 'NO_RESPONSE',
@@ -156,6 +175,11 @@ export const createInquirySchema = z
     budgetMaxPaise: z.coerce.bigint().min(0n).optional(),
     preferredUnitTypeId: z.string().uuid().optional(),
     temperatureId: z.string().uuid().optional(),
+    // Omitted -> InquiryService.create() resolves the company's isDefault
+    // LeadStage (or leaves it null if none configured). Explicit null is
+    // not accepted here — there is no "no stage" gesture at creation, only
+    // "let the default apply."
+    stageId: z.string().uuid().optional(),
     nextFollowupAt: z.coerce.date().optional(),
     customFields: z.record(z.unknown()).optional(),
   })
@@ -176,6 +200,9 @@ export const updateInquirySchema = z
     budgetMaxPaise: z.coerce.bigint().min(0n).optional(),
     preferredUnitTypeId: z.string().uuid().optional(),
     temperatureId: z.string().uuid().optional(),
+    // Never nullable — a lead's stage isn't unset once assigned, only
+    // ever moved to a different stage. See LeadStage's own doc comment.
+    stageId: z.string().uuid().optional(),
     status: z.nativeEnum(INQUIRY_STATUS).optional(),
     nextFollowupAt: z.coerce.date().nullable().optional(),
     customFields: z.record(z.unknown()).optional(),
@@ -192,6 +219,38 @@ export const assignInquirySchema = z
   .strict();
 
 export type AssignInquiryDto = z.infer<typeof assignInquirySchema>;
+
+// ── Zod Schemas: Lead stage ─────────────────────────────────
+
+export const createLeadStageSchema = z
+  .object({
+    name: z.string().min(1).max(255),
+    sortOrder: z.number().int().min(0).default(0),
+    isActive: z.boolean().default(true),
+    isDefault: z.boolean().default(false),
+  })
+  .strict();
+
+export type CreateLeadStageDto = z.infer<typeof createLeadStageSchema>;
+
+/**
+ * `reassignToStageId` is required, not optional-with-a-default, whenever
+ * `isActive: false` is being set on an occupied stage — enforced in
+ * LeadStageService, not expressible statically here (it depends on live
+ * occupancy, which zod can't see). Omitting it against an unoccupied
+ * stage, or against a stage that's staying active, is fine.
+ */
+export const updateLeadStageSchema = z
+  .object({
+    name: z.string().min(1).max(255).optional(),
+    sortOrder: z.number().int().min(0).optional(),
+    isActive: z.boolean().optional(),
+    isDefault: z.boolean().optional(),
+    reassignToStageId: z.string().uuid().optional(),
+  })
+  .strict();
+
+export type UpdateLeadStageDto = z.infer<typeof updateLeadStageSchema>;
 
 // ── Zod Schemas: Assignment pool ────────────────────────────
 

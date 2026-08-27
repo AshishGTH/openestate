@@ -1,0 +1,13 @@
+-- Discriminates a real sales-pipeline movement from a bulk
+-- system-driven one (currently only LeadStageService.reassignOccupants'
+-- move-thousands-of-leads-off-a-deactivated-stage write) — see
+-- InquiryStageHistory's schema doc comment. Phase 3's funnel report
+-- must filter this out by default.
+--
+-- Safe, fast DDL against a live table: a NOT NULL column with a
+-- constant DEFAULT is a metadata-only change on Postgres 11+ (no table
+-- rewrite, no full-table lock beyond the brief ACCESS EXCLUSIVE needed
+-- to update the catalog) — covered by the standing lock_timeout
+-- reasoning in CLAUDE.md, no extra handling needed here.
+-- AlterTable
+ALTER TABLE "inquiry_stage_history" ADD COLUMN     "is_administrative" BOOLEAN NOT NULL DEFAULT false;

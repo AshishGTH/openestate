@@ -3,3 +3,5 @@ packages:
   - "packages/*"
   - "plugins/*"
   - "docs"
+allowBuilds:
+  esbuild: true

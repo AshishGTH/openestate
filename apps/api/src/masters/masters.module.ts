@@ -6,6 +6,7 @@ import { GstRateModule } from './gst-rate/gst-rate.module';
 import { TdsRuleModule } from './tds-rule/tds-rule.module';
 import { SmsTemplateModule } from './sms-template/sms-template.module';
 import { LetterTemplateModule } from './letter-template/letter-template.module';
+import { LeadStageModule } from './lead-stage/lead-stage.module';
 
 const SIMPLE_MASTERS = [
   { modelName: 'UnitType', routePath: 'unit-types', apiTag: 'Unit Types' },
@@ -100,6 +101,13 @@ const simpleMasterModules = SIMPLE_MASTERS.map((config) =>
 );
 
 @Module({
-  imports: [...simpleMasterModules, GstRateModule, TdsRuleModule, SmsTemplateModule, LetterTemplateModule],
+  imports: [
+    ...simpleMasterModules,
+    GstRateModule,
+    TdsRuleModule,
+    SmsTemplateModule,
+    LetterTemplateModule,
+    LeadStageModule,
+  ],
 })
 export class MastersModule {}

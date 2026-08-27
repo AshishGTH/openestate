@@ -176,6 +176,32 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   controllers array with a comment explaining why the order is
   load-bearing, so a future cleanup doesn't silently reintroduce it.
 
+- **Phase 0 of the feature-completion plan: a configurable lead-stage
+  pipeline.** A new Admin → Lead Stages master lets a company define its
+  own sales-pipeline positions (seeded by default with New, Contacted,
+  Site Visit Scheduled, Site Visit Done, Negotiation, Documentation) —
+  separate from, and orthogonal to, an inquiry's existing Open/Continued/
+  Dumped/Successful status. `InquiryDetail` gained a Stage picker; every
+  stage change (including the initial one at creation, from the
+  interactive form, the inbound lead API, or bulk import) writes an
+  append-only history row, so a lead's full stage trail is always
+  reconstructible. Deactivating a stage that still has active leads on it
+  requires picking another stage to move them to first — mirroring the
+  existing booking-count confirmation pattern elsewhere in the admin
+  screens; that reassignment is flagged in the history as an
+  administrative move rather than a real pipeline advance, so a later
+  funnel report can tell the difference between a rep converting a lead
+  and an admin retiring a stage that happened to be holding thousands of
+  them. Existing installs get the default pipeline delivered on
+  upgrade, the same one-time-marker-gated delivery mechanism the
+  permission-sync fix already established — an admin who has since
+  renamed or deleted a seeded stage is never overwritten. This release
+  lands the pipeline and the audit trail only; a Kanban-style board and a
+  stage-based funnel report are separate, later phases. The stage
+  currently marked default can't be deactivated until another stage is
+  set as the default first, and a stage can only ever be retired by
+  deactivating it — there is no delete.
+
 ### Fixed
 
 - **Reloading a few times, or letting your browser restore several tabs,

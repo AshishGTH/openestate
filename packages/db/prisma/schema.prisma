@@ -54,8 +54,10 @@ model Company {
   applicantMerges          ApplicantMerge[]
   applicantDistinctPairs   ApplicantDistinctPair[]
   inquiryTemperatures      InquiryTemperature[]
+  leadStages               LeadStage[]
   inquiries                Inquiry[]
   inquiryAssignments       InquiryAssignment[]
+  inquiryStageHistory      InquiryStageHistory[]
   projectAssignmentPools   ProjectAssignmentPool[]
   followUps                FollowUp[]
   smsTemplates             SmsTemplate[]
@@ -173,6 +175,7 @@ model User {
   assignmentsFrom               InquiryAssignment[]     @relation("assignmentFrom")
   assignmentsTo                 InquiryAssignment[]     @relation("assignmentTo")
   assignmentsActed              InquiryAssignment[]     @relation("assignmentActor")
+  stageChangesActed             InquiryStageHistory[]   @relation("stageHistoryChangedBy")
   assignmentPools               ProjectAssignmentPool[] @relation("assignmentPoolMember")
   followUpsCreated              FollowUp[]              @relation("followUpCreator")
   communicationLogsCreated      CommunicationLog[]      @relation("commLogCreator")
@@ -323,45 +326,45 @@ model CustomFieldDefinition {
 // ─── Company Config ────────────────────────────────────────────
 
 model CompanyConfig {
-  companyId                  String   @id @map("company_id") @db.Uuid
-  labelOverrides             Json     @default("{}") @map("label_overrides")
-  enabledModules             Json     @default("[\"presales\",\"postsales\",\"accounts\"]") @map("enabled_modules")
-  currency                   String   @default("INR") @db.VarChar(3)
-  timezone                   String   @default("Asia/Kolkata") @db.VarChar(50)
-  fyStartMonth               Int      @default(4) @map("fy_start_month")
-  dateFormat                 String   @default("DD-MM-YYYY") @map("date_format") @db.VarChar(20)
+  companyId                  String    @id @map("company_id") @db.Uuid
+  labelOverrides             Json      @default("{}") @map("label_overrides")
+  enabledModules             Json      @default("[\"presales\",\"postsales\",\"accounts\"]") @map("enabled_modules")
+  currency                   String    @default("INR") @db.VarChar(3)
+  timezone                   String    @default("Asia/Kolkata") @db.VarChar(50)
+  fyStartMonth               Int       @default(4) @map("fy_start_month")
+  dateFormat                 String    @default("DD-MM-YYYY") @map("date_format") @db.VarChar(20)
   // Supplier-side GST identity — source of truth for the CGST/SGST-vs-IGST
   // split (Phase 4). gstStateCode is the 2-char GST state code (e.g. "09"
   // for UP, "27" for Maharashtra); the first two chars of a GSTIN.
-  companyGstin               String?  @map("company_gstin") @db.VarChar(15)
-  gstStateCode               String?  @map("gst_state_code") @db.VarChar(2)
+  companyGstin               String?   @map("company_gstin") @db.VarChar(15)
+  gstStateCode               String?   @map("gst_state_code") @db.VarChar(2)
   // Flat charge (paise) applied when a cheque bounces (Phase 4). A receipt
   // or refund cheque bounce posts a BOUNCE_CHARGE debit of this amount.
-  chequeBounceChargePaise    BigInt   @default(0) @map("cheque_bounce_charge_paise")
+  chequeBounceChargePaise    BigInt    @default(0) @map("cheque_bounce_charge_paise")
   // Phase 5: which event triggers broker-commission accrual — ON_BOOKING
   // (full commission at booking confirmation) or ON_COLLECTION_MILESTONE
   // (partitioned across configured collection-percent breakpoints).
-  commissionAccrualTrigger   String   @default("ON_BOOKING") @map("commission_accrual_trigger") @db.VarChar(30)
+  commissionAccrualTrigger   String    @default("ON_BOOKING") @map("commission_accrual_trigger") @db.VarChar(30)
   // Phase 5: what happens to ALREADY-PAID commission when its booking is
   // cancelled — RECOVER (post a CLAWBACK_RECOVERY debit, broker owes it
   // back) or WRITE_OFF (company forgives it; a zero-amount audited entry
   // records the decision, reason required).
-  commissionClawbackPolicy   String   @default("RECOVER") @map("commission_clawback_policy") @db.VarChar(20)
+  commissionClawbackPolicy   String    @default("RECOVER") @map("commission_clawback_policy") @db.VarChar(20)
   // Phase 6: portal branding (logo + accent color shown in apps/portal).
-  logoUrl                    String?  @map("logo_url") @db.VarChar(500)
-  primaryColorHex            String?  @map("primary_color_hex") @db.VarChar(7)
+  logoUrl                    String?   @map("logo_url") @db.VarChar(500)
+  primaryColorHex            String?   @map("primary_color_hex") @db.VarChar(7)
   // v0.2.2: shared cap for ProjectMedia + ConstructionUpdateMedia — both
   // roll up disk usage under one project, an unbounded self-hosted
   // install fills its disk regardless of which table the row lands in.
   // Configurable, sensible defaults (50 files / 500MB per project).
-  projectMediaMaxFiles       Int      @default(50) @map("project_media_max_files")
-  projectMediaMaxBytes       Int      @default(524288000) @map("project_media_max_bytes")
+  projectMediaMaxFiles       Int       @default(50) @map("project_media_max_files")
+  projectMediaMaxBytes       Int       @default(524288000) @map("project_media_max_bytes")
   // A rep's own inquiry must never silently move to someone else via
   // round-robin. When true (default), InquiryService.create() assigns an
   // interactively-created inquiry straight to its creator; round-robin only
   // ever runs for machine-driven intake (inbound lead API, bulk import),
   // which has no human creator to retain ownership for.
-  presalesCreatorRetainsLead Boolean  @default(true) @map("presales_creator_retains_lead")
+  presalesCreatorRetainsLead Boolean   @default(true) @map("presales_creator_retains_lead")
   // v0.5: automated intake (inbound lead API, bulk import) has no human
   // present to ask "same person or not" — when true (default, unchanged
   // behavior), a phone/email match auto-links to the existing applicant.
@@ -369,9 +372,19 @@ model CompanyConfig {
   // broker's office line) can flip this to always create a NEW applicant
   // and flag the match for a human to resolve later instead, via
   // ApplicantDistinctPair — never silently guessing which is riskier here.
-  presalesPhoneDedupAutoLink Boolean  @default(true) @map("presales_phone_dedup_auto_link")
-  createdAt                  DateTime @default(now()) @map("created_at")
-  updatedAt                  DateTime @updatedAt @map("updated_at")
+  presalesPhoneDedupAutoLink Boolean   @default(true) @map("presales_phone_dedup_auto_link")
+  // One-time marker, not an inferred-from-row-count check: "zero
+  // LeadStage rows" is ambiguous between "never seeded" and "admin
+  // deleted all six after a real seeding" — inferring from count alone
+  // would resurrect a deliberate deletion on the next upgrade, the
+  // exact class of bug this project has already been burned by for
+  // seeded masters. Set once, in the same transaction as the initial
+  // 6-row seed (fresh install via seed.ts, or an existing install via
+  // sync-permissions.ts's syncLeadStages on upgrade); never touched
+  // again afterward, so a company that deletes its stages stays deleted.
+  leadStagesSeededAt         DateTime? @map("lead_stages_seeded_at")
+  createdAt                  DateTime  @default(now()) @map("created_at")
+  updatedAt                  DateTime  @updatedAt @map("updated_at")
 
   company Company @relation(fields: [companyId], references: [id])
 
@@ -1204,6 +1217,42 @@ enum InquiryStatus {
   SUCCESSFUL
 }
 
+/// Company-configurable sales-pipeline position — orthogonal to
+/// InquiryStatus, not a replacement for it. Status is the coarse
+/// lifecycle disposition (open/paused/dead/won) and stays load-bearing
+/// elsewhere (EscalationService gates on OPEN/CONTINUED; convertedAt is
+/// keyed off the transition into SUCCESSFUL). LeadStage is "where in
+/// OUR pipeline is this lead" — only meaningful while a lead is
+/// OPEN/CONTINUED, but Inquiry.stageId is never cleared on a terminal
+/// transition: which stage a lead died at, or converted from, is the
+/// most actionable drop-off/win metric there is. See feature-completion-
+/// plan.md's Phase 0 (lead stage foundation).
+model LeadStage {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  /// The stage a newly-created inquiry starts at when the caller doesn't
+  /// specify one. Enforced unique per company by a partial index
+  /// (lead_stages_one_default_per_company, migration SQL) — the actual
+  /// correctness guarantee, not this column alone. The service layer
+  /// also clears the prior default in the same transaction as setting a
+  /// new one, purely so a single request doesn't 409 against its own
+  /// prior default.
+  isDefault Boolean  @default(false) @map("is_default")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company     Company               @relation(fields: [companyId], references: [id])
+  inquiries   Inquiry[]
+  fromHistory InquiryStageHistory[] @relation("stageHistoryFrom")
+  toHistory   InquiryStageHistory[] @relation("stageHistoryTo")
+
+  @@unique([companyId, name])
+  @@map("lead_stages")
+}
+
 /// convertedAt: see the field's own comment — added because the dashboard
 /// needs a conversion DATE that does not move when someone edits a closed
 /// lead.
@@ -1218,6 +1267,10 @@ model Inquiry {
   budgetMaxPaise      BigInt?       @map("budget_max_paise")
   preferredUnitTypeId String?       @map("preferred_unit_type_id") @db.Uuid
   temperatureId       String?       @map("temperature_id") @db.Uuid
+  /// Company-configurable pipeline position — see LeadStage's own doc
+  /// comment. Deliberately NEVER cleared on a status transition to
+  /// DUMPED/SUCCESSFUL; only UI/report queries scope by status.
+  stageId             String?       @map("stage_id") @db.Uuid
   assignedToId        String?       @map("assigned_to_id") @db.Uuid
   // Who created this inquiry, when a human did (interactive create()).
   // Null for machine-driven intake (inbound lead API, bulk import) — there
@@ -1241,17 +1294,19 @@ model Inquiry {
   createdAt           DateTime      @default(now()) @map("created_at")
   updatedAt           DateTime      @updatedAt @map("updated_at")
 
-  company           Company             @relation(fields: [companyId], references: [id])
-  applicant         Applicant           @relation(fields: [applicantId], references: [id])
-  project           Project?            @relation(fields: [projectId], references: [id])
-  source            InquirySource?      @relation(fields: [sourceId], references: [id])
-  inquiryType       InquiryType?        @relation(fields: [inquiryTypeId], references: [id])
-  preferredUnitType UnitType?           @relation(fields: [preferredUnitTypeId], references: [id])
-  temperature       InquiryTemperature? @relation(fields: [temperatureId], references: [id])
-  assignedTo        User?               @relation("inquiryAssignee", fields: [assignedToId], references: [id])
-  createdBy         User?               @relation("inquiryCreator", fields: [createdById], references: [id])
+  company           Company               @relation(fields: [companyId], references: [id])
+  applicant         Applicant             @relation(fields: [applicantId], references: [id])
+  project           Project?              @relation(fields: [projectId], references: [id])
+  source            InquirySource?        @relation(fields: [sourceId], references: [id])
+  inquiryType       InquiryType?          @relation(fields: [inquiryTypeId], references: [id])
+  preferredUnitType UnitType?             @relation(fields: [preferredUnitTypeId], references: [id])
+  temperature       InquiryTemperature?   @relation(fields: [temperatureId], references: [id])
+  stage             LeadStage?            @relation(fields: [stageId], references: [id])
+  assignedTo        User?                 @relation("inquiryAssignee", fields: [assignedToId], references: [id])
+  createdBy         User?                 @relation("inquiryCreator", fields: [createdById], references: [id])
   followUps         FollowUp[]
   assignments       InquiryAssignment[]
+  stageHistory      InquiryStageHistory[]
   communicationLogs CommunicationLog[]
 
   @@index([companyId, assignedToId, status])
@@ -1259,6 +1314,7 @@ model Inquiry {
   @@index([companyId, status, createdAt])
   /// Serves the dashboard's per-scope conversion counts.
   @@index([companyId, convertedAt])
+  @@index([companyId, stageId])
   @@map("inquiries")
 }
 
@@ -1281,6 +1337,53 @@ model InquiryAssignment {
 
   @@index([inquiryId, createdAt])
   @@map("inquiry_assignments")
+}
+
+/// One row per stage transition — including the initial null -> default
+/// assignment at creation, so history is gap-free from row one. Mirrors
+/// InquiryAssignment's shape exactly (from/to/actor/createdAt). Written
+/// by every inquiry-creation path (InquiryService.create,
+/// InquiryService.createFromLead, InquiryImportService's bulk import)
+/// and by InquiryService.update whenever stageId changes, plus a bulk
+/// write when a stage is deactivated-with-reassignment
+/// (LeadStageService). Never backfilled or corrected in place — a
+/// wrong transition gets a new row, same append-only discipline as
+/// every other history table in this codebase.
+///
+/// isAdministrative distinguishes a real sales-pipeline movement (a rep
+/// advancing a lead, or the initial default-stage assignment at
+/// creation) from a bulk system-driven move — currently only
+/// LeadStageService.reassignOccupants, which can move thousands of
+/// leads onto one target stage in a single request when an admin
+/// deactivates an occupied stage, often moving them BACKWARD through
+/// the pipeline. Written once, at insert time, and never revisited —
+/// same now-or-never reasoning as this table's own existence: once a
+/// row exists, there is no way to tell an administrative move from a
+/// real one after the fact except this flag. Phase 3's funnel report
+/// must exclude isAdministrative rows by default, or a single stage
+/// retirement would look like thousands of leads reaching (or
+/// regressing into) that stage on one date.
+model InquiryStageHistory {
+  id                String   @id @default(uuid()) @db.Uuid
+  companyId         String   @map("company_id") @db.Uuid
+  inquiryId         String   @map("inquiry_id") @db.Uuid
+  fromStageId       String?  @map("from_stage_id") @db.Uuid
+  toStageId         String   @map("to_stage_id") @db.Uuid
+  changedById       String?  @map("changed_by_id") @db.Uuid
+  /// True only for LeadStageService.reassignOccupants' bulk moves.
+  /// Every other writer (inquiry creation, the InquiryDetail stage
+  /// picker) leaves this false — those are real pipeline movements.
+  isAdministrative  Boolean  @default(false) @map("is_administrative")
+  changedAt         DateTime @default(now()) @map("changed_at")
+
+  company   Company    @relation(fields: [companyId], references: [id])
+  inquiry   Inquiry    @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  fromStage LeadStage? @relation("stageHistoryFrom", fields: [fromStageId], references: [id])
+  toStage   LeadStage  @relation("stageHistoryTo", fields: [toStageId], references: [id])
+  changedBy User?      @relation("stageHistoryChangedBy", fields: [changedById], references: [id])
+
+  @@index([companyId, inquiryId, changedAt])
+  @@map("inquiry_stage_history")
 }
 
 model ProjectAssignmentPool {

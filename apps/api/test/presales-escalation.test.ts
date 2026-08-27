@@ -99,6 +99,15 @@ describeIf('Escalation job', () => {
     await systemPrisma.applicant.deleteMany({ where: { companyId: { in: [companyAId, companyBId] } } });
     await systemPrisma.user.deleteMany({ where: { companyId: { in: [companyAId, companyBId] } } });
     await systemPrisma.role.deleteMany({ where: { companyId: { in: [companyAId, companyBId] } } });
+    // This fixture never seeds lead stages itself — but under a
+    // full-suite run, syncLeadStages' deliberately unscoped
+    // company.findMany() (packages/db/prisma/sync-permissions.ts) can
+    // race in and seed both a CompanyConfig row and 6 LeadStage rows for
+    // these companies too, if a sync test happens to run concurrently.
+    // Delete both unconditionally so the company delete below never
+    // depends on that race.
+    await systemPrisma.leadStage.deleteMany({ where: { companyId: { in: [companyAId, companyBId] } } });
+    await systemPrisma.companyConfig.deleteMany({ where: { companyId: { in: [companyAId, companyBId] } } });
     await systemPrisma.company.deleteMany({ where: { id: { in: [companyAId, companyBId] } } });
     await systemPrisma.$disconnect();
     await tenantPrisma.$disconnect();

@@ -100,6 +100,8 @@ const TENANT_SCOPED_MODELS = new Set([
   'WebhookDelivery',
   'WebhookDeliveryAttempt',
   'LeadSourceApiKey',
+  'LeadStage',
+  'InquiryStageHistory',
 ]);
 
 const READ_OPS = new Set([

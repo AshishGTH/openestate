@@ -11,6 +11,7 @@ import { PrismaClient } from '@prisma/client';
 import { createHash, randomUUID } from 'node:crypto';
 import * as argon2 from '@node-rs/argon2';
 import { createSystemPrismaClient } from '../src/index';
+import { deleteCompaniesSafely } from './helpers/delete-company-safely';
 
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
 const shouldRun = !!SYSTEM_URL;
@@ -57,7 +58,10 @@ describeIf('Auth: token rotation + reuse detection', () => {
     await prisma.refreshToken.deleteMany({ where: { userId } });
     await prisma.user.deleteMany({ where: { companyId } });
     await prisma.role.deleteMany({ where: { companyId } });
-    await prisma.company.delete({ where: { id: companyId } });
+    // Retries on syncLeadStages' own race — see delete-company-safely.ts's
+    // doc comment for the exact mechanism (a single delete-then-delete
+    // sequence is not enough).
+    await deleteCompaniesSafely(prisma, [companyId]);
     await prisma.$disconnect();
   });
 
