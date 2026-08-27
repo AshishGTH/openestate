@@ -24,3 +24,11 @@ apps/e2e/.fixture-state.json
 # A local pnpm content-addressable cache, never a build output this repo
 # ships — should never end up committed regardless of what created it.
 .pnpm-store/
+
+# apps/website (Vercel) — the local project-link directory `vercel link`/
+# `vercel dev` creates; can hold a project id/org id and, in some CLI
+# versions, cached env values. Never present today, but this repo has
+# already been burned once by a real credential landing in a tracked file
+# (see CLAUDE.md's "no credential VALUES in any committed file" rule) —
+# cheap insurance against the same mistake showing up here.
+.vercel/

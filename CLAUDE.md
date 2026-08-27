@@ -6128,3 +6128,87 @@ Reported directly: the seed step hung on corepack's "Do you want to continue? [Y
 **`run_pnpm()`, a new wrapper every bare `pnpm` call in the script now goes through**, is what makes that real download's failure mode good instead of a raw stack trace: on failure, it probes `https://registry.npmjs.org/` directly with a 5s timeout, and if THAT fails too, names the actual cause and points at `docs/handoff.md`'s "192.168.1.100's system clock" entry (this VM's own real root cause) rather than leaving the reader to decode a `CERT_NOT_YET_VALID` stack trace themselves; if the network probe succeeds, the failure gets a plain message pointing back at pnpm's own already-printed output instead — so a genuinely unrelated failure (e.g., a real error inside `seed.ts` itself) isn't misdiagnosed as a network problem.
 
 **Verified end-to-end, twice, both proving the fix rather than assuming it**: first, the wrapper's diagnostic path directly, against this VM's real (still-broken) network — confirmed it fires the network-specific message, fast, no hang. Second, the full script — teardown then a fresh run — invoked with stdin redirected from `/dev/null` for both steps, the strongest test available: no prompt could be answered even if one somehow still appeared. Completed in full, migrations through seed, exit 0. Production role passwords reset by this run (same `TEST_ALLOW_SHARED_CLUSTER=1` mechanism as before) were restored the same way as previously, confirmed via a real `GET /api/v1/health` afterward.
+
+### `apps/website` — the public marketing site, logged after the fact
+
+Built in a prior session that was cut off before this entry got written
+(a usage-limit interruption, not a deliberate omission) — landed in the
+working tree fully finished, with no Decisions-log entry anywhere. Logged
+now, on discovery, rather than left undocumented.
+
+**What it is.** A standalone React 18 + Vite site (`apps/website`, its
+own `package.json` with `dev`/`build`/`lint`/`typecheck`/`test` scripts,
+zero shared dependency on `packages/shared` or any other workspace
+package — pure marketing copy, no product code) presenting OpenEstate's
+public-facing pitch: hero, capability cards, an illustrative
+(hand-authored, not live-data) product-preview panel, the ledger/
+security/architecture sections, and a real install command block. Real
+brand assets under `public/brand/` (favicon, logo, apple-touch-icon,
+og-image), a `sitemap.xml`/`robots.txt`, and a `vercel.json` (security
+headers + `cleanUrls`, no secrets). **Deploys to a real, named domain**:
+the README documents a Vercel project rooted at `apps/website`, using
+the monorepo's own pnpm lockfile, publishing to `theitguys.in`.
+
+**Copy audited against current product state before committing** — the
+repo has twice shipped public-facing text that fell out of sync with
+reality (a stale "Phase 0 — scaffolding" README claim still live at
+v0.2.3; the ASVS checklist flatly asserting Docker Compose was the only
+supported install path, found and fixed in the Docker-removal pass
+above) so this got the same scrutiny before landing, not less because
+it's "just marketing." Findings: the install command
+(`sudo git clone ... && sudo ./install-native.sh --server-name
+crm.yourcompany.com`) matches `install-native.sh`'s real `--server-name`
+flag exactly — checked against the script's own arg-parsing, not
+assumed; zero Docker references anywhere in the site (correctly reflects
+the post-removal reality); no legal-compliance overclaim (matches this
+file's own India-first rule: "do not claim legal compliance in docs,
+provide the tools" — the security section lists real, shipped
+mechanisms only). **One real gap, fixed**: the "Inventory with context"
+feature card described only the unit-based model (projects/towers/
+floors/units) — not false, but it predates the plotted/farmland
+inventory model (`LAND_BASED` project shape, `InventoryGroup`s, per-acre
+pricing) that shipped since. Reworded to cover both. Manager hierarchy/
+team-scoped visibility (v0.4) is real and unmentioned too, but that's an
+internal RBAC detail, not the kind of thing a marketing feature list
+enumerates at this altitude — left alone as a judgment call, not an
+oversight.
+
+**Secrets check, before staging anything**: no `.vercel/` directory (no
+project-link token), no `.env` file, no API key or credential anywhere
+in the source — confirmed by listing every file in the directory and
+reading `vercel.json` directly, not assumed from `.gitignore` coverage
+alone. `.vercel/` added to `.gitignore` regardless, defensively, since
+`vercel link`/`vercel dev` can create one locally at any time and this
+repo has already been burned once by a real credential landing in a
+tracked file (see the earlier "no credential VALUES in any committed
+file" standing rule). `dist/`, `.turbo/`, and `*.tsbuildinfo` inside
+`apps/website` are already covered by the existing root `.gitignore`
+patterns — confirmed with `git check-ignore -v` against each, not
+assumed from the patterns looking like they'd match.
+
+**CI/workspace blast radius — confirmed real, left as-is, matching an
+existing precedent rather than carving out new isolation.** Because
+`apps/website` sits under `apps/*` (already in `pnpm-workspace.yaml`'s
+glob), it's swept into the bare `pnpm lint`/`pnpm typecheck`/`pnpm
+build` commands `ci.yml`'s `lint-typecheck-build` job runs — confirmed
+directly, not inferred: both commands visibly built/typechecked
+`@openestate/website` in this session's own verification run. Every
+other CI job (`native-install`, `e2e-playwright`, etc.) `needs:
+lint-typecheck-build`, so in principle a website-only regression (a
+broken import, a lint violation) could block jobs that have nothing to
+do with the website. **This is not a new problem specific to
+`apps/website`** — `docs` (the Docusaurus site) has had the identical
+shape, swept into the same bare commands, for the entirety of this
+project's history, and it has never once been the subject of an
+incident entry in this file despite this file documenting essentially
+every other CI/build problem this project has ever hit. Carving
+`apps/website` out into its own isolated pipeline (a `--filter`
+exclusion, or its own non-blocking job) would make it structurally
+*more* isolated than `docs` already is, for no incident this session
+found — an inconsistency introduced to fix a risk that hasn't actually
+manifested anywhere in this codebase's history, including for the
+directly comparable case. Left in the default sweep, matching `docs`.
+**Revisit only if a real website-only CI failure is ever actually
+observed blocking unrelated jobs** — at that point the fix is a
+`--filter='!@openestate/website'` exclusion (or a dedicated job),
+applied with the real incident as the reason, not preemptively.

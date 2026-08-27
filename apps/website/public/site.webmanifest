@@ -1,0 +1,16 @@
+{
+  "name": "OpenEstate by The IT Guys",
+  "short_name": "OpenEstate",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#101A24",
+  "theme_color": "#101A24",
+  "icons": [
+    {
+      "src": "/brand/favicon.svg",
+      "sizes": "64x64",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
