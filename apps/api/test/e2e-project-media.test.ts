@@ -34,7 +34,7 @@ const MINIMAL_PDF = Buffer.from('%PDF-1.4\n%%EOF');
 async function bootstrapApp(): Promise<INestApplication> {
   process.env.DATABASE_URL = APP_URL;
   process.env.DATABASE_URL_SYSTEM = SYSTEM_URL;
-  process.env.REDIS_URL = process.env.REDIS_TEST_URL ?? 'redis://localhost:6380';
+  process.env.REDIS_URL = process.env.REDIS_TEST_URL ?? 'redis://localhost:6379';
   process.env.JWT_ACCESS_SECRET ??= 'e2e-test-access-secret-0123456789';
   process.env.JWT_REFRESH_SECRET ??= 'e2e-test-refresh-secret-0123456789';
   process.env.PAN_ENCRYPTION_KEY ??= 'a1b2c3d4'.repeat(8);

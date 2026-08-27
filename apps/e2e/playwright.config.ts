@@ -10,16 +10,25 @@ export const API_URL = `http://localhost:${API_PORT}`;
 export const WEB_URL = `http://localhost:${WEB_PORT}`;
 export const PORTAL_URL = `http://localhost:${PORTAL_PORT}`;
 
-// Same disposable Postgres/Redis this project's own backend integration
-// tests use (scripts/test-setup.sh / deploy/docker-compose.test.yml) —
-// precondition, not started here. Exported so global-setup.ts's own
-// fixture-seed script (which runs as this same Node process, not a
-// webServer child) connects to the identical database.
+// Same test Postgres/Redis this project's own backend integration tests use
+// (scripts/test-setup.sh) — a precondition, not started here. No containers
+// are involved anywhere in this repo: you bring your own PostgreSQL and
+// Redis, the same way a real install does. Exported so global-setup.ts's own
+// fixture-seed script (which runs as this same Node process, not a webServer
+// child) connects to the identical database.
+//
+// The same three env vars the backend suite reads win when set, so
+// `source .test-env` (written by scripts/test-setup.sh) points this harness
+// at a non-default host/port without editing anything. The fallbacks are the
+// standard ports, which is what test-setup.sh provisions by default and what
+// ci.yml's own services block exposes.
 export const DATABASE_URL_SYSTEM =
-  'postgresql://openestate_system:test_system_pass@localhost:5433/openestate_test';
+  process.env.DATABASE_URL_TEST_SYSTEM ??
+  'postgresql://openestate_system:test_system_pass@localhost:5432/openestate_test';
 const DATABASE_URL_APP =
-  'postgresql://openestate_app:test_app_pass@localhost:5433/openestate_test';
-const REDIS_URL = 'redis://localhost:6380';
+  process.env.DATABASE_URL_TEST ??
+  'postgresql://openestate_app:test_app_pass@localhost:5432/openestate_test';
+const REDIS_URL = process.env.REDIS_TEST_URL ?? 'redis://localhost:6379';
 
 // Not real secrets — throwaway key material for a disposable test database
 // that gets torn down after every run. Fixed (not randomly generated per
