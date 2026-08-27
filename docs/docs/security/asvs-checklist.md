@@ -148,13 +148,18 @@ work — read that file for the full reasoning behind any entry here.
 
 ## V9 — Communications
 
-- **V9.1 Client communications security** — Implemented at the deploy
-  layer: the shipped `nginx` reverse proxy config and Docker Compose
-  stack are the TLS termination point in a real deployment (self-hosters
-  bring their own certificate — this project doesn't attempt to manage
-  ACME/Let's Encrypt for every possible domain setup). **Partial**: no
-  built-in HSTS-preload guidance or automated TLS setup in `install.sh`
-  yet — documented as a gap, not silently assumed solved.
+- **V9.1 Client communications security** — **Partial, honestly scoped**:
+  the native install's own nginx config (`deploy/native/nginx/`)
+  deliberately does NOT terminate TLS out of the box — its own doc
+  comment tells the self-hoster to put a real TLS-terminating proxy in
+  front for production use, rather than this project managing
+  ACME/Let's Encrypt for every possible domain setup. `req.secure`
+  correctly reflects the real client-facing scheme via `X-Forwarded-Proto`
+  once that proxy is in place (see CLAUDE.md's "Secure cookies over
+  plain HTTP" walkthrough entry for the bug this fixed and why
+  `NODE_ENV === 'production'` was never a safe proxy for "this
+  connection is HTTPS"). No built-in HSTS-preload guidance yet —
+  documented as a gap, not silently assumed solved.
 
 ## V11 — Business Logic
 
@@ -187,16 +192,20 @@ work — read that file for the full reasoning behind any entry here.
 
 ## V14 — Configuration
 
-- **V14.1 Build and deployment** — Implemented. `docker compose up` from
-  scratch is the only supported install path (self-hostable-first,
-  CLAUDE.md rule #1); Docker base images pinned by verified sha256 digest
-  as of this phase (closing a gap open since Phase 0 — see `CLAUDE.md`'s
-  Phase 8 decisions for how the digests were actually verified, not
-  fabricated).
+- **V14.1 Build and deployment** — Implemented. `sudo ./install-native.sh`
+  (`deploy/native/`) from scratch is the only supported production
+  install path (self-hostable-first, CLAUDE.md rule #1) — a systemd
+  service behind nginx, talking to a PostgreSQL/Redis the self-hoster
+  already runs. There is no container path anywhere in this project: the
+  Compose files and Dockerfiles were deleted outright, so nothing here
+  builds, ships, or runs an image whose base-image patch level could go
+  stale — the test suite included, which runs against a PostgreSQL and
+  Redis the contributor provides.
 - **V14.2 Dependency management** — Implemented. Lockfile committed,
   `pnpm audit` runs in CI (non-blocking — `continue-on-error: true`,
   a deliberate choice recorded in `ci.yml` rather than a silent gap),
-  Dependabot configured for npm and Docker ecosystems.
+  Dependabot configured for the npm and github-actions ecosystems (the
+  docker ecosystem was removed along with the images it tracked).
 - **V14.3 Unintended security disclosure** — Implemented. `SWAGGER_ENABLED`
   defaults false in production; the health endpoint is the only
   intentionally `@Public()` route.

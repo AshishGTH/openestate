@@ -3,10 +3,9 @@
 # (openestate_app, openestate_system) against a PostgreSQL server the admin
 # already runs. Never installs, configures, or manages PostgreSQL itself —
 # only connects to it. Safe to re-run: every statement checks existence
-# first (matches deploy/docker/init-db/01-create-app-role.sh's pattern,
-# ported to run outside a docker-entrypoint-initdb.d fresh-cluster context,
-# so it also has to create the database itself, which the Docker image did
-# implicitly via POSTGRES_DB).
+# first. Also invoked by scripts/test-setup.sh to provision the test
+# database, so it has to stay safe to run repeatedly against a cluster that
+# already has some of this in place.
 set -euo pipefail
 
 log()  { printf '\033[1;32m[setup-database]\033[0m %s\n' "$1"; }

@@ -176,8 +176,6 @@ packages/sdk    Generated TypeScript API client (from OpenAPI)
 plugins/        First-party plugins (lead sources, messaging, telephony)
 deploy/native/  Native install: install-native.sh, systemd unit, nginx
                 config, backup/restore/upgrade/uninstall scripts
-deploy/         docker-compose.yml, Dockerfiles — contributor test
-                infrastructure only, see CONTRIBUTING.md
 docs/           Docusaurus site: install, admin, API, plugin dev
 ```
 
@@ -193,7 +191,7 @@ versioning (v0.1.0 → v0.3.0 and counting) since. See
 
 | Phase | Scope |
 | --- | --- |
-| 0 | Scaffold, Docker Compose, CI |
+| 0 | Scaffold, local test infrastructure, CI |
 | 1 | Auth, RBAC, multi-tenancy, masters framework, custom fields |
 | 2 | Inventory: projects, towers, floors, units, pricing |
 | 3 | Pre-sales: inquiries, assignment, follow-ups, funnel reports |

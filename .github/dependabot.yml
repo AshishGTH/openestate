@@ -9,10 +9,11 @@ updates:
       dev-dependencies:
         dependency-type: "development"
 
-  - package-ecosystem: "docker"
-    directory: "/deploy/docker"
-    schedule:
-      interval: "weekly"
+  # No "docker" ecosystem entry by design: there are no Dockerfiles and no
+  # Compose files anywhere in this repo. Nothing here builds, ships, or runs
+  # a container image — production installs natively
+  # (deploy/native/install-native.sh, CLAUDE.md rule #1) and the test suite
+  # runs against a PostgreSQL and Redis the contributor provides.
 
   - package-ecosystem: "github-actions"
     directory: "/"

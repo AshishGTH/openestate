@@ -82,7 +82,8 @@ implying a guarantee the architecture doesn't make.
 ## What this document does not cover
 
 Physical security, hosting-provider security, and the self-hoster's own
-operational practices (patching the host OS, securing the Docker daemon,
-network segmentation) are out of scope — this is an *application*-level
-threat model for the software this project ships, not a deployment
-security guide for any specific environment it might run in.
+operational practices (patching the host OS, hardening the PostgreSQL,
+Redis and nginx services it runs, network segmentation) are out of scope
+— this is an *application*-level threat model for the software this
+project ships, not a deployment security guide for any specific
+environment it might run in.
