@@ -41,6 +41,64 @@ die()  { printf '\033[1;31m[test-setup]\033[0m %s\n' "$1" >&2; exit 1; }
 
 command -v psql >/dev/null 2>&1 || die "psql not found. Install the PostgreSQL client package."
 
+# COREPACK_ENABLE_DOWNLOAD_PROMPT=0: corepack's "Do you want to continue?
+# [Y/n]" prompt (shown the first time this repo's pinned pnpm version isn't
+# already cached for the invoking user) reads from stdin — real feedback on
+# a real interactive terminal, but this script has no guarantee of one (an
+# agent, a CI runner, anything that doesn't provide a live keyboard), so
+# left at its default the prompt just hangs forever. Reproduced directly
+# (a fresh COREPACK_HOME against this project's pinned pnpm@9.15.0, network
+# reachable): the prompt appears and blocks indefinitely with no env var
+# set; with this one set, it proceeds straight to the download instead —
+# confirmed the hang is gone, not just less likely.
+#
+# Investigated whether the fetch itself can be avoided entirely when the
+# pinned version isn't cached, rather than just making its failure mode
+# clean — tried COREPACK_ENABLE_NETWORK=0 (fails cleanly instead of
+# fetching, but never succeeds either — it can't use a different, already-
+# installed pnpm, it just refuses) and COREPACK_ENABLE_PROJECT_SPEC=0
+# (ignores this repo's pin and tries to fetch pnpm "latest" instead — worse,
+# not better, and defeats the entire point of pinning). Neither lets
+# corepack fall back to an already-installed different-version pnpm; there
+# is no such fallback in corepack's own design short of disabling the pin
+# outright, which was rejected — every contributor and CI run using the
+# exact same pnpm version is worth keeping. A real download over the
+# network stays possible when genuinely needed; run_pnpm() below is what
+# makes THAT failing cleanly instead of hanging or dumping a raw stack
+# trace.
+export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+
+# Every bare `pnpm` invocation in this script goes through this wrapper
+# instead of being called directly, so a failure fetching the pinned
+# version is diagnosed once, here, instead of as whatever raw corepack
+# stack trace happened to come out of whichever call site hit it first.
+run_pnpm() {
+  pnpm "$@" && return 0
+  local status=$?
+  if ! node -e "fetch('https://registry.npmjs.org/', { signal: AbortSignal.timeout(5000) })" >/dev/null 2>&1; then
+    die "pnpm $* failed, and this machine cannot reach registry.npmjs.org over
+HTTPS right now (checked directly just now, not inferred from the error
+above). If this is the walkthrough VM (192.168.1.100), its system clock is
+known to drift and break TLS certificate validation for exactly this host
+— see docs/handoff.md's \"192.168.1.100's system clock\" section for the
+fix. Otherwise, check your own network/proxy/firewall.
+The original pnpm error is above this message."
+  fi
+  die "pnpm $* failed (exit ${status}) — see the output above."
+}
+
+# packages/db's seed/sync scripts run under tsx as CJS, which resolves
+# @openestate/shared via its package.json's "require" condition —
+# ./dist/index.js, the COMPILED output — not the "import" condition Vite
+# dev servers use (raw TS source). A shared-package export added since the
+# last build (e.g. DEFAULT_LEAD_STAGES) silently resolves to undefined
+# there until dist is rebuilt: exactly the Phase 1 "Vite builds don't
+# require this, NestJS production runtime does" rule, applying here too
+# because tsx is also a Node/CJS consumer. Same reason
+# deploy/native/lib.sh's build_release() rebuilds shared before db.
+log "Building @openestate/shared (dist consumed by tsx-run scripts)..."
+run_pnpm --filter @openestate/shared build
+
 if [ -n "$PG_HOST" ] || [ -n "${PGPASSWORD:-}" ]; then
   PG_HOST="${PG_HOST:-localhost}"
   psql_admin() { psql -v ON_ERROR_STOP=1 -h "$PG_HOST" -p "$PG_PORT" -U "$PG_ADMIN_USER" "$@"; }
@@ -86,6 +144,43 @@ Use a different cluster, or set TEST_ALLOW_SHARED_CLUSTER=1 if you know the
 'openestate' database is not one you care about."
   fi
   warn "Proceeding on a cluster that also hosts an 'openestate' database (TEST_ALLOW_SHARED_CLUSTER=1)."
+fi
+
+# The check above only catches a production install using the DEFAULT
+# database name ('openestate'). deploy/native/setup-database.sh's --db flag
+# accepts any name, so a production install can legitimately use a
+# different one — and openestate_app/openestate_system's passwords are
+# cluster-wide regardless of which database they were granted against, so
+# that install is exactly as reachable and exactly as breakable here. Guard
+# on the roles themselves, not the database name, since the roles are what
+# actually gets reset.
+#
+# openestate_super only ever exists on a cluster this script itself has
+# already touched (a real install's own setup-database.sh never creates
+# it — see the comment on that role below). So: if openestate_super does
+# NOT exist yet, this script has never run against this cluster before,
+# and if openestate_app/openestate_system already exist anyway, they were
+# created by something else — almost certainly a real install, whatever
+# database it uses. Captured before openestate_super gets created a few
+# lines down, since after that point its mere existence stops being a
+# useful signal.
+SUPER_ALREADY_EXISTS="$(psql_admin -tAc "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='openestate_super'" postgres)"
+if [ -z "$SUPER_ALREADY_EXISTS" ]; then
+  EXISTING_APP_ROLE="$(psql_admin -tAc "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='openestate_app'" postgres)"
+  EXISTING_SYSTEM_ROLE="$(psql_admin -tAc "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='openestate_system'" postgres)"
+  if [ -n "$EXISTING_APP_ROLE" ] || [ -n "$EXISTING_SYSTEM_ROLE" ]; then
+    if [ "${TEST_ALLOW_SHARED_CLUSTER:-}" != "1" ]; then
+      die "openestate_app and/or openestate_system already exist on this cluster,
+and this script has never set up a test superuser here before — these roles
+look like they belong to a real install, whatever database it uses (the
+database-name check above only catches the default name 'openestate').
+Their passwords are cluster-wide; continuing would reset them and break
+that install until it re-runs deploy/native/setup-database.sh.
+Use a different cluster, or set TEST_ALLOW_SHARED_CLUSTER=1 if you know
+these roles are safe to reuse."
+    fi
+    warn "Proceeding even though openestate_app/openestate_system already exist on this cluster (TEST_ALLOW_SHARED_CLUSTER=1)."
+  fi
 fi
 
 # Migrations CREATE ROLE ... BYPASSRLS, which only a superuser may do, so
@@ -161,13 +256,22 @@ npx prisma migrate deploy
 echo ""
 npx prisma migrate status
 
+# The generated client is a build artifact of schema.prisma, not of the
+# migration SQL — `pnpm install`'s postinstall generates it once, but a
+# schema change landing via `git pull`/a synced working tree afterward
+# leaves the checked-out client stale until something regenerates it.
+# migrate deploy applies raw SQL and never touches the client, so without
+# this, seed (or anything else importing @prisma/client) fails with
+# "Unknown field" the moment a query touches a genuinely new column.
+log "Regenerating the Prisma client..."
+npx prisma generate
 cd "$REPO_ROOT"
 
 log "Re-granting table privileges now that tables exist..."
 grant_roles
 
 log "Running seed..."
-pnpm --filter @openestate/db seed
+run_pnpm --filter @openestate/db seed
 
 if command -v redis-cli >/dev/null 2>&1; then
   if ! redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping >/dev/null 2>&1; then

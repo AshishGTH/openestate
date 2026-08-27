@@ -60,16 +60,31 @@ describeIf('Presales reports: ageing buckets + funnel reconciliation', () => {
         { days: 400, expected: '90+' },
       ];
 
+      // createdAt is set directly in create()'s own `data`, not patched
+      // afterward via a raw `$executeRaw UPDATE`. That used to be
+      // necessary-looking (createdAt has @default(now())), but Prisma
+      // allows overriding a @default(now()) field at create time, and the
+      // ORM path round-trips a JS Date exactly via Prisma's own query
+      // engine — confirmed directly (0ms drift) against this project's
+      // real infra, not assumed. The raw-SQL path does NOT round-trip
+      // safely: $executeRaw's parameter binding goes through node-postgres
+      // text protocol, which formats/parses a `timestamp without time
+      // zone` value using the Postgres session's `timezone` GUC — on any
+      // server whose timezone isn't UTC (this one: Asia/Kolkata, +5:30),
+      // that silently shifted every written date by the session's UTC
+      // offset. Confirmed by direct reproduction: a raw UPDATE writing
+      // `2026-07-13T12:00:00.000Z` read back as `17:30:00.000Z` — a full
+      // 5.5-hour corruption — which pushed the day=8 fixture's computed
+      // age below the ageDays<=7 boundary and put a 3rd row in bucket
+      // '0-7'. No production code hit this: every raw SQL call site that
+      // touches a timestamp column uses Postgres's own now()/
+      // clock_timestamp(), never a bound JS Date — this was the only
+      // place in the codebase binding one into a timestamp column via
+      // raw SQL, and grepping confirms no other test file did either.
       for (const f of fixtures) {
         await systemPrisma.inquiry.create({
-          data: { companyId, applicantId, status: 'OPEN' },
+          data: { companyId, applicantId, status: 'OPEN', createdAt: daysAgo(f.days) },
         });
-      }
-      // createdAt defaults to now() on insert; patch it to the fixture's
-      // known age via raw UPDATE so the ageing-bucket math has a fixed date.
-      const created = await systemPrisma.inquiry.findMany({ where: { companyId } });
-      for (let i = 0; i < fixtures.length; i++) {
-        await systemPrisma.$executeRaw`UPDATE inquiries SET created_at = ${daysAgo(fixtures[i].days)} WHERE id = ${created[i].id}::uuid`;
       }
 
       const buckets = await reportsService.ageingBuckets(companyId, { visibleUserIds: null });
