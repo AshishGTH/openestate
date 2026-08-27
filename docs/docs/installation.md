@@ -13,12 +13,10 @@ no coding knowledge required for installation, only comfort with a terminal.
 
 OpenEstate installs **natively**: a systemd service talking to a
 PostgreSQL and Redis you already run, static files served by nginx. There
-is no bundled database container and no Docker involved in production —
-you control Postgres/Redis the same way you'd run any other service on
-this box, with your own backup tooling, monitoring, and upgrade cadence
-for them. (Docker Compose still exists in the repo, but only as a
-contributor tool for running the automated test suite — see
-`CONTRIBUTING.md`.)
+is no bundled database container, and no Docker anywhere in this project
+at all — you control Postgres/Redis the same way you'd run any other
+service on this box, with your own backup tooling, monitoring, and
+upgrade cadence for them.
 
 ---
 
@@ -358,8 +356,8 @@ run the dev servers directly (`pnpm dev` at the repo root, after
 `pnpm install`) against a local Postgres/Redis — no systemd or nginx
 involved. This is a developer workflow, not a smaller version of
 production install; see the repo's `README.md` for dev-server setup.
-Docker Compose is also still available, but scoped to running the
-automated test suite — see `CONTRIBUTING.md`.
+The test suite follows the same rule — bring your own PostgreSQL and
+Redis there too; see `CONTRIBUTING.md`.
 
 ---
 

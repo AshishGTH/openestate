@@ -26,9 +26,10 @@ Please include:
 ## Scope
 
 In scope: the OpenEstate monorepo (`apps/`, `packages/`, `plugins/`,
-`deploy/`) as configured by the shipped Docker Compose stack and
-`deploy/install.sh`. Vulnerabilities in third-party dependencies should
-generally be reported upstream, but we still want to know if they affect
+`deploy/`) as configured by the native install path
+(`deploy/native/install-native.sh`) — the supported production
+deployment. Vulnerabilities in third-party dependencies should generally
+be reported upstream, but we still want to know if they affect
 OpenEstate's default configuration.
 
 Out of scope: social engineering, physical attacks, denial-of-service

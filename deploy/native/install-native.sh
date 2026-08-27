@@ -117,9 +117,9 @@ need nginx  "nginx — YOUR web server, see note below"                      "ng
 # platform this script targets and never needs this — but sharp (image
 # processing, used for document/photo handling) can still fall back to
 # compiling libvips from source via node-gyp if no matching prebuild is
-# found for a given platform/libc combination, the same reason deploy/
-# docker/api.Dockerfile's build stage installs these before its own
-# `pnpm install`. Checked (and failed loudly) here rather than silently
+# found for a given platform/libc combination, so the toolchain has to be
+# present before `pnpm install` runs. Checked (and failed loudly) here
+# rather than silently
 # apt-installed: unlike Postgres/Redis/nginx this has no ongoing state to
 # manage, but it's still a package install decision left to the admin,
 # consistent with every other prerequisite in this script.
@@ -176,8 +176,7 @@ log "Creating system user '${APP_USER}'..."
 if ! id "$APP_USER" >/dev/null 2>&1; then
   # -m: pnpm/corepack writes a version-cache under $HOME/.cache on first
   # invocation (migrate/seed run as this user) — a homeless account makes
-  # that fail with EACCES, the same root cause api.Dockerfile's own -m
-  # flag documents for the container user.
+  # that fail with EACCES.
   useradd -r -m -d "$UPLOADS_DIR" -s /usr/sbin/nologin -U "$APP_USER"
 else
   log "User '${APP_USER}' already exists."

@@ -29,14 +29,14 @@ wait_for_health() {
 
 # build_release SRC_DIR RELEASES_DIR -> prints the new release dir path on stdout
 #
-# Reproduces deploy/docker/api.Dockerfile's build+deploy sequence (pnpm
-# build in dependency order, `pnpm --filter @openestate/api deploy --prod`,
-# then manually copying each workspace package's dist/ back in — pnpm
-# deploy's file selection follows git-tracked files, which excludes
+# Builds and stages a release natively: pnpm build in dependency order,
+# then `pnpm --filter @openestate/api deploy --prod`, then manually copying
+# each workspace package's dist/ back in. That last step is not redundant:
+# pnpm deploy's file selection follows git-tracked files, which excludes
 # gitignored dist/ output, so every workspace dependency's dist has to be
-# copied in by hand exactly like the Dockerfile does) plus building the two
-# static frontends and regenerating the Prisma client in place, all run
-# natively instead of inside a multi-stage Docker build.
+# copied in by hand or the deployed API boots with missing modules. Also
+# builds the two static frontends and regenerates the Prisma client in
+# place.
 build_release() {
   local src_dir="$1" releases_dir="$2"
   local release_id
@@ -57,9 +57,8 @@ build_release() {
     # the build: pnpm treats NODE_ENV=production as "skip devDependencies,"
     # which silently drops typescript/@nestjs/cli/vite — every `tsc`/`nest`
     # build command below then fails with "not found" instead of a clear
-    # dependency error. Docker's build stage never had this problem because
-    # its Dockerfile only sets NODE_ENV=production in the later runtime
-    # stage, never in `deps`/`build`.
+    # dependency error. NODE_ENV=production belongs on the *running*
+    # service, never on the build that produces it.
     unset NODE_ENV
     log "Installing workspace dependencies..."
     pnpm install --frozen-lockfile

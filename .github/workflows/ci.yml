@@ -117,7 +117,7 @@ jobs:
       # `pnpm install` alone doesn't produce:
       #   1. packages/db/prisma/seed.ts imports from @openestate/shared,
       #      resolved via plain Node `require()` (tsx runs it, not Vite) —
-      #      same class of gap as apps/api's Dockerfile needing
+      #      the same gap the NestJS production runtime has, needing
       #      packages/shared built first (Phase 1 decisions: "Vite builds
       #      don't require pnpm --filter @openestate/shared build first,
       #      but NestJS production runtime does"). The "Run seed" step
@@ -242,11 +242,13 @@ jobs:
     # and far below the point where a hang stops being obvious.
     timeout-minutes: 30
     needs: lint-typecheck-build
-    # Ports match deploy/docker-compose.test.yml exactly (5433/6380, not
-    # Postgres/Redis's own defaults) so apps/e2e/playwright.config.ts's
-    # hardcoded connection strings work identically here and on a
-    # developer's own machine after `scripts/test-setup.sh` — no
-    # CI-only override needed.
+    # Standard Postgres/Redis ports, matching the integration-tests job
+    # above and apps/e2e/playwright.config.ts's own fallbacks — so the
+    # same connection strings work here and on a developer's machine
+    # after `scripts/test-setup.sh`, with no CI-only override needed.
+    # (These are GitHub Actions service containers — runner
+    # infrastructure. Nothing in this repo builds or ships an image; see
+    # CLAUDE.md rule #1.)
     services:
       postgres:
         image: postgres:16-alpine
@@ -255,7 +257,7 @@ jobs:
           POSTGRES_PASSWORD: test_super_pass
           POSTGRES_DB: openestate_test
         ports:
-          - 5433:5432
+          - 5432:5432
         options: >-
           --health-cmd "pg_isready -U openestate_super -d openestate_test"
           --health-interval 2s
@@ -264,7 +266,7 @@ jobs:
       redis:
         image: redis:7-alpine
         ports:
-          - 6380:6379
+          - 6379:6379
         options: >-
           --health-cmd "redis-cli ping"
           --health-interval 2s
@@ -305,7 +307,7 @@ jobs:
       - name: Create application roles
         env:
           PGHOST: localhost
-          PGPORT: "5433"
+          PGPORT: "5432"
           PGUSER: openestate_super
           PGPASSWORD: test_super_pass
           PGDATABASE: openestate_test
@@ -323,7 +325,7 @@ jobs:
 
       - name: Apply migration
         env:
-          DATABASE_URL: postgresql://openestate_super:test_super_pass@localhost:5433/openestate_test
+          DATABASE_URL: postgresql://openestate_super:test_super_pass@localhost:5432/openestate_test
         run: |
           cd packages/db
           npx prisma migrate deploy
@@ -332,7 +334,7 @@ jobs:
       - name: Grant table-level permissions
         env:
           PGHOST: localhost
-          PGPORT: "5433"
+          PGPORT: "5432"
           PGUSER: openestate_super
           PGPASSWORD: test_super_pass
           PGDATABASE: openestate_test
@@ -357,60 +359,6 @@ jobs:
           name: playwright-report
           path: apps/e2e/playwright-report/
           retention-days: 7
-
-  compose-healthcheck:
-    name: docker compose up + healthcheck
-    runs-on: ubuntu-latest
-    # No job here had an upper time bound, so GitHub's 6-hour default
-    # applied: a hung step burned runner time for hours and never
-    # self-reported. Found when a migration blocked on a database lock and
-    # native-upgrade sat in_progress for an hour against a ~3 minute norm.
-    # 30 is far above every job's real duration (longest observed ~8 min)
-    # and far below the point where a hang stops being obvious.
-    timeout-minutes: 30
-    needs: lint-typecheck-build
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Generate deploy/.env
-        working-directory: deploy
-        run: |
-          cp .env.example .env
-          sed -i "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=$(openssl rand -hex 24)#" .env
-          sed -i "s#^POSTGRES_APP_PASSWORD=.*#POSTGRES_APP_PASSWORD=$(openssl rand -hex 24)#" .env
-          sed -i "s#^POSTGRES_SYSTEM_PASSWORD=.*#POSTGRES_SYSTEM_PASSWORD=$(openssl rand -hex 24)#" .env
-          sed -i "s#^JWT_ACCESS_SECRET=.*#JWT_ACCESS_SECRET=$(openssl rand -hex 24)#" .env
-          sed -i "s#^JWT_REFRESH_SECRET=.*#JWT_REFRESH_SECRET=$(openssl rand -hex 24)#" .env
-          sed -i "s#^PAN_ENCRYPTION_KEY=.*#PAN_ENCRYPTION_KEY=$(openssl rand -hex 32)#" .env
-          sed -i "s#^TOTP_ENCRYPTION_KEY=.*#TOTP_ENCRYPTION_KEY=$(openssl rand -hex 32)#" .env
-          sed -i "s#^PLUGIN_SECRET_ENCRYPTION_KEYS=.*#PLUGIN_SECRET_ENCRYPTION_KEYS=1:$(openssl rand -hex 32)#" .env
-          sed -i "s#^MINIO_ROOT_PASSWORD=.*#MINIO_ROOT_PASSWORD=$(openssl rand -hex 24)#" .env
-
-      - name: docker compose up
-        working-directory: deploy
-        run: docker compose up -d --build
-
-      - name: Wait for healthcheck
-        run: |
-          for i in $(seq 1 60); do
-            if curl -fsS http://localhost:8080/api/v1/health; then
-              echo "API healthy"
-              exit 0
-            fi
-            sleep 2
-          done
-          echo "API did not become healthy in time" >&2
-          exit 1
-
-      - name: Dump logs on failure
-        if: failure()
-        working-directory: deploy
-        run: docker compose logs
-
-      - name: Tear down
-        if: always()
-        working-directory: deploy
-        run: docker compose down -v
 
   native-install:
     name: Native install (real Postgres/Redis/nginx, no Docker)
