@@ -139,61 +139,38 @@ jobs:
       - name: Build workspace
         run: pnpm build
 
-      - name: Create application roles
+      # Delegates role creation, migrate, and seed to the exact same script
+      # a contributor runs locally (scripts/test-setup.sh) instead of a
+      # second, hand-maintained copy of the same SQL — the two had already
+      # drifted once (this job never regenerated the Prisma client or built
+      # packages/shared the way the script now does) before CI started
+      # actually exercising the contributor path. TEST_PG_ADMIN_USER points
+      # it at the service container's own superuser (POSTGRES_USER above)
+      # instead of the local-install default 'postgres'; PGPASSWORD forces
+      # the script's TCP mode (there's no shared OS user to `sudo -u
+      # postgres` as inside a container) — the password matches
+      # POSTGRES_PASSWORD above by the same hardcoded-test-credential
+      # convention setup-database.sh's own header documents. The
+      # 'openestate' shared-cluster guard never fires here: a fresh service
+      # container only ever has openestate_test plus Postgres's own
+      # always-present template/postgres databases.
+      #
+      # .test-env's values are appended to $GITHUB_ENV so every later step
+      # inherits DATABASE_URL_TEST/DATABASE_URL_TEST_SYSTEM/REDIS_TEST_URL
+      # from the script's own output — the two steps below no longer carry
+      # a second hardcoded copy that could quietly drift from what the
+      # script actually provisions.
+      - name: Provision test database (scripts/test-setup.sh)
         env:
-          PGHOST: localhost
-          PGPORT: "5432"
-          PGUSER: openestate_super
+          TEST_PG_HOST: localhost
+          TEST_PG_ADMIN_USER: openestate_super
           PGPASSWORD: test_super_pass
-          PGDATABASE: openestate_test
         run: |
-          psql <<'EOSQL'
-            CREATE ROLE openestate_app WITH LOGIN PASSWORD 'test_app_pass' NOINHERIT;
-            CREATE ROLE openestate_system WITH LOGIN PASSWORD 'test_system_pass' NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
-            GRANT USAGE ON SCHEMA public TO openestate_app;
-            GRANT USAGE ON SCHEMA public TO openestate_system;
-            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openestate_app;
-            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openestate_system;
-            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO openestate_app;
-            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO openestate_system;
-          EOSQL
-
-      - name: Apply migration
-        env:
-          DATABASE_URL: postgresql://openestate_super:test_super_pass@localhost:5432/openestate_test
-        run: |
-          cd packages/db
-          npx prisma migrate deploy
-          npx prisma migrate status
-
-      - name: Grant table-level permissions
-        env:
-          PGHOST: localhost
-          PGPORT: "5432"
-          PGUSER: openestate_super
-          PGPASSWORD: test_super_pass
-          PGDATABASE: openestate_test
-        run: |
-          psql <<'EOSQL'
-            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openestate_app;
-            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openestate_system;
-          EOSQL
-
-      - name: Run seed
-        env:
-          DATABASE_URL: postgresql://openestate_super:test_super_pass@localhost:5432/openestate_test
-        run: pnpm --filter @openestate/db seed
+          ./scripts/test-setup.sh
+          grep '^export ' .test-env | sed -E 's/^export //; s/"//g' >> "$GITHUB_ENV"
 
       - name: Run integration tests
         env:
-          # connection_limit is deliberate — see CLAUDE.md's Phase 7
-          # CI-reliability decisions (must match scripts/test-setup.sh's
-          # local equivalent, and apps/api/vitest.config.ts's maxForks,
-          # so the total connection budget stays arithmetically safe
-          # against Postgres's max_connections=100).
-          DATABASE_URL_TEST: postgresql://openestate_app:test_app_pass@localhost:5432/openestate_test?connection_limit=10
-          DATABASE_URL_TEST_SYSTEM: postgresql://openestate_system:test_system_pass@localhost:5432/openestate_test?connection_limit=5
-          REDIS_TEST_URL: redis://localhost:6379
           # Ledger property test: full CI floor (2000 runs, ~6 min) only on
           # the nightly schedule; PR/push runs 500 for fast feedback. Both
           # are >= the property test's own local-dev default, so PR runs
@@ -204,14 +181,6 @@ jobs:
 
       - name: Fail if any test was skipped
         env:
-          # connection_limit is deliberate — see CLAUDE.md's Phase 7
-          # CI-reliability decisions (must match scripts/test-setup.sh's
-          # local equivalent, and apps/api/vitest.config.ts's maxForks,
-          # so the total connection budget stays arithmetically safe
-          # against Postgres's max_connections=100).
-          DATABASE_URL_TEST: postgresql://openestate_app:test_app_pass@localhost:5432/openestate_test?connection_limit=10
-          DATABASE_URL_TEST_SYSTEM: postgresql://openestate_system:test_system_pass@localhost:5432/openestate_test?connection_limit=5
-          REDIS_TEST_URL: redis://localhost:6379
           PROPERTY_NUM_RUNS: ${{ github.event_name == 'schedule' && '2000' || '500' }}
         run: |
           # Run tests with JSON reporter and check for skipped tests
