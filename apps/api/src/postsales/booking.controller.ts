@@ -27,9 +27,11 @@ import { BrokerService } from '../brokers/broker.service';
 import { NocService } from '../brokers/noc.service';
 import { CommissionService } from '../commission/commission.service';
 import { BookingCostLineVerifier } from './booking-cost-line-verifier.service';
+import { InquiryService } from '../presales/inquiry.service';
 
 class CreateBookingDto extends createZodDto(createBookingSchema) {}
 class AssignBrokerDto extends createZodDto(z.object({ brokerId: z.string().uuid() }).strict()) {}
+class AttachSourceInquiryDto extends createZodDto(z.object({ inquiryId: z.string().uuid() }).strict()) {}
 class CreatePaymentPlanDto extends createZodDto(createPaymentPlanSchema) {}
 class ExtraChargeDto extends createZodDto(extraChargeSchema) {}
 class InterestWaiverDto extends createZodDto(interestWaiverSchema) {}
@@ -56,6 +58,7 @@ export class BookingController {
     private readonly nocs: NocService,
     private readonly commissions: CommissionService,
     private readonly costLineVerifier: BookingCostLineVerifier,
+    private readonly inquiries: InquiryService,
   ) {}
 
   @Post()
@@ -164,6 +167,14 @@ export class BookingController {
   assignBroker(@Param('id') id: string, @Body() dto: AssignBrokerDto, @Req() req: Request) {
     const u = req.user as JwtPayload;
     return this.brokerService.assignToBooking(u.companyId, id, dto.brokerId);
+  }
+
+  @Post(':id/source-inquiry')
+  @RequirePermissions(PERMISSIONS.POSTSALES_BOOKING_CREATE)
+  @ApiOperation({ summary: 'Link the inquiry this booking converted from (Booking.sourceInquiryId — a separate call, same pattern as broker assignment); flips the inquiry to SUCCESSFUL if it wasn\'t already' })
+  attachSourceInquiry(@Param('id') id: string, @Body() dto: AttachSourceInquiryDto, @Req() req: Request) {
+    const u = req.user as JwtPayload;
+    return this.inquiries.attachBooking(u.companyId, dto.inquiryId, id, u.sub);
   }
 
   @Post(':id/commission/accrue')
