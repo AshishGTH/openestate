@@ -5,6 +5,7 @@ import { importInquiryRowSchema, normalizePhone, normalizeEmail } from '@openest
 import * as ExcelJS from 'exceljs';
 import { AssignmentService } from './assignment.service';
 import { LeadStageTransitionService } from './lead-stage-transition.service';
+import { InquiryDispositionTransitionService } from './inquiry-disposition-transition.service';
 
 export interface ImportRowError {
   row: number;
@@ -52,6 +53,7 @@ export class InquiryImportService {
     private readonly tenantPrisma: any,
     private readonly assignmentService: AssignmentService,
     private readonly leadStageTransition: LeadStageTransitionService,
+    private readonly dispositionTransition: InquiryDispositionTransitionService,
   ) {}
 
   /**
@@ -233,6 +235,14 @@ export class InquiryImportService {
             importedInquiry.id,
             null,
             resolvedStageId,
+            null,
+          );
+          await this.dispositionTransition.writeDispositionTransition(
+            tx,
+            companyId,
+            importedInquiry.id,
+            null,
+            importedInquiry.status,
             null,
           );
 

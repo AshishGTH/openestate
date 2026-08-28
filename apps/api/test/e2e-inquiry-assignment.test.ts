@@ -238,7 +238,7 @@ describeIf('e2e POST /inquiries: creator-retains-lead assignment policy', () => 
       .post(`/api/v1/inquiries/${inquiryId}/follow-ups`)
       .set('Authorization', `Bearer ${token}`)
       .set('X-CSRF-Token', csrf)
-      .send({ notes: 'Called, will call back tomorrow' })
+      .send({ notes: 'Called, will call back tomorrow', nextActionAt: new Date(Date.now() + 86_400_000).toISOString() })
       .expect(201);
     expect(followUpRes.body.createdBy).toBeUndefined(); // service.create() doesn't include it — findAllForInquiry does
 

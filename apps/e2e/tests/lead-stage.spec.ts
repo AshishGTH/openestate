@@ -63,9 +63,22 @@ test('Lead Stages admin: seeded pipeline, default flip, occupied-stage deactivat
   ]);
   expect(stagePatchResponse.ok()).toBe(true);
 
+  // A stage that's still the current default can't be deactivated (Phase 0
+  // finding #1: refused outright, never auto-resolved) — make "New" the
+  // default again first, the same explicit admin step the guard requires.
+  await page.goto('/admin/lead-stages');
+  await seededNewRow.getByRole('button', { name: 'Edit' }).click();
+  await page.getByLabel('Default').check();
+  const [defaultFlipResponse] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/masters/lead-stages/') && r.request().method() === 'PATCH'),
+    page.getByRole('button', { name: 'Save' }).click(),
+  ]);
+  expect(defaultFlipResponse.ok()).toBe(true);
+  await expect(seededNewRow.getByRole('cell').nth(2)).toHaveText('Yes'); // Default column
+  await expect(newStageRow.getByRole('cell').nth(2)).toHaveText('No');
+
   // Deactivating the now-occupied stage must be blocked until a
   // reassignment target is given — not attempted-and-silently-failed.
-  await page.goto('/admin/lead-stages');
   await newStageRow.getByRole('button', { name: 'Edit' }).click();
   await page.getByLabel('Active').uncheck();
   await page.getByRole('button', { name: 'Save' }).click();

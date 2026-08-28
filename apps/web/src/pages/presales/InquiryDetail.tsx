@@ -28,9 +28,19 @@ interface FollowUp {
   outcome: string | null;
   scheduledAt: string | null;
   venue: string | null;
+  interactionAt: string;
+  nextActionAt: string | null;
   createdAt: string;
   type: { name: string } | null;
   createdBy: { id: string; name: string } | null;
+}
+
+/** `datetime-local` inputs want "YYYY-MM-DDTHH:mm" in the browser's own
+ *  timezone, not an ISO string — this is the one conversion every field
+ *  in this form needs, so it's shared rather than repeated per field. */
+function toDatetimeLocalValue(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 interface MasterOption {
@@ -51,6 +61,8 @@ export default function InquiryDetailPage() {
 
   const [typeId, setTypeId] = useState('');
   const [notes, setNotes] = useState('');
+  const [interactionAt, setInteractionAt] = useState(() => toDatetimeLocalValue(new Date()));
+  const [nextActionAt, setNextActionAt] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
   const [venue, setVenue] = useState('');
   const [followUpError, setFollowUpError] = useState('');
@@ -64,6 +76,11 @@ export default function InquiryDetailPage() {
 
   const [statusError, setStatusError] = useState('');
   const [stageError, setStageError] = useState('');
+
+  const [showDumpForm, setShowDumpForm] = useState(false);
+  const [dumpReasonId, setDumpReasonId] = useState('');
+  const [dumpRemarks, setDumpRemarks] = useState('');
+  const [dumpError, setDumpError] = useState('');
 
   const { data: inquiry } = useQuery<Inquiry>({
     queryKey: ['inquiry', id],
@@ -92,6 +109,11 @@ export default function InquiryDetailPage() {
     queryFn: () => api('/masters/lead-stages?limit=100'),
   });
 
+  const { data: dumpReasons } = useQuery<{ data: MasterOption[] }>({
+    queryKey: ['masters', 'dump-reasons', 'all'],
+    queryFn: () => api('/masters/dump-reasons?limit=100'),
+  });
+
   const handleAddFollowUp = async () => {
     setFollowUpError('');
     try {
@@ -100,13 +122,18 @@ export default function InquiryDetailPage() {
         body: JSON.stringify({
           typeId: typeId === '' ? undefined : typeId,
           notes: notes.trim() === '' ? undefined : notes.trim(),
+          interactionAt: interactionAt === '' ? undefined : interactionAt,
+          nextActionAt: nextActionAt === '' ? undefined : nextActionAt,
           scheduledAt: scheduledAt === '' ? undefined : scheduledAt,
           venue: venue.trim() === '' ? undefined : venue.trim(),
         }),
       });
       qc.invalidateQueries({ queryKey: ['follow-ups', id] });
+      qc.invalidateQueries({ queryKey: ['inquiry', id] });
       setTypeId('');
       setNotes('');
+      setInteractionAt(toDatetimeLocalValue(new Date()));
+      setNextActionAt('');
       setScheduledAt('');
       setVenue('');
     } catch (err) {
@@ -130,12 +157,36 @@ export default function InquiryDetailPage() {
   };
 
   const handleStatusChange = async (status: string) => {
+    // Dump is special-cased below (SOP rule 5: requires a reason and
+    // remarks) — this handler stays for the other three, which have no
+    // such requirement.
+    if (status === 'DUMPED') {
+      setDumpError('');
+      setShowDumpForm(true);
+      return;
+    }
     setStatusError('');
     try {
       await api(`/inquiries/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
       qc.invalidateQueries({ queryKey: ['inquiry', id] });
     } catch (err) {
       setStatusError((err as Error).message);
+    }
+  };
+
+  const handleDump = async () => {
+    setDumpError('');
+    try {
+      await api(`/inquiries/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'DUMPED', dumpReasonId, dumpRemarks }),
+      });
+      qc.invalidateQueries({ queryKey: ['inquiry', id] });
+      setShowDumpForm(false);
+      setDumpReasonId('');
+      setDumpRemarks('');
+    } catch (err) {
+      setDumpError((err as Error).message);
     }
   };
 
@@ -179,6 +230,32 @@ export default function InquiryDetailPage() {
           ))}
         </div>
         {statusError && <p className="mt-2 text-sm text-red-600">{statusError}</p>}
+
+        {showDumpForm && (
+          <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-4" data-testid="dump-form">
+            <p className="text-sm text-amber-900">Dumping a lead requires a reason and remarks, for future reference.</p>
+            <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Reason</label>
+                <select value={dumpReasonId} onChange={(e) => setDumpReasonId(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+                  <option value="">Select…</option>
+                  {dumpReasons?.data?.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700">Remarks</label>
+                <input type="text" value={dumpRemarks} onChange={(e) => setDumpRemarks(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+            </div>
+            <div className="mt-3 flex gap-3">
+              <button onClick={handleDump} disabled={!dumpReasonId || !dumpRemarks.trim()} className="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50">
+                Confirm Dump
+              </button>
+              <button onClick={() => setShowDumpForm(false)} className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Cancel</button>
+            </div>
+            {dumpError && <p className="mt-2 text-sm text-red-600">{dumpError}</p>}
+          </div>
+        )}
       </section>
 
       <section className="mt-4">
@@ -237,6 +314,19 @@ export default function InquiryDetailPage() {
               </select>
             </div>
             <div>
+              <label className="block text-sm font-medium text-slate-700">Interaction happened at</label>
+              <input type="datetime-local" value={interactionAt} onChange={(e) => setInteractionAt(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700">
+                Next follow-up{(inquiry.status === 'OPEN' || inquiry.status === 'CONTINUED') && <span className="text-red-600"> *</span>}
+              </label>
+              <input type="datetime-local" value={nextActionAt} onChange={(e) => setNextActionAt(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
+              {(inquiry.status === 'OPEN' || inquiry.status === 'CONTINUED') && (
+                <p className="mt-1 text-xs text-slate-500">Required while this lead is active — it won&apos;t be visible in My Day otherwise.</p>
+              )}
+            </div>
+            <div>
               <label className="block text-sm font-medium text-slate-700">Scheduled At (for site visits)</label>
               <input type="datetime-local" value={scheduledAt} onChange={(e) => setScheduledAt(e.target.value)} className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm" />
             </div>
@@ -264,9 +354,10 @@ export default function InquiryDetailPage() {
             followUps!.map((f) => (
               <li key={f.id} className="rounded-md border border-slate-200 bg-white p-3 text-sm">
                 <div className="font-medium text-slate-800">
-                  {f.type?.name ?? 'Follow-up'} — {new Date(f.createdAt).toLocaleString()}
+                  {f.type?.name ?? 'Follow-up'} — {new Date(f.interactionAt).toLocaleString()}
                   {f.createdBy && <span className="font-normal text-slate-500"> by {f.createdBy.name}</span>}
                 </div>
+                {f.nextActionAt && <div className="text-slate-600">Next follow-up: {new Date(f.nextActionAt).toLocaleString()}</div>}
                 {f.scheduledAt && <div className="text-slate-600">Scheduled: {new Date(f.scheduledAt).toLocaleString()} {f.venue && `at ${f.venue}`}</div>}
                 {f.notes && <div className="text-slate-600">{f.notes}</div>}
               </li>

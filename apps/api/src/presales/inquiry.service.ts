@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -22,6 +23,7 @@ import { AssignmentService } from './assignment.service';
 import { ApplicantService } from './applicant.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { LeadStageTransitionService } from './lead-stage-transition.service';
+import { InquiryDispositionTransitionService } from './inquiry-disposition-transition.service';
 
 export interface InquiryScope {
   /**
@@ -63,6 +65,7 @@ export class InquiryService {
     private readonly applicantService: ApplicantService,
     private readonly customFields: CustomFieldsService,
     private readonly leadStageTransition: LeadStageTransitionService,
+    private readonly dispositionTransition: InquiryDispositionTransitionService,
   ) {}
 
   async findAll(companyId: string, query: PaginationQuery, scope: InquiryScope) {
@@ -260,6 +263,7 @@ export class InquiryService {
           },
         });
         await this.leadStageTransition.writeStageTransition(tx, companyId, inquiry.id, null, resolvedStageId, createdById);
+        await this.dispositionTransition.writeDispositionTransition(tx, companyId, inquiry.id, null, inquiry.status, createdById);
 
         // Creator-retains-lead policy (default on): a rep's own inquiry
         // must never silently move to someone else via round-robin.
@@ -370,6 +374,7 @@ export class InquiryService {
         // No human actor for machine-driven intake — same reasoning as
         // this method's assignmentType: 'auto'/actorId: null below.
         await this.leadStageTransition.writeStageTransition(tx, companyId, inquiry.id, null, resolvedStageId, null);
+        await this.dispositionTransition.writeDispositionTransition(tx, companyId, inquiry.id, null, inquiry.status, null);
 
         if (lead.projectId) {
           const assignedToId = await this.assignmentService.autoAssign(tx, companyId, lead.projectId);
@@ -396,6 +401,13 @@ export class InquiryService {
     const existing = await this.findOne(companyId, id, scope);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any = { ...dto };
+    // Not real Inquiry columns — they belong on the disposition-history
+    // row only (InquiryDispositionHistory.reasonId/remarks), never on
+    // Inquiry itself. Delete rather than pass through to tx.inquiry.update().
+    delete data.dumpReasonId;
+    delete data.dumpRemarks;
+
+    const statusChanged = dto.status !== undefined && dto.status !== existing.status;
 
     // convertedAt is stamped on the TRANSITION into SUCCESSFUL, not on
     // every save of an already-successful inquiry — otherwise it would
@@ -404,11 +416,22 @@ export class InquiryService {
     // re-opened lead stops counting as a conversion. This is the only
     // code path in the app that sets SUCCESSFUL (FollowUpService only
     // moves OPEN -> CONTINUED), so one place covers it.
-    if (dto.status !== undefined && dto.status !== existing.status) {
+    if (statusChanged) {
       if (dto.status === 'SUCCESSFUL') {
         data.convertedAt = this.clock.now();
       } else if (existing.status === 'SUCCESSFUL') {
         data.convertedAt = null;
+      }
+      // SOP rule 5: Dump requires both a reason (from the configurable
+      // DumpReason catalogue) and remarks — currently unenforced was the
+      // whole finding. Checked here, not in the zod schema, since it's
+      // conditional on the transition actually being INTO Dumped, which
+      // depends on live state zod can't see (same shape as LeadStage's
+      // default-deactivation guard).
+      if (dto.status === 'DUMPED' && (!dto.dumpReasonId || !dto.dumpRemarks?.trim())) {
+        throw new BadRequestException(
+          'Dumping a lead requires both a reason and remarks — select a reason and explain why for future reference.',
+        );
       }
     }
     if (dto.customFields !== undefined) {
@@ -430,6 +453,9 @@ export class InquiryService {
         if (stageChanged) {
           await this.leadStageTransition.assertStageBelongsToCompany(tx, companyId, dto.stageId!);
         }
+        if (statusChanged && dto.status === 'DUMPED') {
+          await this.dispositionTransition.assertReasonBelongsToCompany(tx, companyId, dto.dumpReasonId!);
+        }
         const updated = await tx.inquiry.update({ where: { id }, data });
         if (stageChanged) {
           await this.leadStageTransition.writeStageTransition(
@@ -439,6 +465,18 @@ export class InquiryService {
             existingStageId,
             dto.stageId!,
             actorId,
+          );
+        }
+        if (statusChanged) {
+          await this.dispositionTransition.writeDispositionTransition(
+            tx,
+            companyId,
+            id,
+            existing.status,
+            dto.status!,
+            actorId,
+            dto.status === 'DUMPED' ? dto.dumpReasonId : null,
+            dto.status === 'DUMPED' ? dto.dumpRemarks : null,
           );
         }
         return updated;

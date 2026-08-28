@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { expect } from '@playwright/test';
 import type { E2eFixture } from './seed';
 
@@ -17,8 +17,8 @@ export async function login(page: Page, fixture: E2eFixture) {
  * htmlFor, so getByLabel can't find them. This locates the control
  * immediately following a label with the given exact text.
  */
-export function controlAfterLabel(page: Page, label: string) {
-  return page.locator(
+export function controlAfterLabel(root: Page | Locator, label: string) {
+  return root.locator(
     `xpath=//label[normalize-space(text())="${label}"]/following-sibling::*[self::input or self::select or self::textarea][1]`,
   );
 }

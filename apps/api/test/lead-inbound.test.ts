@@ -16,6 +16,7 @@ import { CustomFieldsService } from '../src/custom-fields/custom-fields.service'
 import { AssignmentService } from '../src/presales/assignment.service';
 import { ApplicantService } from '../src/presales/applicant.service';
 import { LeadStageTransitionService } from '../src/presales/lead-stage-transition.service';
+import { InquiryDispositionTransitionService } from '../src/presales/inquiry-disposition-transition.service';
 import { PanEncryptionService } from '../src/common/pan-encryption.service';
 import { LeadApiKeyService } from '../src/leads/lead-api-key.service';
 import { LeadInboundController } from '../src/leads/lead-inbound.controller';
@@ -54,7 +55,7 @@ describeIf('Inbound lead API (Phase 7 commit 2)', () => {
     fx = await seedCompany(systemPrisma);
     const assignmentService = new AssignmentService(tenantPrisma);
     const applicantService = new ApplicantService(tenantPrisma, systemPrisma, new PanEncryptionService(), new CustomFieldsService(tenantPrisma, systemPrisma));
-    inquiryService = new InquiryService(tenantPrisma, systemPrisma, SYSTEM_CLOCK, assignmentService, applicantService, new CustomFieldsService(tenantPrisma, systemPrisma), new LeadStageTransitionService());
+    inquiryService = new InquiryService(tenantPrisma, systemPrisma, SYSTEM_CLOCK, assignmentService, applicantService, new CustomFieldsService(tenantPrisma, systemPrisma), new LeadStageTransitionService(), new InquiryDispositionTransitionService());
     leadApiKeyService = new LeadApiKeyService(systemPrisma);
     inboundController = new LeadInboundController(inquiryService);
   });
