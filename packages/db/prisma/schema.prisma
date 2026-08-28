@@ -1678,6 +1678,16 @@ model Booking {
   // as interestRuleId above — set by a Phase 5 controller-layer call after
   // the booking exists, never by BookingService itself.
   brokerId               String?       @map("broker_id") @db.Uuid
+  /// The inquiry this booking converted from (Follow-Up Page spec's
+  /// Successful->Booking gap). Null = a booking with no recorded source
+  /// lead. Scalar + DB-level FK (no Prisma relation), same policy as
+  /// brokerId/interestRuleId above — set by
+  /// InquiryService.attachBooking(), a separate controller-layer call
+  /// after the booking exists, never by BookingService itself. One
+  /// inquiry converts to at most one booking, enforced by a partial
+  /// unique index (bookings_source_inquiry_id_key, migration SQL) — not
+  /// this column alone; see the index's own comment for why.
+  sourceInquiryId        String?       @map("source_inquiry_id") @db.Uuid
   bookingDate            DateTime      @map("booking_date") @db.Date
   allotmentDate          DateTime?     @map("allotment_date") @db.Date
   registrationDate       DateTime?     @map("registration_date") @db.Date

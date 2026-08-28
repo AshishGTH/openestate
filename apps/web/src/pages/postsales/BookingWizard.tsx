@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { formatInr, computeBaseAmountPaise, toAreaScaled, type AreaUnit } from '@openestate/shared';
 import { api } from '../../lib/api';
@@ -292,6 +292,36 @@ export default function BookingWizard() {
     }
   }, [myDrafts, draftId, resumeOffer]);
 
+  // Entry point from InquiryDetail's "Create Booking" link (Successful ->
+  // Booking): carries the applicant/project forward as a convenience
+  // prefill, and sourceInquiryId through to the post-create attach call
+  // below. Ephemeral — not part of DraftData/booking-drafts persistence,
+  // so resuming an unrelated saved draft loses it, same as any other
+  // fresh-navigation state would.
+  const [searchParams] = useSearchParams();
+  const sourceInquiryId = searchParams.get('sourceInquiryId');
+  const prefillApplicantId = searchParams.get('applicantId');
+  const prefillProjectId = searchParams.get('projectId');
+  const [prefillApplied, setPrefillApplied] = useState(false);
+
+  const { data: prefillApplicant } = useQuery<ApplicantRow>({
+    queryKey: ['booking-wizard-prefill-applicant', prefillApplicantId],
+    queryFn: () => api(`/applicants/${prefillApplicantId}`),
+    enabled: !!prefillApplicantId && !prefillApplied,
+  });
+
+  useEffect(() => {
+    if (prefillApplied) return;
+    if (!prefillApplicantId && !prefillProjectId) return;
+    if (prefillApplicantId && !prefillApplicant) return;
+    setDraft((d) => ({
+      ...d,
+      ...(prefillApplicant ? { primaryApplicantId: prefillApplicant.id, primaryApplicantName: prefillApplicant.name } : {}),
+      ...(prefillProjectId ? { projectId: prefillProjectId } : {}),
+    }));
+    setPrefillApplied(true);
+  }, [prefillApplicant, prefillApplicantId, prefillProjectId, prefillApplied]);
+
   const { data: projects } = useQuery<{ data: ProjectRow[] }>({
     queryKey: ['projects-all'],
     queryFn: () => api('/projects?limit=100'),
@@ -461,6 +491,13 @@ export default function BookingWizard() {
         await api(`/bookings/${booking.id}/broker`, {
           method: 'POST',
           body: JSON.stringify({ brokerId: draft.brokerId }),
+        });
+      }
+
+      if (sourceInquiryId) {
+        await api(`/bookings/${booking.id}/source-inquiry`, {
+          method: 'POST',
+          body: JSON.stringify({ inquiryId: sourceInquiryId }),
         });
       }
 

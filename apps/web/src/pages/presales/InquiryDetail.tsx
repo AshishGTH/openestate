@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
 import {
   CustomFieldDisplay,
   useCustomFieldDefinitions,
@@ -58,6 +59,7 @@ const STATUSES = ['OPEN', 'CONTINUED', 'DUMPED', 'SUCCESSFUL'];
 export default function InquiryDetailPage() {
   const { id } = useParams<{ id: string }>();
   const qc = useQueryClient();
+  const { hasPermission } = useAuth();
 
   const [typeId, setTypeId] = useState('');
   const [notes, setNotes] = useState('');
@@ -230,6 +232,15 @@ export default function InquiryDetailPage() {
           ))}
         </div>
         {statusError && <p className="mt-2 text-sm text-red-600">{statusError}</p>}
+
+        {inquiry.status === 'SUCCESSFUL' && hasPermission('postsales.booking.create') && (
+          <Link
+            to={`/postsales/bookings/new?sourceInquiryId=${inquiry.id}&applicantId=${inquiry.applicant.id}${inquiry.project ? `&projectId=${inquiry.project.id}` : ''}`}
+            className="mt-3 inline-block rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+          >
+            Create Booking
+          </Link>
+        )}
 
         {showDumpForm && (
           <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-4" data-testid="dump-form">

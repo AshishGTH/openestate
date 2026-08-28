@@ -83,8 +83,11 @@ export class FollowUpService {
         });
 
         // Advance the inquiry's own next-followup cursor when this
-        // follow-up carries a next action date; also flips DUMPED/SUCCESSFUL
-        // inquiries back to CONTINUED when a new follow-up is logged.
+        // follow-up carries a next action date. Only OPEN flips to
+        // CONTINUED here — a DUMPED/SUCCESSFUL inquiry's status is left
+        // untouched (this ternary's `: inquiry.status` branch), a logged
+        // interaction never reopens a closed lead. See docs/todo.md for
+        // the open product question this raises.
         if (dto.nextActionAt) {
           await tx.inquiry.update({
             where: { id: inquiryId },

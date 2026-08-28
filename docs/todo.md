@@ -613,3 +613,22 @@ pattern is now established (mirror `assertStageBelongsToCompany`'s
 shape for each master/relation). Whoever picks this up should audit
 `InquiryService.update()`'s DTO fields too, not just `create()`'s.
 explicitly rather than deriving them from `rows[0]`.
+
+## Should logging a follow-up on a closed lead reopen it?
+
+`FollowUpService.create()`'s status-advance ternary
+(`status: inquiry.status === 'OPEN' ? 'CONTINUED' : inquiry.status`)
+only flips OPEN to CONTINUED — a DUMPED or SUCCESSFUL inquiry's status
+is left exactly as-is when a new follow-up with a `nextActionAt` is
+logged against it. This has been the actual behavior since item 1 of
+the Follow-Up Page spec work landed; a stale comment above it claimed
+otherwise for a while (fixed, not the point of this entry).
+
+The open product question: should logging an interaction on a closed
+lead reopen it? Current behavior says no — a rep can log a note against
+a DUMPED or SUCCESSFUL inquiry (there's no guard against that either)
+without it silently coming back to life in the active pipeline. That
+seems like the safer default (a closed lead shouldn't resurrect via a
+side effect of logging a call), but nobody has actually asked for
+either behavior — this is speculative, not SOP-mandated. Whoever
+changes it should decide deliberately, not fix it as a "bug."

@@ -413,9 +413,10 @@ export class InquiryService {
     // every save of an already-successful inquiry — otherwise it would
     // drift exactly like updatedAt, which is the problem it exists to
     // solve. Cleared when the inquiry moves back out of SUCCESSFUL, so a
-    // re-opened lead stops counting as a conversion. This is the only
-    // code path in the app that sets SUCCESSFUL (FollowUpService only
-    // moves OPEN -> CONTINUED), so one place covers it.
+    // re-opened lead stops counting as a conversion. attachBooking()
+    // below is the other code path that can set SUCCESSFUL (a real
+    // booking causing the disposition, not the reverse) and follows the
+    // identical stamp-only-on-transition discipline.
     if (statusChanged) {
       if (dto.status === 'SUCCESSFUL') {
         data.convertedAt = this.clock.now();
@@ -482,6 +483,85 @@ export class InquiryService {
         return updated;
       }),
     );
+  }
+
+  /**
+   * Links a real Booking back to the inquiry it converted from
+   * (Booking.sourceInquiryId — mirrors BrokerService.assignToBooking's
+   * shape exactly: scalar FK, no relation, a separate call after the
+   * booking already exists, BookingService itself never touched).
+   *
+   * Ordering is deliberate: the SOP says Successful MEANS a confirmed
+   * booking — the booking causes the disposition, not the reverse — so
+   * this does NOT require the inquiry to already be SUCCESSFUL. It
+   * accepts any inquiry that isn't DUMPED (a dead lead doesn't get
+   * revived by a booking link — reject that outright) and that doesn't
+   * already have a booking attached (one lead converts to one booking;
+   * bookings_source_inquiry_id_key is the actual, concurrency-safe
+   * enforcement — the checks below exist only for a clean error message
+   * before the DB round trip). The status flip to SUCCESSFUL and its
+   * disposition-history row only fire when the inquiry wasn't already
+   * SUCCESSFUL, so retroactively linking an old, already-successful lead
+   * doesn't re-stamp convertedAt or write a no-op transition row.
+   */
+  async attachBooking(companyId: string, inquiryId: string, bookingId: string, actorId: string) {
+    try {
+      return await runWithTenant({ companyId }, () =>
+        withTenantTx(this.tenantPrisma, companyId, async (tx) => {
+          const inquiry = await tx.inquiry.findFirst({ where: { id: inquiryId, companyId } });
+          if (!inquiry) throw new NotFoundException('Inquiry not found');
+          const booking = await tx.booking.findFirst({ where: { id: bookingId, companyId } });
+          if (!booking) throw new NotFoundException('Booking not found');
+
+          if (inquiry.status === 'DUMPED') {
+            throw new BadRequestException(
+              'Cannot link a booking to a dumped lead — a dumped lead does not get revived by a booking link.',
+            );
+          }
+          if (booking.sourceInquiryId) {
+            throw new BadRequestException('This booking is already linked to a source inquiry.');
+          }
+          const alreadyLinked = await tx.booking.findFirst({
+            where: { companyId, sourceInquiryId: inquiryId },
+            select: { bookingNumber: true },
+          });
+          if (alreadyLinked) {
+            throw new BadRequestException(
+              `This inquiry is already linked to booking ${alreadyLinked.bookingNumber}.`,
+            );
+          }
+
+          const updatedBooking = await tx.booking.update({
+            where: { id: bookingId },
+            data: { sourceInquiryId: inquiryId },
+          });
+
+          if (inquiry.status !== 'SUCCESSFUL') {
+            await tx.inquiry.update({
+              where: { id: inquiryId },
+              data: { status: 'SUCCESSFUL', convertedAt: this.clock.now() },
+            });
+            await this.dispositionTransition.writeDispositionTransition(
+              tx,
+              companyId,
+              inquiryId,
+              inquiry.status,
+              'SUCCESSFUL',
+              actorId,
+              null,
+              `Linked to booking ${booking.bookingNumber}`,
+            );
+          }
+
+          return updatedBooking;
+        }),
+      );
+    } catch (err) {
+      if (err && typeof err === 'object' && (err as { code?: string }).code === 'P2002') {
+        throw new BadRequestException('This inquiry is already linked to a booking.');
+      }
+      throw err;
+    }
   }
 
   /**
