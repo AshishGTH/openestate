@@ -12,6 +12,7 @@ import { CustomFieldsService } from '../src/custom-fields/custom-fields.service'
 import { AssignmentService } from '../src/presales/assignment.service';
 import { InquiryImportService } from '../src/presales/inquiry-import.service';
 import { LeadStageTransitionService } from '../src/presales/lead-stage-transition.service';
+import { InquiryDispositionTransitionService } from '../src/presales/inquiry-disposition-transition.service';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -44,6 +45,7 @@ describeIf('Inquiry role scoping and import', () => {
       undefined as never,
       new CustomFieldsService(tenantPrisma, systemPrisma),
       new LeadStageTransitionService(),
+      new InquiryDispositionTransitionService(),
     );
     // assignmentService/leadStageTransition were previously omitted here
     // entirely (assignmentService undefined) — this file's own rows never
@@ -51,7 +53,7 @@ describeIf('Inquiry role scoping and import', () => {
     // already-constructed assignmentService now costs nothing and is more
     // correct; leadStageTransition is newly required (every row now
     // resolves/logs a stage, unconditionally, unlike assignment).
-    importService = new InquiryImportService(tenantPrisma, assignmentService, new LeadStageTransitionService());
+    importService = new InquiryImportService(tenantPrisma, assignmentService, new LeadStageTransitionService(), new InquiryDispositionTransitionService());
 
     const company = await systemPrisma.company.create({
       data: { name: 'Scope Test Co', slug: `scope-test-${Date.now()}` },

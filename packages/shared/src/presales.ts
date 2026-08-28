@@ -204,6 +204,13 @@ export const updateInquirySchema = z
     // ever moved to a different stage. See LeadStage's own doc comment.
     stageId: z.string().uuid().optional(),
     status: z.nativeEnum(INQUIRY_STATUS).optional(),
+    // Required by InquiryService.update() when status is transitioning
+    // to DUMPED (SOP rule 5) — not expressible here since that's
+    // conditional on the transition itself, which zod can't see. Not
+    // persisted on Inquiry at all; carried through to the
+    // InquiryDispositionHistory row only.
+    dumpReasonId: z.string().uuid().optional(),
+    dumpRemarks: z.string().max(2000).optional(),
     nextFollowupAt: z.coerce.date().nullable().optional(),
     customFields: z.record(z.unknown()).optional(),
   })
@@ -270,6 +277,15 @@ export const createFollowUpSchema = z
     typeId: z.string().uuid().optional(),
     notes: z.string().max(5000).optional(),
     outcome: z.nativeEnum(FOLLOW_UP_OUTCOME).optional(),
+    // When the interaction happened — distinct from nextActionAt (when
+    // the NEXT one is due). Omitted -> FollowUpService.create() defaults
+    // to the injected Clock's now(); provided -> lets a rep log a call
+    // that happened earlier (yesterday, this morning) rather than only
+    // "right now."
+    interactionAt: z.coerce.date().optional(),
+    // Required by FollowUpService.create() whenever the inquiry is
+    // currently OPEN/CONTINUED (SOP rule 2) — not expressible here since
+    // that depends on live inquiry state, which zod can't see.
     nextActionAt: z.coerce.date().optional(),
     scheduledAt: z.coerce.date().optional(),
     venue: z.string().max(255).optional(),

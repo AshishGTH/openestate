@@ -13,6 +13,7 @@ const MASTER_TABLES = [
   { key: 'inquiry-types', label: 'Inquiry Types' },
   { key: 'inquiry-temperatures', label: 'Inquiry Temperatures' },
   { key: 'follow-up-types', label: 'Follow-Up Types' },
+  { key: 'dump-reasons', label: 'Dump Reasons' },
   { key: 'ticket-categories', label: 'Ticket Categories' },
   { key: 'communication-types', label: 'Communication Types' },
   { key: 'project-types', label: 'Project Types' },

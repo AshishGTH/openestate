@@ -21,6 +21,7 @@ import { InquiryService } from '../src/presales/inquiry.service';
 import { AssignmentService } from '../src/presales/assignment.service';
 import { CustomFieldsService } from '../src/custom-fields/custom-fields.service';
 import { LeadStageTransitionService } from '../src/presales/lead-stage-transition.service';
+import { InquiryDispositionTransitionService } from '../src/presales/inquiry-disposition-transition.service';
 import { LeadStageService } from '../src/masters/lead-stage/lead-stage.service';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
@@ -55,6 +56,7 @@ describeIf('Lead stage foundation (Phase 0)', () => {
       undefined as never,
       new CustomFieldsService(tenantPrisma, systemPrisma),
       new LeadStageTransitionService(),
+      new InquiryDispositionTransitionService(),
     );
     leadStageService = new LeadStageService(tenantPrisma, systemPrisma);
   });
@@ -175,8 +177,20 @@ describeIf('Lead stage foundation (Phase 0)', () => {
       const stage = await leadStageService.create(companyB.companyId, { name: 'Terminal Check Stage', sortOrder: 8, isActive: true, isDefault: false });
       const applicantId = await makeApplicant(systemPrisma, companyB.companyId);
       const inquiry = await inquiryService.create(companyB.companyId, { applicantId, stageId: stage.id }, companyB.userId);
+      // Dump now requires a reason + remarks (SOP rule 5) — this test is
+      // about stageId surviving the transition, not about that
+      // requirement, so it's satisfied here rather than worked around.
+      const dumpReason = await systemPrisma.dumpReason.create({
+        data: { companyId: companyB.companyId, name: 'Terminal Check Reason', sortOrder: 0 },
+      });
 
-      await inquiryService.update(companyB.companyId, inquiry.id, { status: 'DUMPED' }, { visibleUserIds: null }, companyB.userId);
+      await inquiryService.update(
+        companyB.companyId,
+        inquiry.id,
+        { status: 'DUMPED', dumpReasonId: dumpReason.id, dumpRemarks: 'Just checking stageId survives' },
+        { visibleUserIds: null },
+        companyB.userId,
+      );
 
       const after = await systemPrisma.inquiry.findUnique({ where: { id: inquiry.id } });
       expect(after.status).toBe('DUMPED');

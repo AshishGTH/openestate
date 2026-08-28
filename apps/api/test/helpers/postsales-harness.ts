@@ -343,15 +343,19 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     // to_stage_id is RESTRICT onto lead_stages (never delete audit history
     // for a stage that's still referenced) — must be deleted explicitly,
     // and before lead_stages below, or that delete would fail.
-    'communication_logs', 'follow_ups', 'inquiry_assignments', 'inquiry_stage_history', 'inquiries',
-    // inquiry_sources/lead_stages are masters referenced by inquiries'
-    // source_id/stage_id, so both must be deleted after inquiries above,
-    // not with the other masters section — never previously exercised by
-    // this harness (same never-caught-until-first-use gap as
-    // inquiries/custom_field_definitions above), surfaced by the
+    // inquiry_disposition_history.inquiry_id also cascades from inquiries
+    // (its reason_id is SET NULL onto dump_reasons, not RESTRICT, but
+    // listed explicitly anyway, same discipline as inquiry_stage_history).
+    'communication_logs', 'follow_ups', 'inquiry_assignments', 'inquiry_stage_history', 'inquiry_disposition_history', 'inquiries',
+    // inquiry_sources/lead_stages/dump_reasons are masters referenced by
+    // inquiries' source_id/stage_id (dump_reasons only via disposition
+    // history, already gone by this point) — deleted after inquiries
+    // above, not with the other masters section — never previously
+    // exercised by this harness (same never-caught-until-first-use gap
+    // as inquiries/custom_field_definitions above), surfaced by the
     // master-factory regression test being the first to create an
     // InquirySource row here.
-    'inquiry_sources', 'lead_stages',
+    'inquiry_sources', 'lead_stages', 'dump_reasons',
     // Item 7: applicant_a_id/applicant_b_id are ON DELETE CASCADE from
     // applicants, so this would clean up on its own — listed explicitly
     // anyway, before 'applicants', matching this file's own discipline.

@@ -97,6 +97,7 @@ const MASTER_CASES: MasterCase[] = [
   { label: 'UnitType', path: 'unit-types', payload: simpleBase() },
   { label: 'PlcType', path: 'plc-types', payload: simpleBase() },
   { label: 'InquirySource', path: 'inquiry-sources', payload: simpleBase() },
+  { label: 'DumpReason', path: 'dump-reasons', payload: simpleBase() },
   { label: 'InquiryType', path: 'inquiry-types', payload: simpleBase() },
   { label: 'InquiryTemperature', path: 'inquiry-temperatures', payload: simpleBase() },
   { label: 'FollowUpType', path: 'follow-up-types', payload: simpleBase() },

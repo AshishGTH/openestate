@@ -23,6 +23,7 @@ import { EscalationScheduler } from './escalation.scheduler';
 import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';
 import { LeadStageTransitionService } from './lead-stage-transition.service';
+import { InquiryDispositionTransitionService } from './inquiry-disposition-transition.service';
 
 @Module({
   imports: [QueuesModule, CustomFieldsModule, TeamScopeModule],
@@ -57,6 +58,7 @@ import { LeadStageTransitionService } from './lead-stage-transition.service';
     EscalationScheduler,
     ReportsService,
     LeadStageTransitionService,
+    InquiryDispositionTransitionService,
   ],
   // ReportsService is exported for DashboardModule, which reuses
   // funnelByStatus rather than reimplementing the status aggregation.

@@ -17,101 +17,103 @@ model Company {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  users                    User[]
-  roles                    Role[]
-  config                   CompanyConfig?
-  customFieldDefs          CustomFieldDefinition[]
-  auditLogs                AuditLog[]
-  inquirySources           InquirySource[]
-  inquiryTypes             InquiryType[]
-  followUpTypes            FollowUpType[]
-  communicationTypes       CommunicationType[]
-  areaLocations            AreaLocation[]
-  projectTypes             ProjectType[]
-  documentTypes            DocumentType[]
-  letterTemplates          LetterTemplate[]
-  banks                    Bank[]
-  receiptTypes             ReceiptType[]
-  registrationTypes        RegistrationType[]
-  chargeTypes              ChargeType[]
-  gstRates                 GstRate[]
-  tdsRules                 TdsRule[]
-  interestRules            InterestRule[]
-  transferFeeRules         TransferFeeRule[]
-  paymentPlanTemplates     PaymentPlanTemplate[]
-  unitTypes                UnitType[]
-  plcTypes                 PlcType[]
-  projects                 Project[]
-  towers                   Tower[]
-  floors                   Floor[]
-  units                    Unit[]
-  unitPlcs                 UnitPlc[]
-  unitCharges              UnitCharge[]
-  unitRateRevisions        UnitRateRevision[]
-  unitStatusChanges        UnitStatusChange[]
-  applicants               Applicant[]
-  applicantConsents        ApplicantConsent[]
-  applicantMerges          ApplicantMerge[]
-  applicantDistinctPairs   ApplicantDistinctPair[]
-  inquiryTemperatures      InquiryTemperature[]
-  leadStages               LeadStage[]
-  inquiries                Inquiry[]
-  inquiryAssignments       InquiryAssignment[]
-  inquiryStageHistory      InquiryStageHistory[]
-  projectAssignmentPools   ProjectAssignmentPool[]
-  followUps                FollowUp[]
-  smsTemplates             SmsTemplate[]
-  communicationLogs        CommunicationLog[]
-  cancellationRules        CancellationRule[]
-  applicantAddresses       ApplicantAddress[]
-  applicantDocuments       ApplicantDocument[]
-  bookings                 Booking[]
-  bookingCoApplicants      BookingCoApplicant[]
-  bookingCostLines         BookingCostLine[]
-  paymentPlans             PaymentPlan[]
-  installments             Installment[]
-  ledgerEntries            LedgerEntry[]
-  receipts                 Receipt[]
-  receiptAllocations       ReceiptAllocation[]
-  chequeStatusEvents       ChequeStatusEvent[]
-  numberSequences          NumberSequence[]
-  transfers                Transfer[]
-  cancellations            Cancellation[]
-  refunds                  Refund[]
-  paymentVouchers          PaymentVoucher[]
-  extraCharges             ExtraCharge[]
-  tdsDeductions            TdsDeduction[]
-  tdsCertificates          TdsCertificate[]
-  interestAccruals         InterestAccrual[]
-  paymentPlanMilestones    PaymentPlanMilestone[]
-  generatedDocuments       GeneratedDocument[]
-  documentDispatches       DocumentDispatch[]
-  bookingDrafts            BookingDraft[]
-  brokers                  Broker[]
-  brokerBankDetails        BrokerBankDetail[]
-  brokerCommissionRules    BrokerCommissionRule[]
-  brokerCommissionSlabs    BrokerCommissionSlab[]
-  brokerBookingCommissions BrokerBookingCommission[]
-  commissionLedgerEntries  CommissionLedgerEntry[]
-  commissionPayments       CommissionPayment[]
-  brokerNocs               BrokerNoc[]
-  portalInvites            PortalInvite[]
-  portalPasswordResets     PortalPasswordReset[]
-  passwordResets           PasswordReset[]
-  applicantChangeRequests  ApplicantChangeRequest[]
-  ticketCategories         TicketCategory[]
-  tickets                  Ticket[]
-  ticketMessages           TicketMessage[]
-  constructionUpdates      ConstructionUpdate[]
-  constructionUpdateMedia  ConstructionUpdateMedia[]
-  projectMedia             ProjectMedia[]
-  pluginInstallations      PluginInstallation[]
-  webhookEndpoints         WebhookEndpoint[]
-  webhookDeliveries        WebhookDelivery[]
-  webhookDeliveryAttempts  WebhookDeliveryAttempt[]
-  leadSourceApiKeys        LeadSourceApiKey[]
-  inventoryGroups          InventoryGroup[]
-  stageRaises              StageRaise[]
+  users                     User[]
+  roles                     Role[]
+  config                    CompanyConfig?
+  customFieldDefs           CustomFieldDefinition[]
+  auditLogs                 AuditLog[]
+  inquirySources            InquirySource[]
+  inquiryTypes              InquiryType[]
+  followUpTypes             FollowUpType[]
+  communicationTypes        CommunicationType[]
+  areaLocations             AreaLocation[]
+  projectTypes              ProjectType[]
+  documentTypes             DocumentType[]
+  letterTemplates           LetterTemplate[]
+  banks                     Bank[]
+  receiptTypes              ReceiptType[]
+  registrationTypes         RegistrationType[]
+  chargeTypes               ChargeType[]
+  gstRates                  GstRate[]
+  tdsRules                  TdsRule[]
+  interestRules             InterestRule[]
+  transferFeeRules          TransferFeeRule[]
+  paymentPlanTemplates      PaymentPlanTemplate[]
+  unitTypes                 UnitType[]
+  plcTypes                  PlcType[]
+  projects                  Project[]
+  towers                    Tower[]
+  floors                    Floor[]
+  units                     Unit[]
+  unitPlcs                  UnitPlc[]
+  unitCharges               UnitCharge[]
+  unitRateRevisions         UnitRateRevision[]
+  unitStatusChanges         UnitStatusChange[]
+  applicants                Applicant[]
+  applicantConsents         ApplicantConsent[]
+  applicantMerges           ApplicantMerge[]
+  applicantDistinctPairs    ApplicantDistinctPair[]
+  inquiryTemperatures       InquiryTemperature[]
+  leadStages                LeadStage[]
+  dumpReasons               DumpReason[]
+  inquiries                 Inquiry[]
+  inquiryAssignments        InquiryAssignment[]
+  inquiryStageHistory       InquiryStageHistory[]
+  inquiryDispositionHistory InquiryDispositionHistory[]
+  projectAssignmentPools    ProjectAssignmentPool[]
+  followUps                 FollowUp[]
+  smsTemplates              SmsTemplate[]
+  communicationLogs         CommunicationLog[]
+  cancellationRules         CancellationRule[]
+  applicantAddresses        ApplicantAddress[]
+  applicantDocuments        ApplicantDocument[]
+  bookings                  Booking[]
+  bookingCoApplicants       BookingCoApplicant[]
+  bookingCostLines          BookingCostLine[]
+  paymentPlans              PaymentPlan[]
+  installments              Installment[]
+  ledgerEntries             LedgerEntry[]
+  receipts                  Receipt[]
+  receiptAllocations        ReceiptAllocation[]
+  chequeStatusEvents        ChequeStatusEvent[]
+  numberSequences           NumberSequence[]
+  transfers                 Transfer[]
+  cancellations             Cancellation[]
+  refunds                   Refund[]
+  paymentVouchers           PaymentVoucher[]
+  extraCharges              ExtraCharge[]
+  tdsDeductions             TdsDeduction[]
+  tdsCertificates           TdsCertificate[]
+  interestAccruals          InterestAccrual[]
+  paymentPlanMilestones     PaymentPlanMilestone[]
+  generatedDocuments        GeneratedDocument[]
+  documentDispatches        DocumentDispatch[]
+  bookingDrafts             BookingDraft[]
+  brokers                   Broker[]
+  brokerBankDetails         BrokerBankDetail[]
+  brokerCommissionRules     BrokerCommissionRule[]
+  brokerCommissionSlabs     BrokerCommissionSlab[]
+  brokerBookingCommissions  BrokerBookingCommission[]
+  commissionLedgerEntries   CommissionLedgerEntry[]
+  commissionPayments        CommissionPayment[]
+  brokerNocs                BrokerNoc[]
+  portalInvites             PortalInvite[]
+  portalPasswordResets      PortalPasswordReset[]
+  passwordResets            PasswordReset[]
+  applicantChangeRequests   ApplicantChangeRequest[]
+  ticketCategories          TicketCategory[]
+  tickets                   Ticket[]
+  ticketMessages            TicketMessage[]
+  constructionUpdates       ConstructionUpdate[]
+  constructionUpdateMedia   ConstructionUpdateMedia[]
+  projectMedia              ProjectMedia[]
+  pluginInstallations       PluginInstallation[]
+  webhookEndpoints          WebhookEndpoint[]
+  webhookDeliveries         WebhookDelivery[]
+  webhookDeliveryAttempts   WebhookDeliveryAttempt[]
+  leadSourceApiKeys         LeadSourceApiKey[]
+  inventoryGroups           InventoryGroup[]
+  stageRaises               StageRaise[]
 
   @@map("companies")
 }
@@ -161,24 +163,25 @@ model User {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  company                       Company                 @relation(fields: [companyId], references: [id])
-  role                          Role                    @relation(fields: [roleId], references: [id])
+  company                       Company                     @relation(fields: [companyId], references: [id])
+  role                          Role                        @relation(fields: [roleId], references: [id])
   refreshTokens                 RefreshToken[]
   auditLogs                     AuditLog[]
-  rateRevisionsCreated          UnitRateRevision[]      @relation("rateRevisionCreator")
-  statusChangesActed            UnitStatusChange[]      @relation("statusChangeActor")
-  consentsRecorded              ApplicantConsent[]      @relation("consentActor")
-  applicantMergesActed          ApplicantMerge[]        @relation("applicantMergeActor")
-  applicantDistinctPairsDecided ApplicantDistinctPair[] @relation("applicantDistinctPairDecider")
-  inquiriesAssigned             Inquiry[]               @relation("inquiryAssignee")
-  inquiriesCreated              Inquiry[]               @relation("inquiryCreator")
-  assignmentsFrom               InquiryAssignment[]     @relation("assignmentFrom")
-  assignmentsTo                 InquiryAssignment[]     @relation("assignmentTo")
-  assignmentsActed              InquiryAssignment[]     @relation("assignmentActor")
-  stageChangesActed             InquiryStageHistory[]   @relation("stageHistoryChangedBy")
-  assignmentPools               ProjectAssignmentPool[] @relation("assignmentPoolMember")
-  followUpsCreated              FollowUp[]              @relation("followUpCreator")
-  communicationLogsCreated      CommunicationLog[]      @relation("commLogCreator")
+  rateRevisionsCreated          UnitRateRevision[]          @relation("rateRevisionCreator")
+  statusChangesActed            UnitStatusChange[]          @relation("statusChangeActor")
+  consentsRecorded              ApplicantConsent[]          @relation("consentActor")
+  applicantMergesActed          ApplicantMerge[]            @relation("applicantMergeActor")
+  applicantDistinctPairsDecided ApplicantDistinctPair[]     @relation("applicantDistinctPairDecider")
+  inquiriesAssigned             Inquiry[]                   @relation("inquiryAssignee")
+  inquiriesCreated              Inquiry[]                   @relation("inquiryCreator")
+  assignmentsFrom               InquiryAssignment[]         @relation("assignmentFrom")
+  assignmentsTo                 InquiryAssignment[]         @relation("assignmentTo")
+  assignmentsActed              InquiryAssignment[]         @relation("assignmentActor")
+  stageChangesActed             InquiryStageHistory[]       @relation("stageHistoryChangedBy")
+  dispositionChangesActed       InquiryDispositionHistory[] @relation("dispositionHistoryChangedBy")
+  assignmentPools               ProjectAssignmentPool[]     @relation("assignmentPoolMember")
+  followUpsCreated              FollowUp[]                  @relation("followUpCreator")
+  communicationLogsCreated      CommunicationLog[]          @relation("commLogCreator")
 
   @@unique([companyId, email])
   @@index([companyId, phone])
@@ -1294,20 +1297,21 @@ model Inquiry {
   createdAt           DateTime      @default(now()) @map("created_at")
   updatedAt           DateTime      @updatedAt @map("updated_at")
 
-  company           Company               @relation(fields: [companyId], references: [id])
-  applicant         Applicant             @relation(fields: [applicantId], references: [id])
-  project           Project?              @relation(fields: [projectId], references: [id])
-  source            InquirySource?        @relation(fields: [sourceId], references: [id])
-  inquiryType       InquiryType?          @relation(fields: [inquiryTypeId], references: [id])
-  preferredUnitType UnitType?             @relation(fields: [preferredUnitTypeId], references: [id])
-  temperature       InquiryTemperature?   @relation(fields: [temperatureId], references: [id])
-  stage             LeadStage?            @relation(fields: [stageId], references: [id])
-  assignedTo        User?                 @relation("inquiryAssignee", fields: [assignedToId], references: [id])
-  createdBy         User?                 @relation("inquiryCreator", fields: [createdById], references: [id])
-  followUps         FollowUp[]
-  assignments       InquiryAssignment[]
-  stageHistory      InquiryStageHistory[]
-  communicationLogs CommunicationLog[]
+  company            Company                     @relation(fields: [companyId], references: [id])
+  applicant          Applicant                   @relation(fields: [applicantId], references: [id])
+  project            Project?                    @relation(fields: [projectId], references: [id])
+  source             InquirySource?              @relation(fields: [sourceId], references: [id])
+  inquiryType        InquiryType?                @relation(fields: [inquiryTypeId], references: [id])
+  preferredUnitType  UnitType?                   @relation(fields: [preferredUnitTypeId], references: [id])
+  temperature        InquiryTemperature?         @relation(fields: [temperatureId], references: [id])
+  stage              LeadStage?                  @relation(fields: [stageId], references: [id])
+  assignedTo         User?                       @relation("inquiryAssignee", fields: [assignedToId], references: [id])
+  createdBy          User?                       @relation("inquiryCreator", fields: [createdById], references: [id])
+  followUps          FollowUp[]
+  assignments        InquiryAssignment[]
+  stageHistory       InquiryStageHistory[]
+  dispositionHistory InquiryDispositionHistory[]
+  communicationLogs  CommunicationLog[]
 
   @@index([companyId, assignedToId, status])
   @@index([companyId, nextFollowupAt])
@@ -1364,17 +1368,17 @@ model InquiryAssignment {
 /// retirement would look like thousands of leads reaching (or
 /// regressing into) that stage on one date.
 model InquiryStageHistory {
-  id                String   @id @default(uuid()) @db.Uuid
-  companyId         String   @map("company_id") @db.Uuid
-  inquiryId         String   @map("inquiry_id") @db.Uuid
-  fromStageId       String?  @map("from_stage_id") @db.Uuid
-  toStageId         String   @map("to_stage_id") @db.Uuid
-  changedById       String?  @map("changed_by_id") @db.Uuid
+  id               String   @id @default(uuid()) @db.Uuid
+  companyId        String   @map("company_id") @db.Uuid
+  inquiryId        String   @map("inquiry_id") @db.Uuid
+  fromStageId      String?  @map("from_stage_id") @db.Uuid
+  toStageId        String   @map("to_stage_id") @db.Uuid
+  changedById      String?  @map("changed_by_id") @db.Uuid
   /// True only for LeadStageService.reassignOccupants' bulk moves.
   /// Every other writer (inquiry creation, the InquiryDetail stage
   /// picker) leaves this false — those are real pipeline movements.
-  isAdministrative  Boolean  @default(false) @map("is_administrative")
-  changedAt         DateTime @default(now()) @map("changed_at")
+  isAdministrative Boolean  @default(false) @map("is_administrative")
+  changedAt        DateTime @default(now()) @map("changed_at")
 
   company   Company    @relation(fields: [companyId], references: [id])
   inquiry   Inquiry    @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
@@ -1384,6 +1388,65 @@ model InquiryStageHistory {
 
   @@index([companyId, inquiryId, changedAt])
   @@map("inquiry_stage_history")
+}
+
+/// Follow-Up Page spec gap #2 (docs/plans/followup-spec-gap-analysis.md,
+/// SOP rule 5): "the SOP screenshot shows a reason-selection control with
+/// multiple possible reasons, but the textual SOP does not provide a
+/// canonical complete list ... treated as configurable master data."
+/// Deliberately seeded with ZERO default rows, unlike LeadStage — the
+/// SOP gave real example Response values worth seeding; it explicitly
+/// does NOT give real Dump Reason values, so inventing some here would
+/// be exactly the kind of guess this project's own review keeps getting
+/// burned by. A company must configure at least one before Dump becomes
+/// usable, which is the correct, honest outcome.
+model DumpReason {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String   @map("company_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  isActive  Boolean  @default(true) @map("is_active")
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  company Company                     @relation(fields: [companyId], references: [id])
+  history InquiryDispositionHistory[]
+
+  @@unique([companyId, name])
+  @@map("dump_reasons")
+}
+
+/// Closes the one axis of three (companyId, inquiryId) that lacked a
+/// dedicated history table — stage transitions have InquiryStageHistory,
+/// ownership transitions have InquiryAssignment, but InquiryStatus itself
+/// (OPEN/CONTINUED/DUMPED/SUCCESSFUL) was a plain column overwritten in
+/// place with no history row (see the gap analysis's Definition-of-Done
+/// item 23: "true for stage and ownership; false for status itself").
+/// Written on EVERY status transition, including the initial null->OPEN
+/// at creation, for the same gap-free-from-row-one reason
+/// InquiryStageHistory's own doc comment gives — not just for DUMPED.
+/// `reasonId`/`remarks` are generic, nullable columns populated only
+/// when the transition needs them (currently: only DUMPED does, per SOP
+/// rule 5) — same "one optional column, used when relevant" shape as
+/// InquiryAssignment.reason, not a Dump-specific table.
+model InquiryDispositionHistory {
+  id          String         @id @default(uuid()) @db.Uuid
+  companyId   String         @map("company_id") @db.Uuid
+  inquiryId   String         @map("inquiry_id") @db.Uuid
+  fromStatus  InquiryStatus? @map("from_status")
+  toStatus    InquiryStatus  @map("to_status")
+  reasonId    String?        @map("reason_id") @db.Uuid
+  remarks     String?        @db.Text
+  changedById String?        @map("changed_by_id") @db.Uuid
+  changedAt   DateTime       @default(now()) @map("changed_at")
+
+  company   Company     @relation(fields: [companyId], references: [id])
+  inquiry   Inquiry     @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
+  reason    DumpReason? @relation(fields: [reasonId], references: [id])
+  changedBy User?       @relation("dispositionHistoryChangedBy", fields: [changedById], references: [id])
+
+  @@index([companyId, inquiryId, changedAt])
+  @@map("inquiry_disposition_history")
 }
 
 model ProjectAssignmentPool {
@@ -1416,18 +1479,26 @@ enum FollowUpOutcome {
 }
 
 model FollowUp {
-  id           String           @id @default(uuid()) @db.Uuid
-  companyId    String           @map("company_id") @db.Uuid
-  inquiryId    String           @map("inquiry_id") @db.Uuid
-  typeId       String?          @map("follow_up_type_id") @db.Uuid
-  notes        String?          @db.Text
-  outcome      FollowUpOutcome?
-  nextActionAt DateTime?        @map("next_action_at")
-  scheduledAt  DateTime?        @map("scheduled_at")
-  venue        String?          @db.VarChar(255)
-  createdById  String?          @map("created_by_id") @db.Uuid
-  createdAt    DateTime         @default(now()) @map("created_at")
-  updatedAt    DateTime         @updatedAt @map("updated_at")
+  id            String           @id @default(uuid()) @db.Uuid
+  companyId     String           @map("company_id") @db.Uuid
+  inquiryId     String           @map("inquiry_id") @db.Uuid
+  typeId        String?          @map("follow_up_type_id") @db.Uuid
+  notes         String?          @db.Text
+  outcome       FollowUpOutcome?
+  /// When the interaction itself happened — distinct from `createdAt`
+  /// (when the row was saved) and from `nextActionAt` (when the NEXT one
+  /// is due). User-settable so a rep can log a call that happened
+  /// yesterday; defaults to the injected Clock's `now()` when omitted
+  /// (set in FollowUpService, not relied on as a bare DB default, for
+  /// the same testability reason every other Clock-driven field in this
+  /// codebase is set explicitly).
+  interactionAt DateTime         @default(now()) @map("interaction_at")
+  nextActionAt  DateTime?        @map("next_action_at")
+  scheduledAt   DateTime?        @map("scheduled_at")
+  venue         String?          @db.VarChar(255)
+  createdById   String?          @map("created_by_id") @db.Uuid
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
 
   company   Company       @relation(fields: [companyId], references: [id])
   inquiry   Inquiry       @relation(fields: [inquiryId], references: [id], onDelete: Cascade)
