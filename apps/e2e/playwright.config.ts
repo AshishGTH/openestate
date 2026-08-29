@@ -51,6 +51,18 @@ export default defineConfig({
   // fewer workers than this.
   workers: 4,
   retries: process.env.CI ? 1 : 0,
+  // Playwright's own default (30s) landed several pre-existing specs
+  // (team-scope, ticket-reply, user-role-edit) exactly on the ceiling —
+  // 30.0-30.1s, not a wide miss — the moment the suite grew by two more
+  // real spec files (the presales reporting suite's own e2e coverage).
+  // CI's runner is fixed at 2 cores regardless of file count (see the
+  // `workers` comment above), so this isn't a worker-count problem to
+  // tune away; it's the same "genuinely needs more headroom under
+  // CI-only contention" case CLAUDE.md's Phase 7→8 entry already
+  // documents for postsales-property.test.ts's timeout. Raised on CI
+  // only — local runs, which never showed this, keep the tighter
+  // default so a genuine local hang still fails fast.
+  timeout: process.env.CI ? 45_000 : 30_000,
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   globalSetup: './global-setup.ts',
   use: {
