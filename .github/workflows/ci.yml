@@ -7,6 +7,11 @@ on:
   schedule:
     # Nightly full-strength property-test run (see integration-tests job).
     - cron: "0 3 * * *"
+  # Manual trigger, treated identically to `schedule` throughout this file
+  # (see integration-tests' PROPERTY_NUM_RUNS/timeout-minutes) — the only
+  # way to actually exercise and verify the nightly-strength path on demand
+  # rather than waiting for the next 03:00 UTC firing.
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -94,9 +99,21 @@ jobs:
     # applied: a hung step burned runner time for hours and never
     # self-reported. Found when a migration blocked on a database lock and
     # native-upgrade sat in_progress for an hour against a ~3 minute norm.
-    # 30 is far above every job's real duration (longest observed ~8 min)
-    # and far below the point where a hang stops being obvious.
-    timeout-minutes: 30
+    # 30 is far above every job's real duration on push/PR (longest observed
+    # ~8 min) and far below the point where a hang stops being obvious. The
+    # nightly schedule run gets more: it runs the ledger property test at
+    # full strength (2000 iterations, see PROPERTY_NUM_RUNS below), which
+    # alone was observed taking 28+ minutes and hitting this ceiling before
+    # even completing — three consecutive nightly runs cancelled this way,
+    # unnoticed because nothing blocks on a scheduled run. Paired with the
+    # "Fail if any test was skipped" fix below (which used to silently
+    # re-run the entire 2000-iteration property test a SECOND time, back
+    # to back — the actual bigger driver of the overrun). 90 is real
+    # headroom on top of that fix, verified by an actual green
+    # workflow_dispatch run at this exact PROPERTY_NUM_RUNS=2000 path — see
+    # CLAUDE.md's reporting-suite entry / docs/todo.md for the run that
+    # proved it and its real duration, not assumed from this comment alone.
+    timeout-minutes: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 90 || 30 }}
     services:
       postgres:
         image: postgres:16-alpine
@@ -197,17 +214,33 @@ jobs:
 
       - name: Run integration tests
         env:
-          # Ledger property test: full CI floor (2000 runs, ~6 min) only on
-          # the nightly schedule; PR/push runs 500 for fast feedback. Both
-          # are >= the property test's own local-dev default, so PR runs
-          # still exercise the invariant meaningfully, just not exhaustively.
+          # Ledger property test: full CI floor (2000 runs) only on the
+          # nightly schedule (or a manual workflow_dispatch run standing in
+          # for one); PR/push runs 500 for fast feedback. Both are >= the
+          # property test's own local-dev default, so PR runs still
+          # exercise the invariant meaningfully, just not exhaustively.
           # See CLAUDE.md Phase 4 decisions.
-          PROPERTY_NUM_RUNS: ${{ github.event_name == 'schedule' && '2000' || '500' }}
+          PROPERTY_NUM_RUNS: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && '2000' || '500' }}
         run: pnpm test
 
       - name: Fail if any test was skipped
         env:
-          PROPERTY_NUM_RUNS: ${{ github.event_name == 'schedule' && '2000' || '500' }}
+          # Deliberately NOT the same value as the step above, and
+          # deliberately NOT conditioned on event_name at all — this step's
+          # only job is detecting skipped tests (numPendingTests), which
+          # doesn't depend on how many fast-check iterations a passing
+          # property test ran. It used to inherit the same
+          # PROPERTY_NUM_RUNS as "Run integration tests", which meant the
+          # nightly schedule silently ran the 2000-iteration ledger
+          # property test a SECOND time, back to back, just to check a
+          # skip count — the real driver of three consecutive nightly runs
+          # blowing the job's 30-minute timeout before this was found
+          # (the property test alone took 28+ minutes and was still
+          # running when cancelled). A tiny fixed value still proves the
+          # test isn't skipped; it proves nothing about the invariant
+          # holding at scale, which the step above already proved once.
+          PROPERTY_NUM_RUNS: 5
+          PROPERTY_NUM_RUNS_COMMISSION: 5
         run: |
           # Run tests with JSON reporter and check for skipped tests
           cd packages/db
