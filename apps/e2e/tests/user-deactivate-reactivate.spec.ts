@@ -35,6 +35,12 @@ test('deactivating and reactivating a user, through the real button clicks', asy
   expect(createResponse.ok()).toBe(true);
   await expect(page).toHaveURL(/\/admin\/users$/);
 
+  // The list is company-wide and this fixture company is shared with
+  // other specs (e.g. user-role-edit.spec.ts) that create their own
+  // users concurrently — filter by the target's own unique name rather
+  // than assuming it lands on page 1 of an unfiltered, unsorted list.
+  const search = page.getByPlaceholder('Search by name or email…');
+  await search.fill(targetName);
   const row = page.getByRole('row', { name: new RegExp(targetName) });
   await expect(row).toBeVisible();
   await expect(row.getByText('Active', { exact: true })).toBeVisible();
@@ -54,6 +60,7 @@ test('deactivating and reactivating a user, through the real button clicks', asy
 
   // Persisted server-side, not just an optimistic client-side flip.
   await page.reload();
+  await page.getByPlaceholder('Search by name or email…').fill(targetName);
   const reloadedRow = page.getByRole('row', { name: new RegExp(targetName) });
   await expect(reloadedRow.getByText('Inactive', { exact: true })).toBeVisible();
 
@@ -66,6 +73,7 @@ test('deactivating and reactivating a user, through the real button clicks', asy
   await expect(reloadedRow.getByText('Active', { exact: true })).toBeVisible();
 
   await page.reload();
+  await page.getByPlaceholder('Search by name or email…').fill(targetName);
   const finalRow = page.getByRole('row', { name: new RegExp(targetName) });
   await expect(finalRow.getByText('Active', { exact: true })).toBeVisible();
 });
