@@ -1,8 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { createSystemPrismaClient } from '@openestate/db';
 import { ALL_PERMISSIONS, PERMISSIONS } from '@openestate/shared';
+import * as argon2 from '@node-rs/argon2';
 import { readFixture } from '../fixtures/state';
-import { login, controlAfterLabel } from '../fixtures/actions';
+import { login } from '../fixtures/actions';
 import { DATABASE_URL_SYSTEM } from '../playwright.config';
 
 /**
@@ -78,6 +79,14 @@ test('a view-only role sees reports but never the export or print buttons', asyn
   const staffPassword = 'ReportViewerPass123';
 
   try {
+    // Seeded directly via Prisma, not through Admin -> Add User — that
+    // form's own real-form-submission behavior is already covered by
+    // user-role-edit.spec.ts; driving it again here just adds concurrent
+    // load against /admin/users on the SAME shared mastersCrud fixture
+    // that spec (and team-scope.spec.ts) already exercise, which is what
+    // pushed both of them past their 30s timeout under real CI
+    // concurrency — confirmed by comparing against master's own last
+    // clean Playwright run (zero retries) before this file existed.
     for (const key of ALL_PERMISSIONS) {
       await prisma.permission.upsert({ where: { key }, update: {}, create: { key } });
     }
@@ -92,21 +101,18 @@ test('a view-only role sees reports but never the export or print buttons', asyn
     await prisma.rolePermission.create({ data: { roleId: viewerRole.id, permissionId: viewPermId } });
 
     const viewerEmail = `e2e-report-viewer-${tag}@test.com`;
-    await login(page, fixture);
-    await page.goto('/admin/users/new');
-    await controlAfterLabel(page, 'Name').fill('E2E Report Viewer');
-    await controlAfterLabel(page, 'Email').fill(viewerEmail);
-    await controlAfterLabel(page, 'Password').fill(staffPassword);
-    await controlAfterLabel(page, 'Role').selectOption({ label: viewerRole.name });
-    const [createRes] = await Promise.all([
-      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST'),
-      page.getByRole('button', { name: 'Create User' }).click(),
-    ]);
-    expect(createRes.ok()).toBe(true);
-    await prisma.user.updateMany({ where: { email: viewerEmail }, data: { forcePasswordChange: false } });
+    await prisma.user.create({
+      data: {
+        companyId: fixture.companyId,
+        email: viewerEmail,
+        passwordHash: await argon2.hash(staffPassword, { algorithm: argon2.Algorithm.Argon2id }),
+        name: 'E2E Report Viewer',
+        roleId: viewerRole.id,
+        forcePasswordChange: false,
+      },
+    });
 
-    await page.getByRole('button', { name: 'Sign out' }).click();
-    await expect(page).toHaveURL(/\/login$/);
+    await page.goto('/login');
     await page.locator('#email').fill(viewerEmail);
     await page.locator('#password').fill(staffPassword);
     await page.getByRole('button', { name: 'Sign in' }).click();
