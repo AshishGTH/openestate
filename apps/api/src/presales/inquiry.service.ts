@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -21,6 +22,8 @@ import { CLOCK } from '../common/clock.provider';
 import { AssignmentService } from './assignment.service';
 import { ApplicantService } from './applicant.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
+import { LeadStageTransitionService } from './lead-stage-transition.service';
+import { InquiryDispositionTransitionService } from './inquiry-disposition-transition.service';
 
 export interface InquiryScope {
   /**
@@ -61,6 +64,8 @@ export class InquiryService {
     private readonly assignmentService: AssignmentService,
     private readonly applicantService: ApplicantService,
     private readonly customFields: CustomFieldsService,
+    private readonly leadStageTransition: LeadStageTransitionService,
+    private readonly dispositionTransition: InquiryDispositionTransitionService,
   ) {}
 
   async findAll(companyId: string, query: PaginationQuery, scope: InquiryScope) {
@@ -238,6 +243,7 @@ export class InquiryService {
           }
         }
 
+        const resolvedStageId = await this.leadStageTransition.resolveInitialStage(tx, companyId, dto.stageId);
         const inquiry = await tx.inquiry.create({
           data: {
             companyId,
@@ -249,12 +255,15 @@ export class InquiryService {
             budgetMaxPaise: dto.budgetMaxPaise,
             preferredUnitTypeId: dto.preferredUnitTypeId,
             temperatureId: dto.temperatureId,
+            stageId: resolvedStageId,
             nextFollowupAt: dto.nextFollowupAt,
             createdById,
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             customFields: inquiryCustomFields as any,
           },
         });
+        await this.leadStageTransition.writeStageTransition(tx, companyId, inquiry.id, null, resolvedStageId, createdById);
+        await this.dispositionTransition.writeDispositionTransition(tx, companyId, inquiry.id, null, inquiry.status, createdById);
 
         // Creator-retains-lead policy (default on): a rep's own inquiry
         // must never silently move to someone else via round-robin.
@@ -352,14 +361,20 @@ export class InquiryService {
           applicantId = created.id;
         }
 
+        const resolvedStageId = await this.leadStageTransition.resolveInitialStage(tx, companyId, undefined);
         const inquiry = await tx.inquiry.create({
           data: {
             companyId,
             applicantId,
             projectId: lead.projectId,
+            stageId: resolvedStageId,
             customFields: lead.note ? { leadNote: lead.note } : undefined,
           },
         });
+        // No human actor for machine-driven intake — same reasoning as
+        // this method's assignmentType: 'auto'/actorId: null below.
+        await this.leadStageTransition.writeStageTransition(tx, companyId, inquiry.id, null, resolvedStageId, null);
+        await this.dispositionTransition.writeDispositionTransition(tx, companyId, inquiry.id, null, inquiry.status, null);
 
         if (lead.projectId) {
           const assignedToId = await this.assignmentService.autoAssign(tx, companyId, lead.projectId);
@@ -376,23 +391,48 @@ export class InquiryService {
     );
   }
 
-  async update(companyId: string, id: string, dto: UpdateInquiryDto, scope: InquiryScope) {
+  async update(
+    companyId: string,
+    id: string,
+    dto: UpdateInquiryDto,
+    scope: InquiryScope,
+    actorId: string,
+  ) {
     const existing = await this.findOne(companyId, id, scope);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data: any = { ...dto };
+    // Not real Inquiry columns — they belong on the disposition-history
+    // row only (InquiryDispositionHistory.reasonId/remarks), never on
+    // Inquiry itself. Delete rather than pass through to tx.inquiry.update().
+    delete data.dumpReasonId;
+    delete data.dumpRemarks;
+
+    const statusChanged = dto.status !== undefined && dto.status !== existing.status;
 
     // convertedAt is stamped on the TRANSITION into SUCCESSFUL, not on
     // every save of an already-successful inquiry — otherwise it would
     // drift exactly like updatedAt, which is the problem it exists to
     // solve. Cleared when the inquiry moves back out of SUCCESSFUL, so a
-    // re-opened lead stops counting as a conversion. This is the only
-    // code path in the app that sets SUCCESSFUL (FollowUpService only
-    // moves OPEN -> CONTINUED), so one place covers it.
-    if (dto.status !== undefined && dto.status !== existing.status) {
+    // re-opened lead stops counting as a conversion. attachBooking()
+    // below is the other code path that can set SUCCESSFUL (a real
+    // booking causing the disposition, not the reverse) and follows the
+    // identical stamp-only-on-transition discipline.
+    if (statusChanged) {
       if (dto.status === 'SUCCESSFUL') {
         data.convertedAt = this.clock.now();
       } else if (existing.status === 'SUCCESSFUL') {
         data.convertedAt = null;
+      }
+      // SOP rule 5: Dump requires both a reason (from the configurable
+      // DumpReason catalogue) and remarks — currently unenforced was the
+      // whole finding. Checked here, not in the zod schema, since it's
+      // conditional on the transition actually being INTO Dumped, which
+      // depends on live state zod can't see (same shape as LeadStage's
+      // default-deactivation guard).
+      if (dto.status === 'DUMPED' && (!dto.dumpReasonId || !dto.dumpRemarks?.trim())) {
+        throw new BadRequestException(
+          'Dumping a lead requires both a reason and remarks — select a reason and explain why for future reference.',
+        );
       }
     }
     if (dto.customFields !== undefined) {
@@ -403,11 +443,125 @@ export class InquiryService {
         (existing as { customFields?: Record<string, unknown> | null }).customFields ?? null,
       );
     }
+    const existingStageId = (existing as { stageId: string | null }).stageId;
+    const stageChanged = dto.stageId !== undefined && dto.stageId !== existingStageId;
+
     return runWithTenant({ companyId }, () =>
-      withTenantTx(this.tenantPrisma, companyId, (tx) =>
-        tx.inquiry.update({ where: { id }, data }),
-      ),
+      withTenantTx(this.tenantPrisma, companyId, async (tx) => {
+        // RLS filters reads, not a client-supplied FK on write — must be
+        // checked before the update() call actually persists it, not
+        // after. See LeadStageTransitionService.assertStageBelongsToCompany.
+        if (stageChanged) {
+          await this.leadStageTransition.assertStageBelongsToCompany(tx, companyId, dto.stageId!);
+        }
+        if (statusChanged && dto.status === 'DUMPED') {
+          await this.dispositionTransition.assertReasonBelongsToCompany(tx, companyId, dto.dumpReasonId!);
+        }
+        const updated = await tx.inquiry.update({ where: { id }, data });
+        if (stageChanged) {
+          await this.leadStageTransition.writeStageTransition(
+            tx,
+            companyId,
+            id,
+            existingStageId,
+            dto.stageId!,
+            actorId,
+          );
+        }
+        if (statusChanged) {
+          await this.dispositionTransition.writeDispositionTransition(
+            tx,
+            companyId,
+            id,
+            existing.status,
+            dto.status!,
+            actorId,
+            dto.status === 'DUMPED' ? dto.dumpReasonId : null,
+            dto.status === 'DUMPED' ? dto.dumpRemarks : null,
+          );
+        }
+        return updated;
+      }),
     );
+  }
+
+  /**
+   * Links a real Booking back to the inquiry it converted from
+   * (Booking.sourceInquiryId — mirrors BrokerService.assignToBooking's
+   * shape exactly: scalar FK, no relation, a separate call after the
+   * booking already exists, BookingService itself never touched).
+   *
+   * Ordering is deliberate: the SOP says Successful MEANS a confirmed
+   * booking — the booking causes the disposition, not the reverse — so
+   * this does NOT require the inquiry to already be SUCCESSFUL. It
+   * accepts any inquiry that isn't DUMPED (a dead lead doesn't get
+   * revived by a booking link — reject that outright) and that doesn't
+   * already have a booking attached (one lead converts to one booking;
+   * bookings_source_inquiry_id_key is the actual, concurrency-safe
+   * enforcement — the checks below exist only for a clean error message
+   * before the DB round trip). The status flip to SUCCESSFUL and its
+   * disposition-history row only fire when the inquiry wasn't already
+   * SUCCESSFUL, so retroactively linking an old, already-successful lead
+   * doesn't re-stamp convertedAt or write a no-op transition row.
+   */
+  async attachBooking(companyId: string, inquiryId: string, bookingId: string, actorId: string) {
+    try {
+      return await runWithTenant({ companyId }, () =>
+        withTenantTx(this.tenantPrisma, companyId, async (tx) => {
+          const inquiry = await tx.inquiry.findFirst({ where: { id: inquiryId, companyId } });
+          if (!inquiry) throw new NotFoundException('Inquiry not found');
+          const booking = await tx.booking.findFirst({ where: { id: bookingId, companyId } });
+          if (!booking) throw new NotFoundException('Booking not found');
+
+          if (inquiry.status === 'DUMPED') {
+            throw new BadRequestException(
+              'Cannot link a booking to a dumped lead — a dumped lead does not get revived by a booking link.',
+            );
+          }
+          if (booking.sourceInquiryId) {
+            throw new BadRequestException('This booking is already linked to a source inquiry.');
+          }
+          const alreadyLinked = await tx.booking.findFirst({
+            where: { companyId, sourceInquiryId: inquiryId },
+            select: { bookingNumber: true },
+          });
+          if (alreadyLinked) {
+            throw new BadRequestException(
+              `This inquiry is already linked to booking ${alreadyLinked.bookingNumber}.`,
+            );
+          }
+
+          const updatedBooking = await tx.booking.update({
+            where: { id: bookingId },
+            data: { sourceInquiryId: inquiryId },
+          });
+
+          if (inquiry.status !== 'SUCCESSFUL') {
+            await tx.inquiry.update({
+              where: { id: inquiryId },
+              data: { status: 'SUCCESSFUL', convertedAt: this.clock.now() },
+            });
+            await this.dispositionTransition.writeDispositionTransition(
+              tx,
+              companyId,
+              inquiryId,
+              inquiry.status,
+              'SUCCESSFUL',
+              actorId,
+              null,
+              `Linked to booking ${booking.bookingNumber}`,
+            );
+          }
+
+          return updatedBooking;
+        }),
+      );
+    } catch (err) {
+      if (err && typeof err === 'object' && (err as { code?: string }).code === 'P2002') {
+        throw new BadRequestException('This inquiry is already linked to a booking.');
+      }
+      throw err;
+    }
   }
 
   /**

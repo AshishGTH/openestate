@@ -5439,6 +5439,481 @@ already spoken for, per the count above; a 6th consumes the bucket's
 entire remaining headroom for the whole run) rather than discovering
 the ceiling by breaking unrelated specs, the way this session did.
 
+### Phase 0 of feature-completion-plan.md — lead-stage foundation
+
+Standalone step, built before Phase 1 (Lead Management workspace) per
+explicit direction, once `GET /reports/presales/funnel` was confirmed to
+group by `InquiryStatus` — proving no stage concept existed anywhere in
+the schema, implicit or otherwise, and that Phase 2's board and Phase
+3's funnel would otherwise be built on the wrong axis.
+
+- **`LeadStage` is a new, orthogonal axis, not a rename of
+  `InquiryStatus`.** `InquiryStatus` (OPEN/CONTINUED/DUMPED/SUCCESSFUL)
+  is a coarse lifecycle disposition that `EscalationService` and
+  `convertedAt` already key off — load-bearing, frozen, unchanged.
+  `LeadStage` is a company-configurable pipeline POSITION, meaningful
+  only while the inquiry's status is active. `Inquiry.stageId` is
+  deliberately NEVER cleared when status goes terminal (DUMPED/
+  SUCCESSFUL) — a closed lead keeps showing where it was in the
+  pipeline when it closed, which is also why "block deactivating an
+  occupied stage" was rejected below.
+- **`isDefault` ("one default stage per company") is enforced by a
+  partial unique index, not the service layer** —
+  `CREATE UNIQUE INDEX lead_stages_one_default_per_company ON
+  lead_stages (company_id) WHERE is_default`. Explicitly NOT the
+  `BrokerBankDetail.isPrimary` precedent (a transactional
+  clear-then-set with no DB constraint, verified by reading it directly
+  — a real, still-open race for that table, not fixed here since it's
+  out of this phase's scope). The service still clears the old default
+  before setting a new one, but that's UX convenience; the index is the
+  actual enforcement, one line, unbreakable, strictly less code than a
+  transactional check-then-write that still races under READ COMMITTED.
+- **`InquiryStageHistory` is append-only and gap-free from creation
+  through every later change — verified against all three real
+  inquiry-creation code paths, not assumed from one.** Grepping (not
+  guessing) found `InquiryService.create()`, `InquiryService
+  .createFromLead()`, and `InquiryImportService`'s own raw
+  `tx.inquiry.create()` as three independent call sites, none
+  delegating to the others. A shared, standalone
+  `LeadStageTransitionService` (not private methods on
+  `InquiryService`) is injected into all three, so
+  `InquiryImportService` can reach it without depending on
+  `InquiryService`'s full dependency graph. The very first history row
+  (`null → default`) is written at creation time, same as every later
+  change — there is no "row exists with no history" state.
+- **Bespoke module (service + controller + module), not
+  `master.factory.ts`'s generic `createMasterModule`** — confirmed by
+  reading the factory directly, not assumed: `extraFields` only extends
+  the zod validation schema, with no hook point for a side effect like
+  `isDefault`'s clear-the-old-default behavior. Every other master in
+  this codebase with a genuine side effect (`GstRate`, `TdsRule`)
+  already gets its own bespoke service for the same reason.
+- **One-time seed marker (`CompanyConfig.leadStagesSeededAt`), not
+  row-count inference** — extends the `sync-permissions.ts` upgrade-path
+  pattern (see the v0.2.0/v0.3.1 entries above) to a brand-new master
+  TYPE for the first time, rather than new rows in an existing master's
+  list. Row count can't distinguish "never seeded" from "an admin
+  deleted all six" — inferring from count would resurrect a deliberate
+  deletion on the very next upgrade sync run. `syncLeadStages()` lives
+  in `sync-permissions.ts` (not a new file) and is called from both
+  `seed.ts` (the one company a fresh install creates) and the upgrade
+  CLI entrypoint (every existing company) — same function either way.
+- **Deactivating an occupied stage requires reassignment, not a
+  block.** Reused the exact booking-count-confirmation UI pattern
+  already built for `areaLocationId` edits (`ProjectDetail.tsx`) rather
+  than inventing a new one. "Block while occupied" was rejected because
+  `stageId` is never cleared on a terminal transition (see above) — most
+  stages would accumulate closed-lead occupants forever and become
+  permanently undeactivatable. The admin picks a target stage; the
+  service moves every active occupant there (writing a real stage-history
+  row per move, not a silent reassignment) before deactivating.
+- **`InquiryDetail.tsx`'s stage picker was approved as in-scope, not
+  scope creep** — without it there is no browser-verifiable path for the
+  transition-writing code at all, which fails this project's own primary
+  standard (verify in a real browser, not curl/tests) before the phase
+  can even be called done.
+- **Real bug, found only while verifying "all tests green" for this
+  phase under the full monorepo suite, not by review — `syncLeadStages`
+  and `syncSuperAdminPermissions` both list an entity (companies, roles)
+  with an unscoped whole-table scan, then write for each individually.**
+  Neither function filters by anything test-specific; run against the
+  shared test Postgres under `pnpm test`'s full parallel suite, either
+  one picks up every company or role in the ENTIRE database at that
+  moment — including ones created by a completely unrelated,
+  concurrently-running test file. If that file's own `afterAll` deletes
+  its company between the list and the per-company write, the write
+  hits a foreign-key violation (`lead_stages_company_id_fkey`), which
+  previously aborted the whole loop, silently leaving every company
+  after it in iteration order unsynced. `syncSuperAdminPermissions` has
+  the structurally identical exposure (an unscoped `role.findMany` +
+  per-role write) and just hadn't been caught yet. In production this
+  is effectively impossible — companies are never hard-deleted through
+  the app — so this is a real robustness gap, not a hypothetical one;
+  fixed generally, not with a test-only branch: both functions now catch
+  Prisma's P2003 (foreign-key-violation) per-entity and skip just that
+  one, continuing the sync for everyone else, via a small shared
+  `isForeignKeyViolation()` helper in `sync-permissions.ts`.
+- **Second, unrelated real bug found by the same full-suite pass:
+  `postsales-harness.ts`'s `cleanupCompany()` was missing
+  `inventory_groups`** (`InventoryGroup.projectId` RESTRICTs onto
+  `projects`) — the exact "never previously exercised by this harness"
+  gap this file's own comments already document repeatedly for other
+  tables, this time surfaced by `e2e-plotted-inventory.test.ts` (from
+  the prior plotted-farmhouse-inventory engagement) being the first test
+  using this helper to create a LAND_BASED project with a real
+  `InventoryGroup` row. Reproduced deterministically in isolation, not
+  just under full-suite contention — added to the table list, in
+  dependency order (after `units`, since `Unit.inventoryGroupId`
+  references it; before `projects`).
+- **`InquiryStageHistory.isAdministrative`, added same-session before the
+  human walkthrough below, so the discriminator exists from row one and
+  nothing needs backfilling later.** `LeadStageService.reassignOccupants`
+  bulk-moves every active occupant of a deactivated stage onto one
+  target stage in a single request — a system-driven administrative move,
+  not a rep advancing a lead. Every other writer (creation-time initial
+  assignment, the `InquiryDetail` stage picker via
+  `LeadStageTransitionService.writeStageTransition`, which now always
+  writes `false`) is a real pipeline event. Same now-or-never reasoning
+  as the history table's own existence: once rows are plain and
+  undifferentiated, there is no way to separate an administrative move
+  from a real one after the fact. Phase 3's funnel (`docs/plans/
+  feature-completion-plan.md`, amended) must default to `WHERE NOT
+  is_administrative` — without it, retiring one occupied stage would
+  show thousands of leads "reaching" the target stage on one date, often
+  moving backward through the pipeline, permanently distorting
+  conversion figures. Migration
+  (`20260822123557_inquiry_stage_history_administrative_flag`) is a
+  `NOT NULL DEFAULT false` column add — metadata-only on Postgres 11+,
+  no table rewrite.
+- **P2003 skips in `syncLeadStages`/`syncSuperAdminPermissions` are now
+  loud, not silent — a silent skip in the super_admin sync is close to
+  the exact pre-pilot bug this file's own v0.2.0/v0.3.1 entries already
+  describe (a company's super_admin quietly missing permissions, with no
+  error to explain why), and the caller is a routine upgrade run, the
+  same place that bug hid for four releases.** Each skip now logs the
+  company id (`console.error` for `syncSuperAdminPermissions`,
+  `console.warn` for `syncLeadStages` — the former is the one whose
+  silent-failure precedent this file already documents at length, so it
+  gets the louder channel); each function also logs a final skipped-count
+  summary line if anything was skipped, so a real failure can't hide
+  inside hundreds of lines of otherwise-routine sync output.
+  **`console.error`/`console.warn`, not pino, is a deliberate choice
+  here, not an oversight of CLAUDE.md's "structured logger (pino) with a
+  redaction list" rule** — that rule governs the running API SERVICE:
+  `apps/api/src/main.ts` wires pino in via `app.useLogger(app.get(Logger))`
+  from `nestjs-pino`, scoped to Nest's own DI-managed application
+  bootstrap. `sync-permissions.ts` is a standalone script invoked
+  directly via `tsx` (from `upgrade-native.sh`, or imported as a
+  function by `seed.ts`), with no NestJS application context to pull a
+  configured pino instance from — bootstrapping a partial Nest app just
+  for logging would be real, unrequested complexity for a one-shot CLI
+  tool. `seed.ts` itself already uses plain `console.log` throughout,
+  so this is the established pattern for this class of script, not a
+  new exception. See docs/todo.md for the separate, real gap this
+  raises: `console.*` output alone does not guarantee an operator
+  actually SEES a skip during a real `upgrade-native.sh` run. **Verified
+  by deliberate reproduction, not by reading the code**: a throwaway
+  script (deleted after use) proxied a real Prisma client to delete the
+  target company/role at the exact moment each function's write call
+  fires, confirming both the per-skip log line and the final tally
+  actually print with the correct id — this caught a real off-by-target
+  pluralization bug (`"SKIPPED 1 of 41 company"`, grammar keyed off the
+  wrong count) before it shipped.
+- **The same repro exercise surfaced a much wider, real bug: `syncLeadStages`'s
+  deliberately unscoped `company.findMany()` — correct for its production
+  purpose — reaches into and mutates OTHER test files' fixture companies
+  under a full-suite run, and 14 test files across two packages had never
+  accounted for that.** Any `packages/db`/`apps/api` test file that
+  creates a company via `company.create()` and never sets
+  `leadStagesSeededAt` is fair game: if `sync-lead-stages.test.ts`'s own
+  `syncLeadStages()` call happens to run concurrently and reach that
+  company before its owning test's `afterAll` does, it seeds a
+  `CompanyConfig` row AND 6 `LeadStage` rows for a company that test
+  never asked for — and neither `company_configs_company_id_fkey` nor
+  `lead_stages_company_id_fkey` is `ON DELETE CASCADE` in this schema, so
+  the owning test's own `company.delete()` then fails with a foreign-key
+  violation it has no way to anticipate. First caught for real (not
+  reproduced deliberately) by `packages/db/test/presales-isolation.test.ts`
+  failing under a genuine full-suite run — traced to this mechanism by
+  reading its `beforeAll` (confirms no `CompanyConfig` of its own) and
+  cross-referencing `sync-lead-stages.test.ts`'s `stderr` output in the
+  SAME run, which showed `syncLeadStages` skipping two OTHER companies
+  that vanished mid-sync — proof the function was actively reaching
+  across file boundaries in that exact run, not just a hypothesis.
+  Audited every `company.create(` call site in both `packages/db/test`
+  and `apps/api/test` (grepped, not sampled) and found six more files in
+  `packages/db` (`inventory-isolation`, `auth-token`, `masters-overlap`,
+  `tenant-isolation`, `sync-super-admin-permissions`, plus the one that
+  actually failed) and eight in `apps/api` (`presales-inquiry`,
+  `presales-follow-up`, `refresh-reuse-grace`, `presales-applicant`,
+  `presales-reports` — two separate fixtures in one file — 
+  `presales-escalation`, `presales-communication`, `presales-assignment`)
+  with the identical exposure; `postsales-harness.ts`'s shared
+  `cleanupCompany` already covered both tables (added alongside
+  `lead_stages` itself, Phase 0's original commit), so every test using
+  that shared helper was already safe — only files with their own
+  hand-rolled cleanup were exposed. Fixed by adding an unconditional
+  `leadStage.deleteMany`/`companyConfig.deleteMany` before each file's
+  own `company.delete()`, in all 14 files. **Proven fixed, not assumed**:
+  three consecutive full `pnpm test` runs (`--force`, cache bypassed)
+  all green (723 tests each), plus the full `apps/e2e` Playwright suite
+  rerun clean — a single green run after a probabilistic race fix is not
+  evidence, three is a reasonable bar given this fix's own mechanism is
+  now well understood (not a mystery being papered over).
+  **Correction, same session: "the mechanism is now well understood"
+  was premature.** A second, narrower race in the same area surfaced
+  immediately afterward (see the follow-up entry below) — the
+  delete-then-delete sequence this bullet describes was necessary but
+  not sufficient. Left as written above rather than rewritten, since
+  it's what was actually believed and acted on at the time; the
+  follow-up entry is where the fuller picture and its own honest limits
+  are recorded.
+  **General lesson, not just this instance**: any future master or
+  history table seeded by an unscoped, whole-database sync function
+  (the `sync-permissions.ts` pattern) needs the same audit repeated —
+  grep every `company.create(` in both test packages and confirm the
+  new table is deleted before that fixture's own `company.delete()`,
+  not just wherever the first failure happens to surface.
+
+### Phase 0 follow-up — the P2003 skip made loud AND non-silent for real
+
+Requested explicitly, in this order: the logging fix above was correctly
+flagged as insufficient on its own — `console.error`/`console.warn` alone
+doesn't stop a scripted upgrade from reporting success on a skip, since
+the skip is caught INSIDE the sync functions and never reaches
+`upgrade-native.sh`'s `|| die`. Fixed properly this time, not just logged
+louder.
+
+- **Design check done BEFORE writing code, as instructed**: the
+  sync-permissions step in `upgrade-native.sh` is NOT the last step —
+  cutover (symlink swap + `chown` + `systemctl restart`) and the
+  healthcheck (with rollback-on-failure) both run after it. A plain
+  non-zero exit with `|| die` would therefore abort the ENTIRE upgrade,
+  for every company, before cutover, over what's typically a single-
+  company, near-impossible-in-production edge case (see
+  `isForeignKeyViolation`'s own doc comment) — worse than the skip
+  itself. Mechanism chosen: a distinct exit code the script inspects
+  and defers its final reaction on, not an immediate `die`.
+- **`syncSuperAdminPermissions`/`syncLeadStages` now return
+  `{granted, skipped}`/`{seeded, skipped}` instead of a bare number** —
+  a real breaking change to both functions' public shape, propagated to
+  every call site (`seed.ts` — return value already unused, no change
+  needed; the CLI entrypoint; both sync test files' assertions).
+- **`sync-permissions.ts`'s CLI entrypoint now uses three exit codes**:
+  0 clean, 1 hard failure (unchanged — still fatal), 2 completed-but-
+  skipped. On 2, it prints one unmissable bordered block
+  (`console.error`, `=`.repeat(72) border) naming the total skipped and
+  the per-category breakdown, via `process.exitCode = 2` (not
+  `process.exit(2)`, so the `.finally(() => prisma.$disconnect())`
+  still runs — `process.exit()` would cut it off mid-cleanup).
+- **`upgrade-native.sh` now tees the sync-permissions step's output**,
+  mirroring the migration step immediately above it exactly (a
+  `mktemp` log, `tee`, removed after). On exit 2: `warn`s and sets
+  `SYNC_HAD_SKIPS=1`, then lets cutover and the healthcheck run
+  normally. On any other non-zero: still `die`s before cutover,
+  unchanged. Only once the healthcheck's own success path completes
+  (after `log "Upgrade complete..."`) does the script check
+  `SYNC_HAD_SKIPS` and, if set, print a second unmissable block and
+  `exit 1` — signalling failure to any monitoring/scripted caller
+  without ever leaving a half-applied upgrade stuck mid-sequence.
+- **Real bash bug caught by direct empirical testing, not assumed —
+  `if ! pipeline; then STATUS=$?; fi` does NOT capture the pipeline's
+  real exit code.** `!` negates the status BEFORE the `if` sees it, and
+  `$?` inside that `then` block reflects the ALREADY-NEGATED value
+  (always 0 for any failure) — confirmed with a 3-line `bash -c` repro
+  before it ever reached the real script, which would have silently
+  collapsed every `SYNC_STATUS` to 0 and made the entire exit-code
+  scheme inert. Fixed with `pipeline || STATUS=$?` instead (verified
+  correct under both plain `set -e` and `set -e`+`pipefail` piped
+  commands, empirically, the same way) — the same "don't trust
+  implicit shell propagation, check it directly" discipline this file's
+  own `build_release()`/CI-annotation-cap entries already established.
+  Also verified the FULL new control-flow end-to-end (clean/hard-fail/
+  skip paths) in an isolated harness with a stubbed `run_as_superuser`
+  before touching the real script's logic a second time — confirmed
+  cutover is reached on a skip and skipped entirely on a hard failure.
+- **New permanent, deterministic tests for the skip-counting contract
+  itself** (both sync test files) — the existing tests only covered the
+  no-skip happy path; neither `{granted,skipped}` nor `{seeded,skipped}`
+  had ever been asserted against a REAL skip before. Same Proxy-based
+  deterministic-reproduction technique as the earlier verification
+  (delete the target entity at the exact moment the real write call
+  fires), written as permanent `it()` blocks this time, not a throwaway
+  script. `syncSuperAdminPermissions`'s version deletes the ROLE, not
+  the company (deleting the company would hit `roles_company_id_fkey`
+  first, a different failure than the one under test — learned from the
+  earlier throwaway repro's own confound, this time avoided from the
+  start).
+- **Real bug this uncovered in the FIRST attempt at these tests, not
+  hypothetical: asserting `skipped === 0` in the existing "happy path"
+  tests is wrong.** Both sync functions scan the ENTIRE shared test
+  database; under a real full-suite run, an unrelated sibling test
+  file's OWN fixture company can legitimately vanish mid-sync and get
+  counted in a call that has nothing to do with it. Caught the moment
+  this assertion was added (`expected 7 to be +0`, from seven completely
+  unrelated companies) — removed from both happy-path tests with a
+  comment explaining why, kept only in the dedicated skip tests where
+  the specific entity being tested is checked by id, not by a global
+  count.
+- **A SECOND, narrower race, found only by chasing the above assertion
+  fix through repeated full-suite runs — not the same one already
+  fixed.** Even with `leadStage`/`companyConfig` explicitly deleted
+  before the final `company.delete()`, ~40% of full-suite runs still
+  failed: `syncLeadStages` snapshots eligible companies ONCE, then
+  writes per-company moments later — if it's already mid-loop for a
+  company at the exact instant a cleanup's first two deletes clear that
+  company's (then-nonexistent) rows, the in-flight transaction can
+  commit a FRESH pair immediately after, landing in the gap right
+  before the final company delete. A single delete-then-delete sequence
+  structurally cannot close this; only a retry can, because
+  `syncLeadStages` commits at most once per company per call.
+  `packages/db/test/helpers/delete-company-safely.ts` (new) retries the
+  whole sequence up to 3 times on that specific FK code. Applied to all
+  6 `packages/db/test` files exposed to it. **The 8 `apps/api/test`
+  files still only have the simple delete-then-delete fix, not the
+  retry — this is an INCOMPLETE fix, not a smaller one.** "No failure
+  observed there yet" means the same race is live and simply hasn't
+  been hit by chance; it does not mean those 8 files are fixed. A
+  speculative `packages/db/vitest.config.ts` (`maxForks` cap, mirroring
+  `apps/api`'s existing Phase 7 fix) was tried first, based on an
+  initial — wrong — read of an unrelated failure, then DELETED once the
+  investigation moved on. **Whether that cap would actually have
+  helped, hurt, or done nothing was never cleanly established — it was
+  evaluated only against a database later found to be polluted by this
+  session's own earlier debugging, and against a batch that followed a
+  timeout-killed run. Treat the maxForks question as untested, not
+  resolved, and do not cite this session's numbers as evidence either
+  way if it comes up again.**
+  **This entire fix — the 14-file cleanup plus the retry helper —
+  makes test cleanup TOLERATE `syncLeadStages`' unscoped whole-database
+  scan colliding with other tests' fixtures under shared-database
+  parallel test execution. It does not stop the collision, only
+  survives it.** See `docs/todo.md`'s rewritten entry for the honest
+  root cause and two real (not-built) candidate fixes: an optional
+  `companyId` scope on the sync (tradeoff: stops exercising the exact
+  unscoped production scan path), or database-per-worker/a serial
+  project for unscoped-sync-adjacent test files (tradeoff: real setup
+  cost, and the same "someone has to remember" fragility at a
+  different layer). Neither was built this session — timeboxed
+  deliberately rather than continued indefinitely.
+- **A P2002 (unique constraint) failure during this same investigation
+  was correctly NOT added to `isForeignKeyViolation`'s catch — traced
+  to test-database pollution from this session's own earlier debugging
+  (an orphaned company with real `LeadStage` rows but no marker, left
+  behind by a run that failed before this session's cleanup fixes
+  existed), not a live code bug.** Confirmed by direct SQL query, not
+  assumed, then fixed by resetting the disposable test database via the
+  project's own `scripts/test-setup.sh` rather than hand-deleting rows.
+  A P2002 in production would mean a company has real, inconsistent
+  data (stage names already present with no marker) — a data-integrity
+  problem worth surfacing as a hard failure, not something to silently
+  skip past the same way a vanished entity is.
+- **Verification, cumulative, with an honest limit on how far it should
+  be trusted**: the exit-code/tee/`{granted,skipped}` change itself is
+  solid — full monorepo `pnpm test` green, the full `apps/e2e`
+  Playwright suite rerun clean, and a standalone bash harness proving
+  the new `upgrade-native.sh` control flow end-to-end for all three
+  exit-code paths. The test-cleanup flakiness chase that followed is a
+  DIFFERENT story: some individual runs failed, and this session's own
+  closing summary attributed at least one of those to an interrupted
+  10-minute-timeout run's aftermath — a plausible inference from
+  DB-state inspection (an unpolluted database afterward), not a proven
+  causal chain. That inference should not be read as confirmed. The
+  timeboxing decision above is what actually closes this out, not a
+  claim that every observed failure has been explained.
+- **This work is machine-verified only, same caveat as the rest of
+  Phase 0** — `upgrade-native.sh`'s new control flow has been proven
+  correct via an isolated stub harness and direct code reading, not by
+  actually running a real upgrade against a real native install. The
+  human walkthrough already in progress for the rest of Phase 0 covers
+  the feature; this script change has not been exercised on the VM.
+- Full verification for this phase, per the closing standard: full
+  monorepo `pnpm test` (11/11 tasks, 723 tests: shared 104, portal 4,
+  web 4, db 63, api 548 — zero failures), full monorepo lint+typecheck+
+  build (28/28 tasks), the full `apps/e2e` Playwright suite (36/36 —
+  rerun after the `isAdministrative` migration + service changes, no
+  regressions), and two separate genuinely-fresh-from-scratch checks —
+  `prisma migrate deploy` against a brand-new empty database applied all
+  26 migrations including `lead_stage_foundation`, then a second fresh
+  database after adding `inquiry_stage_history_administrative_flag`
+  applied all 27 cleanly — both followed by `pnpm seed`, which seeded the
+  6-stage default pipeline correctly (verified by direct query, not just
+  a clean exit code, on the first check).
+  **This is machine verification only.** Per this file's own primary
+  lesson — and its own history, including the Secure-cookie-over-HTTP
+  bug that no automated dev-environment test would have caught — a human
+  has NOT yet run the real-browser acceptance walkthrough for this
+  phase. Do not treat Phase 0 as closed, or cite it elsewhere as
+  browser-verified, until that walkthrough is reported back.
+
+### Phase 0 — three real bugs found by code review before the first commit, plus one unrelated dead-config cleanup
+
+The whole uncommitted Phase 0 diff was reviewed before any of it reached
+master — the first time this project's review discipline has been
+applied to a diff that never shipped at all, rather than to a bug
+already live. Three real, confirmed bugs, all fixed and regression-
+tested through the real HTTP pipeline before commit:
+
+1. **Deactivating the CURRENT DEFAULT lead stage never cleared
+   `isDefault`, so `resolveInitialStage` kept routing every new inquiry
+   to a now-inactive, invisible stage.** The real admin UI
+   (`LeadStages.tsx`) always round-trips the stage's current `isDefault`
+   value in its PATCH body unless the checkbox is explicitly touched, so
+   this was reachable through ordinary use, not just a crafted request —
+   an admin unchecking Active on the default stage, without also
+   unchecking Default, silently left the company routing new leads to a
+   stage nothing else would show as active. **Fixed by refusing the
+   deactivation outright** (`LeadStageService.update()`, a `400` naming
+   the reason) whenever the stage being deactivated is currently the
+   default — never auto-picking a replacement or auto-clearing the flag,
+   since which stage should inherit "default" is a real decision only an
+   admin can make. The admin sets a different stage as default first (a
+   separate, explicit request), then deactivates this one.
+2. **`LeadStageService.remove()` (hard DELETE) bypassed `update()`'s
+   occupancy/reassignment safety net entirely** — no confirmation, no
+   history row, the DB's `ON DELETE SET NULL` would silently orphan
+   every active inquiry's `stageId`. **Removed the endpoint outright**
+   rather than hardening it: `inquiry_stage_history.to_stage_id`
+   `RESTRICT`s onto `lead_stages` anyway, so a hard delete already 500s
+   on any stage that's ever had a single inquiry pass through it (which
+   is nearly all of them, in practice, almost immediately) — the
+   capability was already close to unusable, and deactivation
+   (`isActive: false`) is the only way to retire a stage now, matching
+   this codebase's existing soft-deactivate convention for masters.
+3. **`Inquiry.stageId` was never validated against the caller's own
+   company before being persisted, on either `create()` or `update()`.**
+   RLS filters what a query can READ; it never validated a
+   client-supplied foreign key on WRITE — the `inquiries_stage_id_fkey`
+   constraint only proves the id exists somewhere in `lead_stages`, not
+   that it belongs to this company. Fixed with a new
+   `LeadStageTransitionService.assertStageBelongsToCompany`, called from
+   `resolveInitialStage` (covers `create()`; `createFromLead()` and bulk
+   import never pass a client-supplied id, so it's a no-op there) and
+   directly from `InquiryService.update()` before the write. **Sibling
+   optional FK fields on `Inquiry`** (`projectId`, `sourceId`,
+   `inquiryTypeId`, `preferredUnitTypeId`, `temperatureId`) have the
+   identical gap and were deliberately NOT fixed in the same pass — a
+   targeted review fix isn't licence to widen the diff into every
+   sibling field — logged in `docs/todo.md` instead, with the fix
+   pattern now established for whoever picks it up.
+
+Also fixed, unrelated to the lead-stage feature itself but found in the
+same diff: **`pnpm-workspace.yaml`'s `allowBuilds.esbuild` held the
+literal placeholder text `"set this to true or false"` instead of a
+boolean.** Verified empirically before treating it as anything more
+than dead config: `pnpm install` against the broken value exits 0 and
+esbuild's postinstall script still runs — pnpm 9.15 silently ignores
+the malformed value today rather than erroring — so this wasn't
+actually breaking installs, but it wasn't recording any real approval
+decision either. Set to `true`.
+
+One optional cleanup taken from the same review: `InquiryImportService`
+resolved the company's default stage once **per CSV row** instead of
+once per import, even though the same loop already caches
+project/source/inquiryType lookups per unique name for exactly this
+reason. Hoisted `resolveInitialStage`'s call outside the row loop —
+the value can't change mid-import, so this was pure wasted round trips
+on a bulk operation.
+
+**Regression-tested through the real HTTP pipeline**
+(`apps/api/test/e2e-lead-stage.test.ts`, new — three supertest cases):
+deactivating the default stage 400s with a message naming the reason,
+and is left completely untouched (still active, still default) by the
+rejected request; a subsequently-created inquiry still resolves to that
+same, still-visible stage. `DELETE /masters/lead-stages/:id` now 404s
+(the route doesn't exist) rather than succeeding or discouraging-but-
+allowing. A cross-company `stageId` is rejected with 404 on both
+`POST /inquiries` and `PATCH /inquiries/:id`, and the rejected PATCH
+never writes the foreign id. Full monorepo `pnpm test`/`typecheck`/
+`build` green before commit (see this session's own verification
+notes for the exact numbers).
+
+Housekeeping from the same pass, unrelated to any of the above:
+`.pnpm-store/` (a local pnpm cache that had been created inside the
+working tree, not a build output this repo ships) added to
+`.gitignore` so it can never be accidentally committed regardless of
+what creates it next time.
+
 ### Docker role audit — scoped to build-integrity tooling, not deleted
 
 A full audit categorized every Docker-related file, script, doc section,
@@ -5653,3 +6128,142 @@ Reported directly: the seed step hung on corepack's "Do you want to continue? [Y
 **`run_pnpm()`, a new wrapper every bare `pnpm` call in the script now goes through**, is what makes that real download's failure mode good instead of a raw stack trace: on failure, it probes `https://registry.npmjs.org/` directly with a 5s timeout, and if THAT fails too, names the actual cause and points at `docs/handoff.md`'s "192.168.1.100's system clock" entry (this VM's own real root cause) rather than leaving the reader to decode a `CERT_NOT_YET_VALID` stack trace themselves; if the network probe succeeds, the failure gets a plain message pointing back at pnpm's own already-printed output instead — so a genuinely unrelated failure (e.g., a real error inside `seed.ts` itself) isn't misdiagnosed as a network problem.
 
 **Verified end-to-end, twice, both proving the fix rather than assuming it**: first, the wrapper's diagnostic path directly, against this VM's real (still-broken) network — confirmed it fires the network-specific message, fast, no hang. Second, the full script — teardown then a fresh run — invoked with stdin redirected from `/dev/null` for both steps, the strongest test available: no prompt could be answered even if one somehow still appeared. Completed in full, migrations through seed, exit 0. Production role passwords reset by this run (same `TEST_ALLOW_SHARED_CLUSTER=1` mechanism as before) were restored the same way as previously, confirmed via a real `GET /api/v1/health` afterward.
+
+### `apps/website` — the public marketing site, logged after the fact
+
+Built in a prior session that was cut off before this entry got written
+(a usage-limit interruption, not a deliberate omission) — landed in the
+working tree fully finished, with no Decisions-log entry anywhere. Logged
+now, on discovery, rather than left undocumented.
+
+**What it is.** A standalone React 18 + Vite site (`apps/website`, its
+own `package.json` with `dev`/`build`/`lint`/`typecheck`/`test` scripts,
+zero shared dependency on `packages/shared` or any other workspace
+package — pure marketing copy, no product code) presenting OpenEstate's
+public-facing pitch: hero, capability cards, an illustrative
+(hand-authored, not live-data) product-preview panel, the ledger/
+security/architecture sections, and a real install command block. Real
+brand assets under `public/brand/` (favicon, logo, apple-touch-icon,
+og-image), a `sitemap.xml`/`robots.txt`, and a `vercel.json` (security
+headers + `cleanUrls`, no secrets). **Deploys to a real, named domain**:
+the README documents a Vercel project rooted at `apps/website`, using
+the monorepo's own pnpm lockfile, publishing to `theitguys.in`.
+
+**Copy audited against current product state before committing** — the
+repo has twice shipped public-facing text that fell out of sync with
+reality (a stale "Phase 0 — scaffolding" README claim still live at
+v0.2.3; the ASVS checklist flatly asserting Docker Compose was the only
+supported install path, found and fixed in the Docker-removal pass
+above) so this got the same scrutiny before landing, not less because
+it's "just marketing." Findings: the install command
+(`sudo git clone ... && sudo ./install-native.sh --server-name
+crm.yourcompany.com`) matches `install-native.sh`'s real `--server-name`
+flag exactly — checked against the script's own arg-parsing, not
+assumed; zero Docker references anywhere in the site (correctly reflects
+the post-removal reality); no legal-compliance overclaim (matches this
+file's own India-first rule: "do not claim legal compliance in docs,
+provide the tools" — the security section lists real, shipped
+mechanisms only). **One real gap, fixed**: the "Inventory with context"
+feature card described only the unit-based model (projects/towers/
+floors/units) — not false, but it predates the plotted/farmland
+inventory model (`LAND_BASED` project shape, `InventoryGroup`s, per-acre
+pricing) that shipped since. Reworded to cover both. Manager hierarchy/
+team-scoped visibility (v0.4) is real and unmentioned too, but that's an
+internal RBAC detail, not the kind of thing a marketing feature list
+enumerates at this altitude — left alone as a judgment call, not an
+oversight.
+
+**Secrets check, before staging anything**: no `.vercel/` directory (no
+project-link token), no `.env` file, no API key or credential anywhere
+in the source — confirmed by listing every file in the directory and
+reading `vercel.json` directly, not assumed from `.gitignore` coverage
+alone. `.vercel/` added to `.gitignore` regardless, defensively, since
+`vercel link`/`vercel dev` can create one locally at any time and this
+repo has already been burned once by a real credential landing in a
+tracked file (see the earlier "no credential VALUES in any committed
+file" standing rule). `dist/`, `.turbo/`, and `*.tsbuildinfo` inside
+`apps/website` are already covered by the existing root `.gitignore`
+patterns — confirmed with `git check-ignore -v` against each, not
+assumed from the patterns looking like they'd match.
+
+**CI/workspace blast radius — confirmed real, left as-is, matching an
+existing precedent rather than carving out new isolation.** Because
+`apps/website` sits under `apps/*` (already in `pnpm-workspace.yaml`'s
+glob), it's swept into the bare `pnpm lint`/`pnpm typecheck`/`pnpm
+build` commands `ci.yml`'s `lint-typecheck-build` job runs — confirmed
+directly, not inferred: both commands visibly built/typechecked
+`@openestate/website` in this session's own verification run. Every
+other CI job (`native-install`, `e2e-playwright`, etc.) `needs:
+lint-typecheck-build`, so in principle a website-only regression (a
+broken import, a lint violation) could block jobs that have nothing to
+do with the website. **This is not a new problem specific to
+`apps/website`** — `docs` (the Docusaurus site) has had the identical
+shape, swept into the same bare commands, for the entirety of this
+project's history, and it has never once been the subject of an
+incident entry in this file despite this file documenting essentially
+every other CI/build problem this project has ever hit. Carving
+`apps/website` out into its own isolated pipeline (a `--filter`
+exclusion, or its own non-blocking job) would make it structurally
+*more* isolated than `docs` already is, for no incident this session
+found — an inconsistency introduced to fix a risk that hasn't actually
+manifested anywhere in this codebase's history, including for the
+directly comparable case. Left in the default sweep, matching `docs`.
+**Revisit only if a real website-only CI failure is ever actually
+observed blocking unrelated jobs** — at that point the fix is a
+`--filter='!@openestate/website'` exclusion (or a dedicated job),
+applied with the real incident as the reason, not preemptively.
+
+### Pre-sales reporting suite (PR #27) — 5 real bugs shipped clean; `e2e-playwright` has a known pre-existing intermittent flakiness, documented not fixed
+
+The 19-report pre-sales reporting suite (8 existing reports upgraded
+with date-range/project filtering and real `TeamScopeService` scoping,
+11 new reports, `source-wise`/`staff-performance` now showing
+status-based and booking-linked conversion side by side per explicit
+correction, export/print gated by two new permissions separate from
+view with an audit-log entry per action, a widened `team-scope-guard`
+check that caught a real `managerWiseInteractions` scoping bug) shipped
+after real CI verification found and fixed five genuine bugs, exactly
+as expected of a rewrite this size that had never touched a real
+database: a CSV column-format regression against a pre-existing spec's
+literal assertion, a missing required `bookingDate` field in a new test
+fixture, an `eslint-disable-next-line` comment separated from the line
+it was meant to suppress by an inserted explanatory comment block, a
+test-isolation leak (one test's uncommitted-cleanup inquiry inflating a
+sibling test's exact-count assertion within the same shared company
+fixture), and a disposition-history row with a null `changedById` that
+made a permission-scoped query invisible to the very user calling it.
+All five confirmed via real CI logs across multiple pushes, not
+guessed — `lint-typecheck-build`, `integration-tests`, `native-install`,
+and `native-upgrade` are all reliably green on this branch.
+
+**`e2e-playwright` was NOT made green, and the PR merged anyway — with
+explicit, informed user sign-off, not by unilateral judgment call.**
+Extensive investigation (five distinct fix attempts, each targeting a
+specific hypothesis, each producing SOME signal but never a clean run —
+full account in `docs/todo.md`'s own entry) converged on a decisive
+diagnostic: removing this PR's own Playwright spec entirely and pushing
+that as a pure test still left the job failing, with a **different**
+pair of pre-existing, unrelated specs than the pair that had been
+failing with the new spec present. That rotation — which specific
+specs fail depends on what else is running, at a fixed timeout ceiling
+regardless — is the signature of real, pre-existing concurrency
+contention in the E2E suite itself, not a defect in this PR's code.
+Root-caused (via Playwright's own trace artifacts, not speculation) to
+the refresh-token-rotation race this file already documents
+(`REFRESH_REUSE_GRACE_SECONDS`) firing under genuine CI concurrency
+rather than only React StrictMode's synchronous double-invoke, which is
+the narrower case the existing mitigation was built against.
+
+**This does not relax the "verify in a real browser" primary lesson at
+the top of this file, and must not be cited as license to wave off a
+future E2E failure.** The rotation was established by an actual
+diagnostic — remove the suspect code, observe the failure persists
+unchanged in kind — not assumed from "E2E is sometimes flaky" folklore.
+A failure in a spec touched by a change, or a new failure appearing in
+one that wasn't, is still that change's responsibility until a
+comparably rigorous diagnostic says otherwise, exactly as it was for
+five real bugs earlier in this same PR. See `docs/todo.md` for the full
+wrong-turns-ruled-out account and the candidate fix directions for the
+underlying race, which needs its own real-browser click-through per
+this file's mirrored-auth standing rule before it's touched — a
+materially larger, separate undertaking correctly left out of this PR.

@@ -314,7 +314,14 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     'stage_raises',
     // v0.2.2: layout plan/brochure/photo rows — CASCADE from projects but
     // listed explicitly anyway, same discipline as construction_update_media.
-    'units', 'floors', 'towers', 'project_media', 'projects',
+    // inventory_groups.project_id RESTRICTs onto projects, so it must be
+    // deleted before the projects delete below — must also come after
+    // 'units' since Unit.inventoryGroupId references it. Never previously
+    // exercised by this harness (same never-caught-until-first-use gap as
+    // the presales/custom-field tables above), surfaced by
+    // e2e-plotted-inventory.test.ts being the first test using this
+    // helper to create a LAND_BASED project with an InventoryGroup.
+    'units', 'inventory_groups', 'floors', 'towers', 'project_media', 'projects',
     // Masters referenced by the financial rows above.
     'cancellation_rules', 'interest_rules', 'gst_rates', 'tds_rules', 'transfer_fee_rules',
     'payment_plan_milestones', 'payment_plan_templates', 'area_locations',
@@ -332,14 +339,23 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     // being the first to combine this (financial-harness) cleanup with
     // real Inquiry rows — 'inquiries' was previously never populated by
     // any test using this helper, so its absence here was never caught.
-    'communication_logs', 'follow_ups', 'inquiry_assignments', 'inquiries',
-    // inquiry_sources is a master referenced by inquiries.source_id, so it
-    // must be deleted after inquiries above, not with the other masters
-    // section — never previously exercised by this harness (same
-    // never-caught-until-first-use gap as inquiries/custom_field_definitions
-    // above), surfaced by the master-factory regression test being the
-    // first to create an InquirySource row here.
-    'inquiry_sources',
+    // inquiry_stage_history.inquiry_id cascades from inquiries, but its
+    // to_stage_id is RESTRICT onto lead_stages (never delete audit history
+    // for a stage that's still referenced) — must be deleted explicitly,
+    // and before lead_stages below, or that delete would fail.
+    // inquiry_disposition_history.inquiry_id also cascades from inquiries
+    // (its reason_id is SET NULL onto dump_reasons, not RESTRICT, but
+    // listed explicitly anyway, same discipline as inquiry_stage_history).
+    'communication_logs', 'follow_ups', 'inquiry_assignments', 'inquiry_stage_history', 'inquiry_disposition_history', 'inquiries',
+    // inquiry_sources/lead_stages/dump_reasons are masters referenced by
+    // inquiries' source_id/stage_id (dump_reasons only via disposition
+    // history, already gone by this point) — deleted after inquiries
+    // above, not with the other masters section — never previously
+    // exercised by this harness (same never-caught-until-first-use gap
+    // as inquiries/custom_field_definitions above), surfaced by the
+    // master-factory regression test being the first to create an
+    // InquirySource row here.
+    'inquiry_sources', 'lead_stages', 'dump_reasons',
     // Item 7: applicant_a_id/applicant_b_id are ON DELETE CASCADE from
     // applicants, so this would clean up on its own — listed explicitly
     // anyway, before 'applicants', matching this file's own discipline.

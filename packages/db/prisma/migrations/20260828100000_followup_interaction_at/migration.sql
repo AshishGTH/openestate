@@ -1,0 +1,14 @@
+-- Follow-Up Page spec gap #1 (docs/plans/followup-spec-gap-analysis.md,
+-- Collision 3): FollowUp had no field distinct from `created_at` for
+-- "when the interaction actually happened" — a rep could not log a call
+-- that happened yesterday. `interaction_at` closes that gap.
+--
+-- Safe, fast DDL against a live table: a NOT NULL column with a constant
+-- DEFAULT is a metadata-only change on Postgres 11+ (no table rewrite) —
+-- covered by the standing lock_timeout reasoning in CLAUDE.md, no extra
+-- handling needed here. Existing rows get `now()` at migration time,
+-- which is the best available approximation for history that predates
+-- this column (same "backfill from the closest proxy available"
+-- reasoning as `convertedAt`'s own backfill).
+-- AlterTable
+ALTER TABLE "follow_ups" ADD COLUMN     "interaction_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;

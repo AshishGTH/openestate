@@ -253,7 +253,7 @@ describeIf('e2e team scoping: manager hierarchy, FollowUp IDOR fix, scoped reass
       .post(`/api/v1/inquiries/${execInquiryId}/follow-ups`)
       .set('Authorization', `Bearer ${token}`)
       .set('X-CSRF-Token', csrf)
-      .send({ notes: 'Manager checking in on the team' })
+      .send({ notes: 'Manager checking in on the team', nextActionAt: new Date(Date.now() + 86_400_000).toISOString() })
       .expect(201);
 
     const listRes = await agent

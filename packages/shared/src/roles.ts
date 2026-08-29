@@ -93,6 +93,10 @@ export const ROLE_PERMISSIONS: Record<SystemRoleSlug, readonly string[]> = {
     P.PRESALES_SITE_VISIT_CREATE,
     P.PRESALES_SITE_VISIT_UPDATE,
     P.PRESALES_COMMUNICATION_SEND,
+    // View only — TeamScopeService already scopes every report to just
+    // this rep's own data, but export/print (PII leaving the system in
+    // a portable form) stay manager+ only, not auto-extended here.
+    P.PRESALES_REPORT_VIEW,
     P.POSTSALES_BOOKING_READ,
     P.POSTSALES_UNIT_READ,
     P.POSTSALES_DOCUMENT_READ,

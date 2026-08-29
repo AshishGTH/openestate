@@ -3,6 +3,7 @@ import { ClockProvider } from '../common/clock.provider';
 import { InventoryModule } from '../inventory/inventory.module';
 import { BrokersModule } from '../brokers/brokers.module';
 import { CommissionModule } from '../commission/commission.module';
+import { PresalesModule } from '../presales/presales.module';
 import { BookingController } from './booking.controller';
 import { ReceiptController } from './receipt.controller';
 import { RefundController } from './refund.controller';
@@ -25,7 +26,7 @@ import { RefundService } from './refund.service';
 import { BookingCostLineVerifier } from './booking-cost-line-verifier.service';
 
 @Module({
-  imports: [InventoryModule, BrokersModule, CommissionModule],
+  imports: [InventoryModule, BrokersModule, CommissionModule, PresalesModule],
   controllers: [BookingController, ReceiptController, RefundController, BookingDraftController, PlanHistoryController, StageRaiseController],
   providers: [
     ClockProvider,

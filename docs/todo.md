@@ -69,6 +69,115 @@ identical by direct comparison of both hardcoded values, but worth
 re-checking first) or (b) `$GITHUB_ENV` not receiving the three
 `DATABASE_URL_TEST*`/`REDIS_TEST_URL` lines from `.test-env` correctly.
 
+## Test-infra flakiness from `syncLeadStages`' unscoped scan — timeboxed, root cause not fixed
+
+**Honest root cause, stated plainly**: `syncLeadStages` (`packages/db/prisma/
+sync-permissions.ts`) does a deliberately UNSCOPED whole-database
+`company.findMany()` — correct for its real job (an upgrade must reach every
+company, not just some). The test suite runs many files in parallel against
+ONE SHARED Postgres database. Put those two facts together and any test
+fixture's company is fair game for `syncLeadStages` to reach into, any time
+`sync-lead-stages.test.ts` happens to be running concurrently — which, under
+`pnpm test`'s default parallelism, is most of the time.
+
+Everything built this session in response — the 14-file
+`leadStage.deleteMany`/`companyConfig.deleteMany` additions, and
+`packages/db/test/helpers/delete-company-safely.ts`'s retry loop — makes
+test cleanup TOLERATE that interference. **Neither one stops the
+interference itself.** `syncLeadStages` still reaches into every other
+test's fixtures on every call; the fixes only make it survivable once it
+does. Worth being precise about that distinction so a future session doesn't
+mistake "cleanup no longer throws" for "the tests are isolated from each
+other," which they aren't.
+
+**The fix is INCOMPLETE, not just imperfect — say so plainly.** The 8
+`apps/api/test` files that create a company still only have the simple
+`leadStage.deleteMany` + `companyConfig.deleteMany` before their
+`company.delete()` — the SAME sequence that was proven insufficient for the
+6 `packages/db/test` files (a real, ~40%-of-runs-observed gap between those
+deletes and the final company delete, where `syncLeadStages`' already-
+in-flight per-company transaction can land and recreate what was just
+deleted). None of the 8 apps/api files have the retry helper. **"No failure
+observed there yet" is not "fixed" — it means the race is live and simply
+hasn't been hit by chance yet**, for the same reason a rarely-taken branch
+with no test isn't "verified working." Treat these 8 files as still exposed
+until either they get the same retry treatment or the real fix below lands.
+
+**Two real candidate root fixes — recorded, NOT built this session:**
+
+**(a) An optional `companyId` scope on `syncLeadStages`/
+`syncSuperAdminPermissions`**, so a test can ask "sync just this one company"
+instead of the function always scanning every company in the database.
+Directly stops the interference at the source — a scoped call genuinely
+cannot reach another test's fixture.
+**Tradeoff, stated honestly**: the production call path (`upgrade-native.sh`,
+`seed.ts`) needs the UNSCOPED behavior — an upgrade has to reach every
+company, not one. A test that only ever calls the scoped form no longer
+exercises the exact scan `syncLeadStages` actually runs in production
+(`company.findMany()` with no filter, iterating the full result). Any test
+that specifically wants to prove the unscoped-scan behavior itself (there is
+at least one — the "does NOT resurrect" test relies on iterating past
+already-marked companies) would still need the unscoped form, so this
+wouldn't be a clean full replacement, only an option most fixtures could
+take to stop being reachable.
+
+**(b) Database-per-worker, or a serial (non-parallel) vitest project for
+files that call an unscoped sync.** Removes the SHARED half of "shared
+database across parallel workers" instead of the unscoped-scan half.
+**Tradeoff**: database-per-worker means provisioning N throwaway databases
+(migrating and seeding each) instead of one, adding real setup time and
+complexity to `scripts/test-setup.sh` and CI; a serial project for the
+handful of unscoped-sync-adjacent files is cheaper to build but makes the
+full suite slower by however long those files take run-not-in-parallel,
+and doesn't help if a NEW file elsewhere in the suite also starts an
+unscoped scan without anyone remembering to add it to that project's list —
+the same "someone has to remember" fragility as the current per-file
+cleanup fixes, just at a different layer.
+
+Neither is built. This entry exists so a future session facing this same
+class of flake doesn't have to re-derive the root cause or re-discover
+these two options — it can start here and pick one deliberately, or find a
+better one, rather than adding a 15th parallel cleanup fix.
+
+**Caveat on this session's own evidence, so it isn't over-trusted later**:
+the initial ~40%-of-runs figure and the "second, narrower race" diagnosis
+came from a batch run against a freshly-reset database and are reasonably
+trustworthy. But a separate data point — a `packages/db/vitest.config.ts`
+`maxForks` cap tried, then reverted, mid-investigation — was evaluated
+against a database that later turned out to be polluted by this session's
+OWN earlier ad hoc debugging (an orphaned company with real `LeadStage`
+rows and no marker, confirmed by direct query, left over from before the
+cleanup fixes existed). At least one subsequent "still failing" full-suite
+run was one of a batch where an EARLIER run in the same batch had been
+killed by a 10-minute tool timeout mid-transaction — a hard kill, not a
+clean failure, and a plausible independent source of the SAME kind of
+pollution. Both were treated in this session's own closing summary as
+supporting evidence that the retry helper's fix was reliable. **That
+conclusion should be read as UNTESTED, not established** — the maxForks
+experiment in particular was never cleanly re-run against a verified-clean
+database on its own, so no real conclusion about whether concurrency
+capping would help or hurt should be carried forward from it either way.
+
+## `BrokerBankDetail.isPrimary` has a real, still-open race condition
+
+Found while designing `LeadStage.isDefault`'s enforcement (Phase 0 of
+feature-completion-plan.md — see CLAUDE.md's decisions entry). Verified
+by reading the code directly, not assumed: `BrokerBankDetail.isPrimary`
+is enforced only by a transactional clear-then-set (`updateMany` inside
+a transaction), with no database constraint backing it. Two concurrent
+requests setting a different bank detail as primary for the same broker
+can both leave `isPrimary: true` under READ COMMITTED — nothing prevents
+it. `LeadStage.isDefault` deliberately did NOT copy this pattern (a
+partial unique index instead); `BrokerBankDetail` itself was left
+untouched, out of scope for that phase. **What unblocks it**: a
+`CREATE UNIQUE INDEX ... WHERE is_primary` partial index on
+`broker_bank_details (broker_id)`, same shape as `LeadStage`'s, plus a
+migration to resolve any bank detail that's already in the broken state
+(more than one primary per broker) before the index can be added. Low
+urgency — no financial money-movement reads `isPrimary` directly today
+(confirmed by grep before filing this) — but worth fixing before
+anything starts trusting it as a hard invariant.
+
 ## Built: lead ownership & manager hierarchy (v0.4) — what's still open from that work
 
 `User.managerId` + `TeamScopeService` + the CI guard landed in v0.4 (see
@@ -480,3 +589,147 @@ would have been. Pre-existing, affects all seven presales reports
 equally (not specific to the v0.2.3 custom-field columns, which are
 derived from the rows). Fixing it means passing the expected headers in
 explicitly rather than deriving them from `rows[0]`.
+
+## `Inquiry`'s other optional FK fields aren't validated against the caller's company either
+
+Code review of the Phase 0 lead-stage diff (before it shipped) found and
+fixed the missing check for `stageId` — `InquiryService.create()`/
+`update()` never confirmed a client-supplied `stageId` belongs to the
+caller's own company before persisting it; the DB foreign key only
+proves the row exists somewhere in `lead_stages`, not that it's in
+scope. Fixed via `LeadStageTransitionService.assertStageBelongsToCompany`.
+
+**Not fixed in the same pass, and this is the gap**: `projectId`,
+`sourceId`, `inquiryTypeId`, `preferredUnitTypeId`, and `temperatureId`
+on `Inquiry.create()` have the identical shape — none of them are
+re-checked against `companyId` before the `tx.inquiry.create()` call
+(only `applicantId` is, via an explicit `tx.applicant.findFirst({where:
+{id, companyId}})`). A caller who obtains another company's id for any
+of these could set a cross-tenant reference the same way `stageId`
+used to allow. Scoped out of the `stageId` fix specifically because it
+was a targeted review fix, not an invitation to widen the diff into
+every sibling field — but the underlying gap is real and the fix
+pattern is now established (mirror `assertStageBelongsToCompany`'s
+shape for each master/relation). Whoever picks this up should audit
+`InquiryService.update()`'s DTO fields too, not just `create()`'s.
+explicitly rather than deriving them from `rows[0]`.
+
+## Should logging a follow-up on a closed lead reopen it?
+
+`FollowUpService.create()`'s status-advance ternary
+(`status: inquiry.status === 'OPEN' ? 'CONTINUED' : inquiry.status`)
+only flips OPEN to CONTINUED — a DUMPED or SUCCESSFUL inquiry's status
+is left exactly as-is when a new follow-up with a `nextActionAt` is
+logged against it. This has been the actual behavior since item 1 of
+the Follow-Up Page spec work landed; a stale comment above it claimed
+otherwise for a while (fixed, not the point of this entry).
+
+The open product question: should logging an interaction on a closed
+lead reopen it? Current behavior says no — a rep can log a note against
+a DUMPED or SUCCESSFUL inquiry (there's no guard against that either)
+without it silently coming back to life in the active pipeline. That
+seems like the safer default (a closed lead shouldn't resurrect via a
+side effect of logging a call), but nobody has actually asked for
+either behavior — this is speculative, not SOP-mandated. Whoever
+changes it should decide deliberately, not fix it as a "bug."
+
+## `apps/e2e`'s CI job has a real, pre-existing intermittent flakiness under concurrency — found while shipping the pre-sales reporting suite, not caused by it
+
+Building the reporting suite's own Playwright coverage
+(`presales-reports.spec.ts`, PR #27) surfaced a genuine, reproducible
+problem in the `e2e-playwright` CI job itself: a **rotating subset** of
+the suite's heaviest, most login-intensive specs — `team-scope.spec.ts`,
+`ticket-reply.spec.ts`, `user-role-edit.spec.ts`,
+`successful-to-booking.spec.ts`, `rapid-reload-session.spec.ts` — fails
+intermittently, at the exact test-timeout ceiling (30.0-30.1s, not a
+partial-progress miss), across otherwise-identical CI runs.
+
+**Proven unrelated to that PR's own changes, not assumed.** After five
+different fix attempts each targeting a specific hypothesis (below) left
+the same two specs failing every time, `presales-reports.spec.ts` was
+removed from the branch ENTIRELY and pushed as a pure diagnostic (run
+[33245056896](https://github.com/AshishGTH/openestate/actions/runs/33245056896),
+job 99081209383). The job still failed — but with a **different** pair
+of specs (`successful-to-booking.spec.ts` + `user-role-edit.spec.ts`)
+than the pair that had been failing with the new spec present
+(`team-scope.spec.ts` + `user-role-edit.spec.ts` — seen across runs
+[33242845925](https://github.com/AshishGTH/openestate/actions/runs/33242845925),
+[33243617317](https://github.com/AshishGTH/openestate/actions/runs/33243617317),
+[33244004498](https://github.com/AshishGTH/openestate/actions/runs/33244004498),
+[33244405582](https://github.com/AshishGTH/openestate/actions/runs/33244405582)).
+That rotation — a different pair failing depending on what else is in
+the suite, at the same fixed ceiling regardless — is the signature of
+real, load-dependent contention, not a specific spec's logic being
+wrong. Two "success" runs on `master` from just before this PR
+(`33065667370`, `33066407872`, both 35/35 with zero retries) were
+initially taken as evidence the branch introduced the problem — that
+turned out to be two lucky samples, not proof of master's true
+underlying rate; the diagnostic above is the actual evidence.
+
+**Root mechanism, from Playwright's own trace artifacts, not
+speculation**: the browser is sitting on `/login` at the exact moment
+of failure, mid-test, even though the test code believes it's several
+steps past login. `page.goto()` is a real browser navigation (not a
+React Router client-side transition) — it remounts the whole SPA and
+re-fires `AuthProvider`'s mount-time `/auth/refresh` call. This project
+already documents and partially mitigates this exact race
+(`REFRESH_REUSE_GRACE_SECONDS`, the "rapid-reload-logout" fix in
+CLAUDE.md's Decisions log) — the new finding is that under **real CI
+concurrency** (many spec files' own logins and page reloads landing in
+the same narrow window, not just React StrictMode's double-effect
+pattern the original fix targeted), the existing grace window can still
+be exceeded.
+
+**Wrong turns ruled out, in order, so a future session doesn't re-walk
+them:**
+1. *Fixture contention on the shared `mastersCrud` company's Users list*
+   (`Users.tsx` paginates at `limit: 20`; many concurrent specs create
+   users against the same company). Plausible-looking, and partially
+   true as a contributing factor, but eliminated as the SOLE cause: even
+   after moving the affected test onto a fully independent company
+   (zero shared rows), the same two specs kept failing identically.
+2. *The shared default rate-limit bucket* (100 req/60s, IP-keyed,
+   `app.module.ts`) being exhausted by this PR's own added `/auth/login`
+   calls. Real and fixed on the **backend** integration-tests job
+   (unrelated 429s on `e2e-tickets`/`e2e-plugins` went away after
+   consolidating `e2e-presales-reports.test.ts` from 7 logins to 3) —
+   but the E2E/Playwright job runs a completely separate API process
+   with its own separate budget, and reducing this PR's own Playwright
+   login count (down to a single login, then down to zero via the
+   diagnostic) never changed the E2E outcome.
+3. *Needs more time, not a hang* — raised Playwright's CI timeout from
+   30s to 45s. The same two specs failed at 45.0-45.1s instead, exactly
+   on the new ceiling rather than somewhere in between — ruling out
+   "genuinely slow but progressing" and pointing at a real stuck state
+   instead. Reverted.
+4. *This PR's own extra page reload* — replaced a `page.goto()` with a
+   client-side nav-link click to cut one avoidable `/auth/refresh` call.
+   Real and directionally correct (contributes less load), but not
+   sufficient on its own — the same failures persisted until the
+   zero-spec diagnostic finally isolated the true scope of the problem.
+
+**What would actually close this**: the refresh-rotation race needs to
+tolerate real concurrent load, not just React StrictMode's synchronous
+double-invoke. Candidate directions: widen
+`REFRESH_REUSE_GRACE_SECONDS` (a config change, but see its own
+Decisions-log entry for the security trade-off that name already
+documents — widening it further isn't free); or make the specific
+heaviest specs (`team-scope`, `user-role-edit`, `ticket-reply`,
+`successful-to-booking`) reuse an already-authenticated session instead
+of each doing several sequential fresh logins in one test, the same
+"extend an existing fixture's login, don't add a new one" discipline
+this file's own portal-auth-throttle entry already established for a
+different bucket. Either way, per CLAUDE.md's standing rule, a real
+change to the refresh/auth path needs its own real-browser
+click-through on both staff and portal before it ships — a materially
+bigger undertaking than this entry, and deliberately not attempted as a
+side effect of an unrelated feature PR.
+
+**Standing note, not a licence to wave off E2E failures generally**: a
+failure in a spec you just touched, or a NEW failure appearing in a spec
+you didn't, is still yours to investigate until proven otherwise — the
+rotation described here was established with a real diagnostic (removing
+the suspect code and confirming the failure persists unchanged in kind),
+not assumed from "E2E is flaky" folklore. This entry documents one
+specific, evidenced instance of pre-existing contention; it does not mean
+future E2E red is presumed innocent.

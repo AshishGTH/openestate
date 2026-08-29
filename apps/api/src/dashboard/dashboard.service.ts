@@ -130,7 +130,7 @@ export class DashboardService {
         this.systemPrisma.inquiry.count({
           where: { ...base, convertedAt: { gte: startOfMonth } },
         }),
-        this.reportsService.funnelByStatus(companyId, { visibleUserIds: userIds }),
+        this.reportsService.funnelByStatus(companyId, { visibleUserIds: userIds }, {}),
       ]);
 
     return { followUpsToday, followUpsOverdue, openInquiries, conversionsThisMonth, byStatus };

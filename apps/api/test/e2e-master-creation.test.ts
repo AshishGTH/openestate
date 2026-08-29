@@ -97,6 +97,7 @@ const MASTER_CASES: MasterCase[] = [
   { label: 'UnitType', path: 'unit-types', payload: simpleBase() },
   { label: 'PlcType', path: 'plc-types', payload: simpleBase() },
   { label: 'InquirySource', path: 'inquiry-sources', payload: simpleBase() },
+  { label: 'DumpReason', path: 'dump-reasons', payload: simpleBase() },
   { label: 'InquiryType', path: 'inquiry-types', payload: simpleBase() },
   { label: 'InquiryTemperature', path: 'inquiry-temperatures', payload: simpleBase() },
   { label: 'FollowUpType', path: 'follow-up-types', payload: simpleBase() },
@@ -208,6 +209,16 @@ const MASTER_CASES: MasterCase[] = [
       sortOrder: 1,
     },
     assertExtra: (b) => expect(b.entityType).toBe('ALLOTMENT_LETTER'),
+  },
+  // Bespoke module (Phase 0 of feature-completion-plan.md), not a
+  // SIMPLE_MASTERS entry — no `description` field at all (createLeadStageSchema
+  // is .strict() with only name/sortOrder/isActive/isDefault), unlike every
+  // simpleBase() case above.
+  {
+    label: 'LeadStage',
+    path: 'lead-stages',
+    payload: { name: `E2E Stage ${TAG}`, sortOrder: 1, isActive: true, isDefault: false },
+    assertExtra: (b) => expect(b.isDefault).toBe(false),
   },
 ];
 
