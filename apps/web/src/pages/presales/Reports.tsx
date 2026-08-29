@@ -168,6 +168,7 @@ export default function PresalesReportsPage() {
       </div>
 
       <select
+        aria-label="Report"
         value={reportKey}
         onChange={(e) => {
           setReportKey(e.target.value);
