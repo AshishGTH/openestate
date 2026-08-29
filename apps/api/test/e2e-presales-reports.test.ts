@@ -70,18 +70,35 @@ function extractCookie(setCookieHeader: string[] | string | undefined, name: str
   throw new Error(`Cookie ${name} not found in Set-Cookie headers`);
 }
 
+interface Session {
+  agent: ReturnType<typeof request.agent>;
+  token: string;
+  csrf: string;
+}
+
 describeIf('e2e /reports/presales: permissions, audit logging, and team scoping', () => {
   let app: INestApplication;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let systemPrisma: any;
   let fx: CompanyFixture;
 
-  let viewerEmail: string;
-  let exporterEmail: string;
-  let managerEmail: string;
+  let exporterId: string;
   let managerId: string;
   let execUnderManagerId: string;
   let execOutsideId: string;
+
+  // Logged in ONCE per identity, in beforeAll, and reused across every
+  // it() that needs that identity — the default rate-limit bucket
+  // (100 req/60s, IP-keyed, apps.module.ts) is shared across this WHOLE
+  // job's concurrently-running vitest files, not scoped per file (unlike
+  // portal-auth's THROTTLE_TEST_KEY_PREFIX). A fresh login per it() block
+  // (7 of them, originally) pushed unrelated concurrently-running files
+  // (e2e-tickets, e2e-plugins) over that shared budget under real CI
+  // concurrency — found by the CI run itself, not locally, since a local
+  // single-file run never contends with 50+ other files' own logins.
+  let viewerSession: Session;
+  let exporterSession: Session;
+  let managerSession: Session;
 
   beforeAll(async () => {
     app = await bootstrapApp();
@@ -121,17 +138,18 @@ describeIf('e2e /reports/presales: permissions, audit logging, and team scoping'
 
     const passwordHash = await argon2.hash(STAFF_PASSWORD, { algorithm: argon2.Algorithm.Argon2id });
 
-    viewerEmail = `viewer-${TAG}@test.com`;
+    const viewerEmail = `viewer-${TAG}@test.com`;
     await systemPrisma.user.create({
       data: { companyId: fx.companyId, email: viewerEmail, passwordHash, name: 'Viewer', roleId: viewerRole.id, forcePasswordChange: false },
     });
 
-    exporterEmail = `exporter-${TAG}@test.com`;
-    await systemPrisma.user.create({
+    const exporterEmail = `exporter-${TAG}@test.com`;
+    const exporter = await systemPrisma.user.create({
       data: { companyId: fx.companyId, email: exporterEmail, passwordHash, name: 'Exporter', roleId: exporterRole.id, forcePasswordChange: false },
     });
+    exporterId = exporter.id;
 
-    managerEmail = `manager-${TAG}@test.com`;
+    const managerEmail = `manager-${TAG}@test.com`;
     const manager = await systemPrisma.user.create({
       data: { companyId: fx.companyId, email: managerEmail, passwordHash, name: 'Manager', roleId: managerRole.id, forcePasswordChange: false },
     });
@@ -160,13 +178,22 @@ describeIf('e2e /reports/presales: permissions, audit logging, and team scoping'
       data: { companyId: fx.companyId, applicantId: applicant.id, status: 'OPEN', assignedToId: execOutsideId },
     });
 
-    // A DUMPED disposition-history row so dump-report has something real to stream.
+    // A DUMPED disposition-history row so dump-report has something real to
+    // stream. changedById must be the exporter's OWN id (not left null) —
+    // the dump-report test below calls this endpoint AS the exporter, who
+    // has no ADMIN_TEAM_SCOPE_ALL, so getVisibleUserIds returns a real
+    // (non-null) subtree and `changedById: { in: [...] }` never matches a
+    // NULL column value. Caught for real: the CSV came back header-only.
     const inqForDump = await systemPrisma.inquiry.create({
       data: { companyId: fx.companyId, applicantId: applicant.id, status: 'DUMPED' },
     });
     await systemPrisma.inquiryDispositionHistory.create({
-      data: { companyId: fx.companyId, inquiryId: inqForDump.id, toStatus: 'DUMPED' },
+      data: { companyId: fx.companyId, inquiryId: inqForDump.id, toStatus: 'DUMPED', changedById: exporterId },
     });
+
+    viewerSession = await login(viewerEmail);
+    exporterSession = await login(exporterEmail);
+    managerSession = await login(managerEmail);
   });
 
   afterAll(async () => {
@@ -182,18 +209,18 @@ describeIf('e2e /reports/presales: permissions, audit logging, and team scoping'
   }
 
   it('presales.report.view is required, and JSON view works without export/print', async () => {
-    const { agent, token } = await login(viewerEmail);
+    const { agent, token } = viewerSession;
     await agent.get('/api/v1/reports/presales/funnel').set('Authorization', `Bearer ${token}`).expect(200);
   });
 
   it('format=csv 403s for a viewer who lacks presales.report.export, even though view succeeds', async () => {
-    const { agent, token } = await login(viewerEmail);
+    const { agent, token } = viewerSession;
     const res = await agent.get('/api/v1/reports/presales/funnel?format=csv').set('Authorization', `Bearer ${token}`).expect(403);
     expect(res.body.message).toContain('presales.report.export');
   });
 
   it('format=csv succeeds for an exporter and writes an audit row with filters + row count', async () => {
-    const { agent, token } = await login(exporterEmail);
+    const { agent, token } = exporterSession;
     const res = await agent.get('/api/v1/reports/presales/funnel?format=csv').set('Authorization', `Bearer ${token}`).expect(200);
     expect(res.headers['content-type']).toContain('text/csv');
 
@@ -206,7 +233,7 @@ describeIf('e2e /reports/presales: permissions, audit logging, and team scoping'
   });
 
   it('POST /reports/presales/audit-action 403s without presales.report.print', async () => {
-    const { agent, token, csrf } = await login(viewerEmail);
+    const { agent, token, csrf } = viewerSession;
     await agent
       .post('/api/v1/reports/presales/audit-action')
       .set('Authorization', `Bearer ${token}`)
@@ -216,7 +243,7 @@ describeIf('e2e /reports/presales: permissions, audit logging, and team scoping'
   });
 
   it('POST /reports/presales/audit-action succeeds for a printer and writes a PRINT audit row', async () => {
-    const { agent, token, csrf } = await login(exporterEmail);
+    const { agent, token, csrf } = exporterSession;
     await agent
       .post('/api/v1/reports/presales/audit-action')
       .set('Authorization', `Bearer ${token}`)
@@ -232,7 +259,7 @@ describeIf('e2e /reports/presales: permissions, audit logging, and team scoping'
   });
 
   it('a manager sees only their own reporting subtree, not an unrelated colleague', async () => {
-    const { agent, token } = await login(managerEmail);
+    const { agent, token } = managerSession;
     const res = await agent.get('/api/v1/reports/presales/staff-performance').set('Authorization', `Bearer ${token}`).expect(200);
     const userIds = (res.body as Array<{ userId: string }>).map((r) => r.userId);
     expect(userIds).toContain(execUnderManagerId);
@@ -240,7 +267,7 @@ describeIf('e2e /reports/presales: permissions, audit logging, and team scoping'
   });
 
   it('dump-report streams real CSV with a header row and at least one data row', async () => {
-    const { agent, token } = await login(exporterEmail);
+    const { agent, token } = exporterSession;
     const res = await agent.get('/api/v1/reports/presales/dump-report?format=csv').set('Authorization', `Bearer ${token}`).expect(200);
     expect(res.headers['content-type']).toContain('text/csv');
     const lines = res.text.trim().split('\n');

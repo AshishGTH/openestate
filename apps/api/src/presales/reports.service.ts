@@ -373,12 +373,12 @@ export class ReportsService {
       'Temperature',
       'Assigned To',
     ];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     // Lowercase dotted prefix ("applicant."/"inquiry."), matching the
     // pre-existing export's column-naming convention exactly — this
     // report predates this session's rewrite and apps/e2e's
     // custom-field-values.spec.ts already asserts against this literal
     // format, so it isn't just cosmetic.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const customLabels = definitions.map((d: any) => `${d.entityType === 'APPLICANT' ? 'applicant' : 'inquiry'}.${d.label}`);
     return { fixed, customLabels, definitions, headers: [...fixed, ...customLabels] };
   }

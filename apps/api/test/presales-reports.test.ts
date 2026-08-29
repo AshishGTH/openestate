@@ -260,6 +260,15 @@ describeIf('Presales reports: new report methods (v0.5 reporting suite)', () => 
     const row = rows.find((r: { managerId: string }) => r.managerId === manager.id);
     expect(row).toBeDefined();
     expect(row!.interactionCount).toBe(2);
+
+    // Every it() in this describe shares one companyId fixture — an
+    // uncleaned inquiry here leaks into sourceWiseConversion's exact-count
+    // assertions below (caught for real: inflated its "unknown source"
+    // total from 2 to 3 under CI, since test order isn't guaranteed).
+    await systemPrisma.followUp.deleteMany({ where: { inquiryId: inquiry.id } });
+    await systemPrisma.inquiry.delete({ where: { id: inquiry.id } });
+    await systemPrisma.user.deleteMany({ where: { id: { in: [manager.id, exec.id] } } });
+    await systemPrisma.role.deleteMany({ where: { id: { in: [managerRole.id, execRole.id] } } });
   });
 
   it('sourceWiseConversion shows status-based and booking-linked conversion side by side, never merged', async () => {
