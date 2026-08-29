@@ -108,6 +108,16 @@ export const PERMISSIONS = {
   PRESALES_COMMUNICATION_SEND: 'presales.communication.send',
   PRESALES_ASSIGNMENT_POOL_MANAGE: 'presales.assignment-pool.manage',
   PRESALES_REPORT_VIEW: 'presales.report.view',
+  // Separate from .view so a role can read a report on-screen without
+  // exfiltrating customer PII via CSV/print — see CLAUDE.md's presales
+  // reporting suite decisions. company_admin/sales_manager inherit both
+  // automatically via the `presales.` prefix filter in roles.ts; on an
+  // EXISTING install upgrading, that prefix filter only seeds a brand-new
+  // role — an admin must grant these two explicitly via Admin > Roles
+  // (see the standing "does an existing install actually receive a new
+  // PERMISSIONS key" upgrade-path rule).
+  PRESALES_REPORT_EXPORT: 'presales.report.export',
+  PRESALES_REPORT_PRINT: 'presales.report.print',
 
   // ── Postsales ──────────────────────────────────────
   POSTSALES_BOOKING_READ: 'postsales.booking.read',

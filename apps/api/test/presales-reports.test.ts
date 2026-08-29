@@ -7,6 +7,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createSystemPrismaClient } from '@openestate/db';
 import type { Clock } from '@openestate/shared';
 import { ReportsService } from '../src/presales/reports.service';
+import { TeamScopeService } from '../src/team-scope/team-scope.service';
 
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
 const shouldRun = !!SYSTEM_URL;
@@ -28,7 +29,12 @@ describeIf('Presales reports: ageing buckets + funnel reconciliation', () => {
 
   beforeAll(async () => {
     systemPrisma = createSystemPrismaClient(SYSTEM_URL!);
-    reportsService = new ReportsService(systemPrisma, frozenClock);
+    // TeamScopeService is only used by managerWiseInteractions, not
+    // exercised by this file's ageing/funnel assertions — same
+    // undefined-not-exercised pattern this codebase already uses
+    // elsewhere for a constructor dependency a given test file never
+    // reaches (see CLAUDE.md's v0.2.3 custom-field-values entry).
+    reportsService = new ReportsService(systemPrisma, frozenClock, undefined as never);
 
     const company = await systemPrisma.company.create({
       data: { name: 'Reports Test Co', slug: `reports-test-${Date.now()}` },
@@ -96,7 +102,7 @@ describeIf('Presales reports: ageing buckets + funnel reconciliation', () => {
         });
       }
 
-      const buckets = await reportsService.ageingBuckets(companyId, { visibleUserIds: null });
+      const buckets = await reportsService.ageingBuckets(companyId, { visibleUserIds: null }, {});
       const byBucket = new Map(buckets.map((b: { bucket: string; count: number }) => [b.bucket, b.count]));
 
       expect(byBucket.get('0-7')).toBe(2);
@@ -147,7 +153,7 @@ describeIf('Presales reports: ageing buckets + funnel reconciliation', () => {
     });
 
     it('funnel counts reconcile exactly against raw per-status counts', async () => {
-      const funnel = await reportsService.funnelByStatus(funnelCompanyId, { visibleUserIds: null });
+      const funnel = await reportsService.funnelByStatus(funnelCompanyId, { visibleUserIds: null }, {});
       const funnelTotal = funnel.reduce((sum: number, r: { count: number }) => sum + r.count, 0);
 
       const rawTotal = await systemPrisma.inquiry.count({ where: { companyId: funnelCompanyId } });
@@ -168,5 +174,203 @@ describeIf('Presales reports: ageing buckets + funnel reconciliation', () => {
         expect(raw).toBe(expectedPerStatus);
       }
     });
+  });
+});
+
+/**
+ * Direct-service correctness for the v0.5 pre-sales reporting suite's new
+ * methods, plus the required regression coverage for managerWiseInteractions
+ * — which had ZERO test coverage before this fix (CLAUDE.md's reporting-suite
+ * decisions: "verify it FIRES against the current managerWiseInteractions...
+ * then fix, then confirm the guard goes green for the right reason").
+ */
+describeIf('Presales reports: new report methods (v0.5 reporting suite)', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let systemPrisma: any;
+  let reportsService: ReportsService;
+  let companyId: string;
+  let applicantId: string;
+
+  beforeAll(async () => {
+    systemPrisma = createSystemPrismaClient(SYSTEM_URL!);
+    reportsService = new ReportsService(systemPrisma, frozenClock, new TeamScopeService(systemPrisma));
+
+    const company = await systemPrisma.company.create({
+      data: { name: 'New Reports Test Co', slug: `new-reports-test-${Date.now()}` },
+    });
+    companyId = company.id;
+    const applicant = await systemPrisma.applicant.create({
+      data: { companyId, name: 'New Reports Applicant', primaryPhone: '9876541111', primaryPhoneNormalized: '9876541111' },
+    });
+    applicantId = applicant.id;
+  });
+
+  afterAll(async () => {
+    await systemPrisma.booking.deleteMany({ where: { companyId } });
+    await systemPrisma.followUp.deleteMany({ where: { companyId } });
+    await systemPrisma.inquiryStageHistory.deleteMany({ where: { companyId } });
+    await systemPrisma.inquiryDispositionHistory.deleteMany({ where: { companyId } });
+    await systemPrisma.inquiry.deleteMany({ where: { companyId } });
+    await systemPrisma.applicant.deleteMany({ where: { companyId } });
+    await systemPrisma.unit.deleteMany({ where: { companyId } });
+    await systemPrisma.floor.deleteMany({ where: { companyId } });
+    await systemPrisma.tower.deleteMany({ where: { companyId } });
+    await systemPrisma.leadStage.deleteMany({ where: { companyId } });
+    await systemPrisma.project.deleteMany({ where: { companyId } });
+    await systemPrisma.user.deleteMany({ where: { companyId } });
+    await systemPrisma.role.deleteMany({ where: { companyId } });
+    await systemPrisma.companyConfig.deleteMany({ where: { companyId } });
+    await systemPrisma.company.delete({ where: { id: companyId } });
+    await systemPrisma.$disconnect();
+  });
+
+  it('managerWiseInteractions rolls up a manager\'s whole subtree via TeamScopeService — the bug the CI guard now catches', async () => {
+    const managerRole = await systemPrisma.role.create({
+      data: { companyId, name: 'Sales Manager', slug: 'sales_manager', isSystem: true },
+    });
+    const manager = await systemPrisma.user.create({
+      data: { companyId, email: `mgr-${Date.now()}@test`, passwordHash: 'x', name: 'Manager One', roleId: managerRole.id },
+    });
+    const execRole = await systemPrisma.role.create({
+      data: { companyId, name: 'Exec', slug: `exec-${Date.now()}`, isSystem: true },
+    });
+    const exec = await systemPrisma.user.create({
+      data: {
+        companyId,
+        email: `exec-${Date.now()}@test`,
+        passwordHash: 'x',
+        name: 'Exec One',
+        roleId: execRole.id,
+        managerId: manager.id,
+      },
+    });
+    const inquiry = await systemPrisma.inquiry.create({
+      data: { companyId, applicantId, status: 'OPEN', assignedToId: exec.id },
+    });
+    // Logged by the SUBORDINATE, not the manager — the exact case the old
+    // "each manager's own directly-logged interactions only" bug missed.
+    await systemPrisma.followUp.createMany({
+      data: [
+        { companyId, inquiryId: inquiry.id, createdById: exec.id },
+        { companyId, inquiryId: inquiry.id, createdById: exec.id },
+      ],
+    });
+
+    const rows = await reportsService.managerWiseInteractions(companyId, { visibleUserIds: null }, {});
+    const row = rows.find((r: { managerId: string }) => r.managerId === manager.id);
+    expect(row).toBeDefined();
+    expect(row!.interactionCount).toBe(2);
+  });
+
+  it('sourceWiseConversion shows status-based and booking-linked conversion side by side, never merged', async () => {
+    // Inquiry A: marked SUCCESSFUL, but no booking ever attached — the
+    // exact gap the user's explicit correction requires stays visible.
+    const inqA = await systemPrisma.inquiry.create({
+      data: { companyId, applicantId, status: 'SUCCESSFUL' },
+    });
+    // Inquiry B: has a real linked booking.
+    const applicantB = await systemPrisma.applicant.create({
+      data: { companyId, name: 'Booked Applicant', primaryPhone: '9876542222', primaryPhoneNormalized: '9876542222' },
+    });
+    const inqB = await systemPrisma.inquiry.create({
+      data: { companyId, applicantId: applicantB.id, status: 'SUCCESSFUL' },
+    });
+    const project = await systemPrisma.project.create({
+      data: { companyId, name: `Proj ${Date.now()}`, code: `PJ-${Date.now()}` },
+    });
+    const tower = await systemPrisma.tower.create({ data: { companyId, projectId: project.id, name: 'T', code: 'T' } });
+    const floor = await systemPrisma.floor.create({ data: { companyId, towerId: tower.id, name: 'F1', floorNumber: 1 } });
+    const unit = await systemPrisma.unit.create({
+      data: { companyId, projectId: project.id, shape: 'HIGH_RISE', floorId: floor.id, number: `U-${Date.now()}`, status: 'AVAILABLE' },
+    });
+    await systemPrisma.booking.create({
+      data: {
+        companyId,
+        unitId: unit.id,
+        primaryApplicantId: applicantB.id,
+        bookingNumber: `BKG-${Date.now()}`,
+        agreedPricePaise: 1000000n,
+        sourceInquiryId: inqB.id,
+      },
+    });
+
+    const rows = await reportsService.sourceWiseConversion(companyId, { visibleUserIds: null }, {});
+    const unknownSourceRow = rows.find((r: { sourceId: string }) => r.sourceId === 'unknown');
+    expect(unknownSourceRow).toBeDefined();
+    expect(unknownSourceRow!.total).toBe(2);
+    expect(unknownSourceRow!.successful).toBe(2); // both marked SUCCESSFUL
+    expect(unknownSourceRow!.bookingLinked).toBe(1); // only inqB has a real booking
+    expect(unknownSourceRow!.conversionPercent).toBe(100);
+    expect(unknownSourceRow!.bookingLinkedConversionPercent).toBe(50);
+
+    await systemPrisma.inquiry.deleteMany({ where: { id: { in: [inqA.id, inqB.id] } } });
+  });
+
+  it('followUpOverdue counts only OPEN/CONTINUED inquiries whose nextFollowupAt is strictly in the past', async () => {
+    const staffRole = await systemPrisma.role.create({
+      data: { companyId, name: 'Staff', slug: `staff-${Date.now()}`, isSystem: true },
+    });
+    const staff = await systemPrisma.user.create({
+      data: { companyId, email: `staff-${Date.now()}@test`, passwordHash: 'x', name: 'Staff One', roleId: staffRole.id },
+    });
+    const overdueInq = await systemPrisma.inquiry.create({
+      data: { companyId, applicantId, status: 'OPEN', assignedToId: staff.id, nextFollowupAt: daysAgo(2) },
+    });
+    const futureInq = await systemPrisma.inquiry.create({
+      data: {
+        companyId,
+        applicantId,
+        status: 'OPEN',
+        assignedToId: staff.id,
+        nextFollowupAt: new Date(FROZEN_NOW.getTime() + 86_400_000),
+      },
+    });
+
+    const rows = await reportsService.followUpOverdue(companyId, { visibleUserIds: null });
+    const row = rows.find((r: { executiveId: string }) => r.executiveId === staff.id);
+    expect(row).toBeDefined();
+    expect(row!.overdueCount).toBe(1);
+
+    await systemPrisma.inquiry.deleteMany({ where: { id: { in: [overdueInq.id, futureInq.id] } } });
+  });
+
+  it('stageTransitions and stageVelocity exclude administrative (bulk-reassignment) stage moves', async () => {
+    const stageA = await systemPrisma.leadStage.create({ data: { companyId, name: `Stage A ${Date.now()}`, sortOrder: 1 } });
+    const stageB = await systemPrisma.leadStage.create({ data: { companyId, name: `Stage B ${Date.now()}`, sortOrder: 2 } });
+    const inquiry = await systemPrisma.inquiry.create({ data: { companyId, applicantId, status: 'OPEN', stageId: stageB.id } });
+
+    const t0 = daysAgo(10);
+    const t1 = daysAgo(5);
+    await systemPrisma.inquiryStageHistory.create({
+      data: { companyId, inquiryId: inquiry.id, fromStageId: null, toStageId: stageA.id, isAdministrative: false, changedAt: t0 },
+    });
+    await systemPrisma.inquiryStageHistory.create({
+      data: { companyId, inquiryId: inquiry.id, fromStageId: stageA.id, toStageId: stageB.id, isAdministrative: false, changedAt: t1 },
+    });
+    // An administrative bulk-reassignment move — must not count toward
+    // either report, or it would distort both the transition matrix and
+    // the velocity average with a move nobody on the sales team made.
+    const stageC = await systemPrisma.leadStage.create({ data: { companyId, name: `Stage C ${Date.now()}`, sortOrder: 3 } });
+    await systemPrisma.inquiryStageHistory.create({
+      data: { companyId, inquiryId: inquiry.id, fromStageId: stageB.id, toStageId: stageC.id, isAdministrative: true, changedAt: daysAgo(1) },
+    });
+
+    const transitions = await reportsService.stageTransitions(companyId, { visibleUserIds: null }, {});
+    expect(transitions.find((t: { toStageName: string }) => t.toStageName === stageC.name)).toBeUndefined();
+    const aToB = transitions.find((t: { fromStageName: string; toStageName: string }) => t.fromStageName === stageA.name && t.toStageName === stageB.name);
+    expect(aToB).toBeDefined();
+    expect(aToB!.count).toBe(1);
+
+    const velocity = await reportsService.stageVelocity(companyId, { visibleUserIds: null }, {});
+    const stageARow = velocity.find((v: { stageName: string }) => v.stageName === stageA.name);
+    expect(stageARow).toBeDefined();
+    // t0 -> t1 is exactly 5 days; the administrative move into stageC must
+    // not appear as a closed stay for stageB at all.
+    expect(stageARow!.avgDays).toBe(5);
+    expect(velocity.find((v: { stageName: string }) => v.stageName === stageB.name)).toBeUndefined();
+
+    await systemPrisma.inquiryStageHistory.deleteMany({ where: { inquiryId: inquiry.id } });
+    await systemPrisma.inquiry.delete({ where: { id: inquiry.id } });
+    await systemPrisma.leadStage.deleteMany({ where: { id: { in: [stageA.id, stageB.id, stageC.id] } } });
   });
 });
