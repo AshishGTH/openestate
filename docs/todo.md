@@ -4,6 +4,56 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## Nightly property test now takes ~32min at 2000 runs — consider sharding across matrix jobs instead of one long job
+
+The nightly (`schedule`/`workflow_dispatch`) CI run was silently cancelling
+during `postsales-property.test.ts`'s 2000-run property test for at least
+three runs, unnoticed. Root-caused and fixed in two layers (see the PR that
+merged this entry for full detail and real run-ID evidence): a redundant
+full re-run of the test inside the "Fail if any test was skipped" step, and
+the test's own hardcoded `it()` timeout (30min, sized for the 500-run
+PR/push path) firing independently of the job-level timeout. Both are
+fixed — a real `workflow_dispatch` run confirmed `integration-tests` green
+at full 2000-run strength.
+
+**The real timing evidence this fix produced, which is the actual reason
+to revisit the sharding question**: at 2000 runs, the job's "Run
+integration tests" step alone took the full **32m26s** for the whole job
+(property test dominates that). The test's own timeout now has an 80min
+ceiling to leave headroom inside the job's 90min budget. **32+ minutes is
+a long time for a single test to run before a real ledger regression is
+discovered** — it's a large part of why the original cancellation went
+unnoticed for three consecutive nightly runs: a single long-running job is
+easy to lose track of, and a red run that takes 30+ minutes to fail is
+much less likely to get looked at promptly than one that fails in a few
+minutes.
+
+**Why not sharded now**: this exact tradeoff was already considered once
+and deliberately deferred in favor of the time-based 500/2000 PR-vs-nightly
+split (see CLAUDE.md's Phase 4 decisions, "Ledger property test:
+nightly-2000 / PR-500 split, not CI-matrix sharding") — the reasoning there
+was that a 4-way matrix (400–500/shard) would 4x the runner minutes for the
+same total coverage per run (sharding parallelizes wall time, not cost),
+plus shard-partitioning complexity for fast-check's seed/skip mechanics,
+for no correctness benefit over the simpler split. That reasoning about
+*cost* still holds. What's new is the *observability* argument: a 4-way
+matrix would turn one 32-minute job into four ~8-minute jobs running in
+parallel, at the same total runner-minute cost, but with each individual
+job finishing (and therefore failing, if it's going to fail) in a fraction
+of the wall-clock time — directly addressing the "unnoticed for three runs
+because nobody was watching a 30+ minute job" failure mode, independent of
+the runner-cost tradeoff that was the sole consideration last time.
+
+**What would actually decide this**: whether GitHub Actions' own
+notification/status visibility for a long-running scheduled job is really
+the reason the original cancellation went unnoticed (plausible, but not
+directly verified — no one has checked whether a shorter-duration failure
+would actually have surfaced faster in practice, e.g. via how failure
+notifications are configured for this repo). If so, sharding earns its
+complexity cost specifically for faster failure detection, not (per the
+Phase 4 reasoning, still valid) for lower total cost. Revisit alongside
+that question rather than sharding on wall-clock time alone.
+
 ## Two known-timing-sensitive test failures, not re-investigated (contention-class, evidence already in hand)
 
 Found in a real full-`pnpm test` run on the walkthrough VM (2 CPU cores,
