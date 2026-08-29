@@ -380,6 +380,35 @@ jobs:
         working-directory: apps/e2e
         run: npx playwright test
 
+      # Standing rule (CLAUDE.md): never override an E2E merge check without
+      # first reading the Playwright trace for the failure. Three overrides
+      # in one session happened because bypassing cost nothing; this step
+      # makes the cost structural. If tests failed but Playwright produced
+      # no trace at all (webServer never started, config crashed, harness
+      # exited before any test ran), a human cannot diagnose the failure
+      # from CI logs alone, so the merge gate would have nothing to gate
+      # on — fail loud instead of green-lighting a black-box red run.
+      # playwright.config.ts sets trace: 'retain-on-failure', so a real
+      # test failure ALWAYS produces trace.zip under test-results/.
+      - name: Assert Playwright produced traces on failure
+        if: failure()
+        working-directory: apps/e2e
+        run: |
+          if [ ! -d test-results ] || [ -z "$(ls -A test-results 2>/dev/null)" ]; then
+            echo "::error::E2E failed but produced no trace in apps/e2e/test-results/. This is a harness failure, not a test failure — diagnose it before merging. Overriding this merge check without a trace to inspect violates CLAUDE.md's E2E standing rule."
+            exit 1
+          fi
+          echo "Traces present: $(find test-results -name 'trace.zip' | wc -l) trace.zip file(s) across $(ls test-results | wc -l) test dir(s)."
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: apps/e2e/test-results/
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4

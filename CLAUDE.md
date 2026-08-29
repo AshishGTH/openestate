@@ -6267,3 +6267,125 @@ wrong-turns-ruled-out account and the candidate fix directions for the
 underlying race, which needs its own real-browser click-through per
 this file's mirrored-auth standing rule before it's touched — a
 materially larger, separate undertaking correctly left out of this PR.
+
+### E2E refresh-rotation cascade — fixed at the source; supersedes the merged-red-anyway exception above
+
+The three-times-overridden gate documented in the entry above is now
+addressable, not just diagnosable. The failing subset (rapid-reload-
+session, team-scope, user-role-edit, ticket-reply, successful-to-booking,
+user-deactivate-reactivate) all shared one mechanism, per the Playwright
+trace evidence already gathered: under CI runner concurrency,
+mount-time /auth/refresh calls got aborted mid-flight by the next
+page.goto(); the cookie jar kept re-presenting the same token; the
+server-side grace window (`REFRESH_REUSE_GRACE_SECONDS=30`) forgave each
+re-presentation with a new rotation — until the cascade outlived that
+30-second window, the still-un-updated token tripped past-grace replay
+detection, and the family was revoked, parking the browser on /login.
+
+**Fixed at the source with a sessionStorage cooldown that stops the
+cascade forming.** Both apps' `AuthProvider` mount effect now consults a
+per-app `_authCache` (`_authCacheStaff`, `_authCachePortal` — distinct
+because the two apps share an origin in production and would otherwise
+cross-contaminate) before firing /auth/refresh; if a successful refresh
+landed within `AUTH_COOLDOWN_MS` (5s), it hydrates `state.user` from the
+cached JWT PAYLOAD (never the raw token — see the Phase 1 read below)
+and skips the refresh call entirely. The cascade never starts because
+the /auth/refresh calls that would abort each other are never fired.
+Seeded on successful login, verifyTotp, and every successful mount
+refresh; cleared on logout.
+
+**Two accompanying changes, both required for the cooldown to work:**
+- `api()`'s 401-retry gate relaxed from `if (res.status === 401 &&
+  accessToken)` to `if (res.status === 401)`, so a cooldown-skipped
+  mount that leaves accessToken null does not lose the first API call
+  after the skip (the retry path fires refreshSession(), gets a fresh
+  token via the still-valid cookie, retries). `refreshSession()` returns
+  null cleanly for a genuinely-logged-out user, so a real 401
+  short-circuits back to the caller after one wasted refresh probe —
+  cheap, and deduped by single-flight anyway.
+- `REFRESH_REUSE_GRACE_SECONDS` default 30→60 as defence in depth for a
+  slightly wider real-world race (multi-tab restore, flaky-network
+  double-refresh). **NOT 120**: if the client cooldown works, the
+  cascade never approaches this ceiling; if the ceiling still fires at
+  60, that proves the client fix failed and widening further would just
+  hide it. Tunable per-install; 0 restores strict pre-fix behaviour.
+  Supersedes the earlier "Decision: `REFRESH_REUSE_GRACE_SECONDS` stays
+  at 30" entry above, on the reasoning that the security trade-off named
+  there (a stolen token replayed within grace) is unchanged in kind
+  between 30 and 60s — genuine post-grace replay still revokes the whole
+  family, family revocation on explicit logout still refuses reuse, an
+  unknown token still returns null. Only the innocent-race forgiveness
+  window widens; the theft-detection ceiling above it is unchanged.
+
+**Cache is RENDERING ONLY.** Audited every reader of `_authCache` in
+both apps (two, one per app — each `AuthProvider` mount effect) and
+every downstream consumer of `state.user` it feeds: `ProtectedRoute`'s
+redirect if user missing, `RequirePermission`'s "No access" placeholder,
+`hasPermission()`'s button/link/nav rendering across ~8 files in
+apps/web (Dashboard, AppShell, Inquiries, InquiryDetail, Reports,
+BrokerDetail, RequirePermission, auth.tsx). Zero code paths use the
+cache to short-circuit a server call or grant an action; the server is
+the sole authorization authority. A tampered sessionStorage entry
+cannot grant access, only briefly mis-render a nav or button before the
+first API call the server refuses. This constraint is stated at the top
+of api.ts's own cache comment block so a future reader who reaches for
+`readAuthCache()` as a permission gate finds it before writing the
+code.
+
+**Phase 1 read, stated explicitly rather than assumed:** Phase 1's
+"access token in memory, not localStorage" decision specifically
+protects the RAW bearer credential — an XSS reading it gains a
+15-minute reusable session. The decoded PAYLOAD has no such property:
+the server re-verifies the signature on every request, and any
+successful API response already discloses those claims to any script
+that can observe fetch responses. Storing the payload in sessionStorage
+is a permitted, narrower thing than storing the token, not a Phase 1
+violation.
+
+**The two prior mitigations were correct for their own failure modes
+and simply did not address this one:**
+- **Client-side `refreshSession()` single-flight** (apps/e2e harness
+  entry, Phase 8) fixes React.StrictMode's synchronous double-invoke
+  of the mount effect — two concurrent /auth/refresh calls within one
+  page's JS lifetime. It is module-scoped by design, which is exactly
+  why it dies on `page.goto()`; it was never meant to survive
+  navigation and cannot.
+- **Server-side `REFRESH_REUSE_GRACE_SECONDS`** (own Decision entry
+  above) fixes aborted-response cascades UP TO its ceiling. It IS the
+  mitigation for this class of race — the sessionStorage cooldown
+  keeps the cascade under the ceiling that mitigation provides, and
+  the 30→60 bump widens the ceiling for cases the cooldown cannot
+  cover (a page load outside the 5s window; a client where the
+  cooldown didn't apply).
+
+Neither is being removed or weakened; each still covers what it always
+covered. The cooldown covers what neither did — the specific
+Playwright-under-CI-concurrency cascade — by not firing the aborted
+calls in the first place.
+
+**CI merge gate now self-audits — bypassing has a structural cost.**
+New step in `.github/workflows/ci.yml`'s `e2e-playwright` job: on
+failure, asserts `apps/e2e/test-results/` is non-empty (i.e.
+Playwright's `trace: 'retain-on-failure'` actually produced traces).
+If not — the harness itself crashed before any test ran — the job
+fails loud with a specific message stating the merge check must not
+be overridden without a trace to inspect. Uploads the traces as their
+own artifact alongside the existing `playwright-report/`. Three
+overrides in one session happened because bypassing cost nothing; now
+whoever overrides has at minimum to look at the trace, which is what
+this file's own primary lesson already required in principle but did
+not enforce in structure.
+
+**Regression coverage.** 8 new unit tests (4 per app, in the existing
+`api.test.ts`) prove the cache primitive round-trips, expires after
+`AUTH_COOLDOWN_MS`, refuses malformed input without throwing, clears
+cleanly — and, crucially, that the raw token never enters storage
+(the test reads sessionStorage's raw contents and asserts the token
+substring and the signature segment are both absent). These prove the
+MECHANISM works; they do NOT prove the CI cascade is fixed. The proof
+of that is three consecutive green full-suite CI runs after this push,
+per the ledger property test's own precedent. Local reproduction was
+attempted first per instruction; not feasible on this Windows dev box
+(no Postgres/Redis, no reachable verification VM), so the loop is
+one-shot-plus-push, per the accepted fallback in the same
+instruction.

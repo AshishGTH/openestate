@@ -64,3 +64,90 @@ describe('refreshSession — concurrent-call de-dup', () => {
     expect(getAccessToken()).toBeNull();
   });
 });
+
+// Mirrors apps/web/src/lib/api.test.ts's _authCache suite exactly (different
+// storage key `_authCachePortal` — see api.ts's block on why the two apps use
+// distinct keys). Same "prove the mechanism, not the CI cascade" caveat: a
+// full Playwright run under real concurrent load is what proves the cascade
+// fix; these tests prove the cache primitives themselves round-trip, expire,
+// clear, and survive tampering without crashing.
+describe('_authCache — sessionStorage cooldown bridge', () => {
+  function encodeSegment(obj: unknown): string {
+    return btoa(JSON.stringify(obj)).replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_');
+  }
+  function fakeJwt(payload: Record<string, unknown>): string {
+    return `${encodeSegment({ alg: 'HS256', typ: 'JWT' })}.${encodeSegment(payload)}.sig`;
+  }
+
+  // vitest defaults to the `node` environment (no DOM) — install a minimal
+  // sessionStorage instead of pulling jsdom/happy-dom in as a dev dependency
+  // just for these tests. Matches the Storage interface for the subset the
+  // cache uses.
+  function stubSessionStorage() {
+    const store = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => { store.set(k, v); },
+      removeItem: (k: string) => { store.delete(k); },
+      clear: () => { store.clear(); },
+      get length() { return store.size; },
+      key: (i: number) => Array.from(store.keys())[i] ?? null,
+    });
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    stubSessionStorage();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('write then read round-trips the decoded payload; the raw token never enters storage', async () => {
+    const { writeAuthCache, readAuthCache } = await import('./api');
+    const token = fakeJwt({ sub: 'u1', permissions: ['x'], companyId: 'c1' });
+
+    writeAuthCache(token);
+
+    const cached = readAuthCache();
+    expect(cached).not.toBeNull();
+    expect(cached!.payload.sub).toBe('u1');
+    expect(cached!.payload.permissions).toEqual(['x']);
+
+    const raw = sessionStorage.getItem('_authCachePortal') ?? '';
+    expect(raw).not.toContain(token);
+    expect(raw).not.toContain('sig');
+  });
+
+  it('returns null once the cooldown window has elapsed', async () => {
+    const now = Date.now();
+    vi.setSystemTime(now);
+    const { writeAuthCache, readAuthCache, AUTH_COOLDOWN_MS } = await import('./api');
+    writeAuthCache(fakeJwt({ sub: 'u1', permissions: [] }));
+
+    expect(readAuthCache()).not.toBeNull();
+    vi.setSystemTime(now + AUTH_COOLDOWN_MS + 1);
+    expect(readAuthCache()).toBeNull();
+
+    vi.useRealTimers();
+  });
+
+  it('returns null and does not throw on tampered/malformed storage', async () => {
+    const { readAuthCache } = await import('./api');
+    sessionStorage.setItem('_authCachePortal', 'not-json');
+    expect(readAuthCache()).toBeNull();
+
+    sessionStorage.setItem('_authCachePortal', '{"garbage":true}');
+    expect(readAuthCache()).toBeNull();
+  });
+
+  it('clearAuthCache removes the entry', async () => {
+    const { writeAuthCache, readAuthCache, clearAuthCache } = await import('./api');
+    writeAuthCache(fakeJwt({ sub: 'u1', permissions: [] }));
+    expect(readAuthCache()).not.toBeNull();
+
+    clearAuthCache();
+    expect(readAuthCache()).toBeNull();
+  });
+});

@@ -8,7 +8,15 @@ import {
   type ReactNode,
 } from 'react';
 import type { JwtPayload } from '@openestate/shared';
-import { api, setAccessToken, refreshSession } from './api';
+import {
+  api,
+  setAccessToken,
+  refreshSession,
+  readAuthCache,
+  writeAuthCache,
+  clearAuthCache,
+  decodeJwt,
+} from './api';
 
 interface AuthState {
   user: JwtPayload | null;
@@ -31,27 +39,41 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function decodeJwt(token: string): JwtPayload | null {
-  try {
-    const payload = token.split('.')[1];
-    return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
-  } catch {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ user: null, isLoading: true });
 
   useEffect(() => {
-    // refreshSession() (not a direct api('/auth/refresh') call) — shares
-    // its in-flight request with api()'s own 401-retry refresh and with
-    // any other concurrent caller, including a second invocation of this
-    // same effect under React.StrictMode. Without that sharing, two
-    // concurrent /auth/refresh calls race the single-use refresh-token
-    // rotation: the loser 401s, and if it resolves second, its failure
-    // overwrites the session the winner just established. setAccessToken
-    // is already handled inside refreshSession()/refreshAccessToken().
+    // Cooldown check — if we successfully refreshed within AUTH_COOLDOWN_MS
+    // (see api.ts's auth-cache block for the full reasoning), hydrate
+    // `state.user` from the cached JWT PAYLOAD (never the raw token) and
+    // skip firing another /auth/refresh. This exists solely to break the CI
+    // Playwright refresh-rotation cascade under back-to-back page.goto()s;
+    // it does NOT weaken normal refresh — a tab left open then reloaded
+    // much later still refreshes, and any actually-expired access token
+    // still triggers api()'s 401-retry.
+    //
+    // RENDERING ONLY: state.user's permissions here are used to decide what
+    // to DRAW (nav, gated buttons). The server re-verifies every request; a
+    // tampered cache cannot grant access, only briefly mis-render.
+    //
+    // In-memory `accessToken` stays null during a cooldown-skip. The first
+    // real API call will 401 (no Authorization header), which api()'s
+    // relaxed 401-retry gate handles: it fires refreshSession() without
+    // needing a prior in-memory token, gets a fresh one, retries with it.
+    const cached = readAuthCache();
+    if (cached) {
+      setState({ user: cached.payload, isLoading: false });
+      return;
+    }
+
+    // refreshSession() shares its in-flight request with api()'s own 401-retry
+    // refresh and any concurrent caller, including a second invocation of this
+    // same effect under React.StrictMode. Without that sharing, two concurrent
+    // /auth/refresh calls race the single-use refresh-token rotation: the
+    // loser 401s, and if it resolves second, its failure overwrites the
+    // session the winner just established. setAccessToken is already handled
+    // inside refreshSession()/refreshAccessToken(), and refreshAccessToken
+    // seeds the cooldown cache on success.
     refreshSession().then((accessToken) => {
       setState(accessToken ? { user: decodeJwt(accessToken), isLoading: false } : { user: null, isLoading: false });
     });
@@ -74,6 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const { accessToken } = res as { accessToken: string };
         setAccessToken(accessToken);
+        writeAuthCache(accessToken);
         setState({ user: decodeJwt(accessToken), isLoading: false });
         return { ok: true as const };
       } catch (err) {
@@ -95,6 +118,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ code }),
       });
       setAccessToken(res.accessToken);
+      writeAuthCache(res.accessToken);
       setState({ user: decodeJwt(res.accessToken), isLoading: false });
       return { ok: true as const };
     } catch (err) {
@@ -109,6 +133,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // ignore
     }
     setAccessToken(null);
+    clearAuthCache();
     setState({ user: null, isLoading: false });
   }, []);
 

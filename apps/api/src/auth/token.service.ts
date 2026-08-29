@@ -19,8 +19,18 @@ export class TokenService {
   ) {
     this.refreshSecret = this.config.getOrThrow('JWT_REFRESH_SECRET');
     this.refreshExpiresIn = this.config.get('JWT_REFRESH_EXPIRES_IN') ?? '7d';
+    // Default 60s, not 30 or 120: the client-side cooldown (both apps'
+    // AuthProvider — see apps/web/src/lib/api.ts's auth-cache block) is
+    // meant to break the CI Playwright refresh-rotation cascade at its
+    // source. If it works, the cascade never approaches this ceiling; if
+    // this ceiling still fires under the fix, that proves the client fix
+    // failed and widening further would just hide it. 60s is defence in
+    // depth for a slightly wider real-world race (multi-tab restore,
+    // flaky-network double-refresh) without weakening theft detection —
+    // family revocation on genuine post-grace replay is unchanged.
+    // Tunable per-install; 0 restores the strict pre-fix behaviour.
     this.reuseGraceMs =
-      Number(this.config.get('REFRESH_REUSE_GRACE_SECONDS') ?? 30) * 1000;
+      Number(this.config.get('REFRESH_REUSE_GRACE_SECONDS') ?? 60) * 1000;
   }
 
   signAccessToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
