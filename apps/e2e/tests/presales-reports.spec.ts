@@ -73,28 +73,33 @@ test('an admin browses the report catalogue, toggles the chart view, and exports
  * action in the first place.
  */
 test('a view-only role sees reports but never the export or print buttons', async ({ page }) => {
-  const fixture = readFixture('mastersCrud');
   const prisma = createSystemPrismaClient(DATABASE_URL_SYSTEM);
   const tag = Date.now();
   const staffPassword = 'ReportViewerPass123';
 
   try {
-    // Seeded directly via Prisma, not through Admin -> Add User — that
-    // form's own real-form-submission behavior is already covered by
-    // user-role-edit.spec.ts; driving it again here just adds concurrent
-    // load against /admin/users on the SAME shared mastersCrud fixture
-    // that spec (and team-scope.spec.ts) already exercise, which is what
-    // pushed both of them past their 30s timeout under real CI
-    // concurrency — confirmed by comparing against master's own last
-    // clean Playwright run (zero retries) before this file existed.
+    // A fully independent company, not mastersCrud — this test only needs
+    // a login, no project/masters/inventory data. Sharing mastersCrud
+    // would add one more row to its Users list, which
+    // Users.tsx.usePaginatedQuery(limit: 20) caps at 20/page: with enough
+    // OTHER specs concurrently creating users in that SAME company,
+    // team-scope.spec.ts's/user-role-edit.spec.ts's own just-created row
+    // can land past page 1 — a real, deterministic failure (unaffected
+    // by any timeout, since the row is never on the page being looked
+    // at) traced to exactly this contention, not CI slowness. Confirmed:
+    // master's own last clean Playwright run had zero retries before
+    // this file's tests existed.
     for (const key of ALL_PERMISSIONS) {
       await prisma.permission.upsert({ where: { key }, update: {}, create: { key } });
     }
     const allPerms = await prisma.permission.findMany();
     const permByKey = new Map(allPerms.map((p) => [p.key, p.id]));
 
+    const company = await prisma.company.create({
+      data: { name: `E2E Report Viewer Co ${tag}`, slug: `e2e-report-viewer-co-${tag}` },
+    });
     const viewerRole = await prisma.role.create({
-      data: { companyId: fixture.companyId, name: `E2E Report Viewer ${tag}`, slug: `e2e-report-viewer-${tag}`, isSystem: false },
+      data: { companyId: company.id, name: `E2E Report Viewer ${tag}`, slug: `e2e-report-viewer-${tag}`, isSystem: false },
     });
     const viewPermId = permByKey.get(PERMISSIONS.PRESALES_REPORT_VIEW);
     if (!viewPermId) throw new Error('presales.report.view permission not found');
@@ -103,7 +108,7 @@ test('a view-only role sees reports but never the export or print buttons', asyn
     const viewerEmail = `e2e-report-viewer-${tag}@test.com`;
     await prisma.user.create({
       data: {
-        companyId: fixture.companyId,
+        companyId: company.id,
         email: viewerEmail,
         passwordHash: await argon2.hash(staffPassword, { algorithm: argon2.Algorithm.Argon2id }),
         name: 'E2E Report Viewer',
