@@ -632,3 +632,104 @@ seems like the safer default (a closed lead shouldn't resurrect via a
 side effect of logging a call), but nobody has actually asked for
 either behavior — this is speculative, not SOP-mandated. Whoever
 changes it should decide deliberately, not fix it as a "bug."
+
+## `apps/e2e`'s CI job has a real, pre-existing intermittent flakiness under concurrency — found while shipping the pre-sales reporting suite, not caused by it
+
+Building the reporting suite's own Playwright coverage
+(`presales-reports.spec.ts`, PR #27) surfaced a genuine, reproducible
+problem in the `e2e-playwright` CI job itself: a **rotating subset** of
+the suite's heaviest, most login-intensive specs — `team-scope.spec.ts`,
+`ticket-reply.spec.ts`, `user-role-edit.spec.ts`,
+`successful-to-booking.spec.ts`, `rapid-reload-session.spec.ts` — fails
+intermittently, at the exact test-timeout ceiling (30.0-30.1s, not a
+partial-progress miss), across otherwise-identical CI runs.
+
+**Proven unrelated to that PR's own changes, not assumed.** After five
+different fix attempts each targeting a specific hypothesis (below) left
+the same two specs failing every time, `presales-reports.spec.ts` was
+removed from the branch ENTIRELY and pushed as a pure diagnostic (run
+[33245056896](https://github.com/AshishGTH/openestate/actions/runs/33245056896),
+job 99081209383). The job still failed — but with a **different** pair
+of specs (`successful-to-booking.spec.ts` + `user-role-edit.spec.ts`)
+than the pair that had been failing with the new spec present
+(`team-scope.spec.ts` + `user-role-edit.spec.ts` — seen across runs
+[33242845925](https://github.com/AshishGTH/openestate/actions/runs/33242845925),
+[33243617317](https://github.com/AshishGTH/openestate/actions/runs/33243617317),
+[33244004498](https://github.com/AshishGTH/openestate/actions/runs/33244004498),
+[33244405582](https://github.com/AshishGTH/openestate/actions/runs/33244405582)).
+That rotation — a different pair failing depending on what else is in
+the suite, at the same fixed ceiling regardless — is the signature of
+real, load-dependent contention, not a specific spec's logic being
+wrong. Two "success" runs on `master` from just before this PR
+(`33065667370`, `33066407872`, both 35/35 with zero retries) were
+initially taken as evidence the branch introduced the problem — that
+turned out to be two lucky samples, not proof of master's true
+underlying rate; the diagnostic above is the actual evidence.
+
+**Root mechanism, from Playwright's own trace artifacts, not
+speculation**: the browser is sitting on `/login` at the exact moment
+of failure, mid-test, even though the test code believes it's several
+steps past login. `page.goto()` is a real browser navigation (not a
+React Router client-side transition) — it remounts the whole SPA and
+re-fires `AuthProvider`'s mount-time `/auth/refresh` call. This project
+already documents and partially mitigates this exact race
+(`REFRESH_REUSE_GRACE_SECONDS`, the "rapid-reload-logout" fix in
+CLAUDE.md's Decisions log) — the new finding is that under **real CI
+concurrency** (many spec files' own logins and page reloads landing in
+the same narrow window, not just React StrictMode's double-effect
+pattern the original fix targeted), the existing grace window can still
+be exceeded.
+
+**Wrong turns ruled out, in order, so a future session doesn't re-walk
+them:**
+1. *Fixture contention on the shared `mastersCrud` company's Users list*
+   (`Users.tsx` paginates at `limit: 20`; many concurrent specs create
+   users against the same company). Plausible-looking, and partially
+   true as a contributing factor, but eliminated as the SOLE cause: even
+   after moving the affected test onto a fully independent company
+   (zero shared rows), the same two specs kept failing identically.
+2. *The shared default rate-limit bucket* (100 req/60s, IP-keyed,
+   `app.module.ts`) being exhausted by this PR's own added `/auth/login`
+   calls. Real and fixed on the **backend** integration-tests job
+   (unrelated 429s on `e2e-tickets`/`e2e-plugins` went away after
+   consolidating `e2e-presales-reports.test.ts` from 7 logins to 3) —
+   but the E2E/Playwright job runs a completely separate API process
+   with its own separate budget, and reducing this PR's own Playwright
+   login count (down to a single login, then down to zero via the
+   diagnostic) never changed the E2E outcome.
+3. *Needs more time, not a hang* — raised Playwright's CI timeout from
+   30s to 45s. The same two specs failed at 45.0-45.1s instead, exactly
+   on the new ceiling rather than somewhere in between — ruling out
+   "genuinely slow but progressing" and pointing at a real stuck state
+   instead. Reverted.
+4. *This PR's own extra page reload* — replaced a `page.goto()` with a
+   client-side nav-link click to cut one avoidable `/auth/refresh` call.
+   Real and directionally correct (contributes less load), but not
+   sufficient on its own — the same failures persisted until the
+   zero-spec diagnostic finally isolated the true scope of the problem.
+
+**What would actually close this**: the refresh-rotation race needs to
+tolerate real concurrent load, not just React StrictMode's synchronous
+double-invoke. Candidate directions: widen
+`REFRESH_REUSE_GRACE_SECONDS` (a config change, but see its own
+Decisions-log entry for the security trade-off that name already
+documents — widening it further isn't free); or make the specific
+heaviest specs (`team-scope`, `user-role-edit`, `ticket-reply`,
+`successful-to-booking`) reuse an already-authenticated session instead
+of each doing several sequential fresh logins in one test, the same
+"extend an existing fixture's login, don't add a new one" discipline
+this file's own portal-auth-throttle entry already established for a
+different bucket. Either way, per CLAUDE.md's standing rule, a real
+change to the refresh/auth path needs its own real-browser
+click-through on both staff and portal before it ships — a materially
+bigger undertaking than this entry, and deliberately not attempted as a
+side effect of an unrelated feature PR.
+
+**Standing note, not a licence to wave off E2E failures generally**: a
+failure in a spec you just touched, or a NEW failure appearing in a spec
+you didn't, is still yours to investigate until proven otherwise — the
+rotation described here was established with a real diagnostic (removing
+the suspect code and confirming the failure persists unchanged in kind),
+not assumed from "E2E is flaky" folklore. This entry documents one
+specific, evidenced instance of pre-existing contention; it does not mean
+future E2E red is presumed innocent.

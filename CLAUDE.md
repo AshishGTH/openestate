@@ -6212,3 +6212,58 @@ directly comparable case. Left in the default sweep, matching `docs`.
 observed blocking unrelated jobs** — at that point the fix is a
 `--filter='!@openestate/website'` exclusion (or a dedicated job),
 applied with the real incident as the reason, not preemptively.
+
+### Pre-sales reporting suite (PR #27) — 5 real bugs shipped clean; `e2e-playwright` has a known pre-existing intermittent flakiness, documented not fixed
+
+The 19-report pre-sales reporting suite (8 existing reports upgraded
+with date-range/project filtering and real `TeamScopeService` scoping,
+11 new reports, `source-wise`/`staff-performance` now showing
+status-based and booking-linked conversion side by side per explicit
+correction, export/print gated by two new permissions separate from
+view with an audit-log entry per action, a widened `team-scope-guard`
+check that caught a real `managerWiseInteractions` scoping bug) shipped
+after real CI verification found and fixed five genuine bugs, exactly
+as expected of a rewrite this size that had never touched a real
+database: a CSV column-format regression against a pre-existing spec's
+literal assertion, a missing required `bookingDate` field in a new test
+fixture, an `eslint-disable-next-line` comment separated from the line
+it was meant to suppress by an inserted explanatory comment block, a
+test-isolation leak (one test's uncommitted-cleanup inquiry inflating a
+sibling test's exact-count assertion within the same shared company
+fixture), and a disposition-history row with a null `changedById` that
+made a permission-scoped query invisible to the very user calling it.
+All five confirmed via real CI logs across multiple pushes, not
+guessed — `lint-typecheck-build`, `integration-tests`, `native-install`,
+and `native-upgrade` are all reliably green on this branch.
+
+**`e2e-playwright` was NOT made green, and the PR merged anyway — with
+explicit, informed user sign-off, not by unilateral judgment call.**
+Extensive investigation (five distinct fix attempts, each targeting a
+specific hypothesis, each producing SOME signal but never a clean run —
+full account in `docs/todo.md`'s own entry) converged on a decisive
+diagnostic: removing this PR's own Playwright spec entirely and pushing
+that as a pure test still left the job failing, with a **different**
+pair of pre-existing, unrelated specs than the pair that had been
+failing with the new spec present. That rotation — which specific
+specs fail depends on what else is running, at a fixed timeout ceiling
+regardless — is the signature of real, pre-existing concurrency
+contention in the E2E suite itself, not a defect in this PR's code.
+Root-caused (via Playwright's own trace artifacts, not speculation) to
+the refresh-token-rotation race this file already documents
+(`REFRESH_REUSE_GRACE_SECONDS`) firing under genuine CI concurrency
+rather than only React StrictMode's synchronous double-invoke, which is
+the narrower case the existing mitigation was built against.
+
+**This does not relax the "verify in a real browser" primary lesson at
+the top of this file, and must not be cited as license to wave off a
+future E2E failure.** The rotation was established by an actual
+diagnostic — remove the suspect code, observe the failure persists
+unchanged in kind — not assumed from "E2E is sometimes flaky" folklore.
+A failure in a spec touched by a change, or a new failure appearing in
+one that wasn't, is still that change's responsibility until a
+comparably rigorous diagnostic says otherwise, exactly as it was for
+five real bugs earlier in this same PR. See `docs/todo.md` for the full
+wrong-turns-ruled-out account and the candidate fix directions for the
+underlying race, which needs its own real-browser click-through per
+this file's mirrored-auth standing rule before it's touched — a
+materially larger, separate undertaking correctly left out of this PR.
