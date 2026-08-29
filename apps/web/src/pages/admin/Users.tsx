@@ -28,13 +28,13 @@ export default function UsersPage() {
   );
 
   const deactivate = useApiMutation<unknown, { id: string }>(
-    'PATCH',
+    'POST',
     (body) => `/users/${body.id}/deactivate`,
     [['users']],
   );
 
   const reactivate = useApiMutation<unknown, { id: string }>(
-    'PATCH',
+    'POST',
     (body) => `/users/${body.id}/reactivate`,
     [['users']],
   );
