@@ -35,6 +35,7 @@ import ProjectsPage from './pages/inventory/Projects';
 import ProjectDetailPage from './pages/inventory/ProjectDetail';
 import InquiriesPage from './pages/presales/Inquiries';
 import InquiryDetailPage from './pages/presales/InquiryDetail';
+import PresalesReportsPage from './pages/presales/Reports';
 import TicketsPage from './pages/support/Tickets';
 import TicketDetailPage from './pages/support/TicketDetail';
 
@@ -80,6 +81,7 @@ export default function App() {
 
             <Route path="presales/inquiries" element={<RequirePermission perm={PERMISSIONS.PRESALES_INQUIRY_READ}><InquiriesPage /></RequirePermission>} />
             <Route path="presales/inquiries/:id" element={<RequirePermission perm={PERMISSIONS.PRESALES_INQUIRY_READ}><InquiryDetailPage /></RequirePermission>} />
+            <Route path="presales/reports" element={<RequirePermission perm={PERMISSIONS.PRESALES_REPORT_VIEW}><PresalesReportsPage /></RequirePermission>} />
 
             <Route path="support/tickets" element={<RequirePermission perm={PERMISSIONS.ADMIN_TICKET_RESPOND}><TicketsPage /></RequirePermission>} />
             <Route path="support/tickets/:id" element={<RequirePermission perm={PERMISSIONS.ADMIN_TICKET_RESPOND}><TicketDetailPage /></RequirePermission>} />

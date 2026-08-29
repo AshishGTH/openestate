@@ -202,6 +202,56 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   set as the default first, and a stage can only ever be retired by
   deactivating it — there is no delete.
 
+- **Pre-sales reporting suite.** A single `Reports` screen under
+  Pre-Sales, driven by one filter bar (date range, project, and a
+  per-report executive/reason filter where relevant) and one reusable
+  table/chart pattern, replacing the previous zero-UI state — every
+  report in this release was already backend-only or entirely new; none
+  had a screen before. Nine reports are new: Daily Work (per-user
+  follow-ups logged / leads touched / stage changes / dispositions set),
+  Leads by Stage, Dump report (by reason/executive/time), Site Visit
+  report, Enquiry-type breakdown (Fresh/Resale/Rental/Commercial — a
+  different axis from the existing Source-wise report, not a rename of
+  it), Stage Transitions and Stage Velocity (`InquiryStageHistory`,
+  excluding administrative bulk-reassignment moves), Follow-up Overdue
+  (a live gauge, ignores the date filter by design) and Follow-up Delay
+  (average gap between a follow-up's next-action date and the follow-up
+  that actually closed it), Supervisor Review Queue (dumped + transferred
+  leads, for the SOP-mandated weekly review), and Communication-type
+  breakdown (`FollowUpType`, not `CommunicationType`). Two existing
+  reports — Source-wise and Staff Performance — gained a second,
+  **booking-linked** conversion percentage (via `Booking.sourceInquiryId`)
+  shown side by side with the existing status-based one, never replacing
+  it: the gap between "marked Successful" and "has a real booking behind
+  it" is itself a signal a manager can act on. Every report is scoped
+  through `TeamScopeService` (a sales exec sees their own data, a manager
+  their subtree, an admin everything) — no report hand-rolls its own
+  owner filter, enforced by a widened CI guard (see Fixed, below).
+  Charts are hand-rolled inline SVG bar/donut, no charting library.
+  CSV export and print are gated by two new permissions,
+  `presales.report.export` and `presales.report.print`, kept separate
+  from `presales.report.view` specifically so a role can read a report
+  on-screen without being able to take customer PII out of the system —
+  every export and print writes an audit-log row (who, which report,
+  what filters, row count) before the response is sent, the control 4QT
+  had as "Print/Download Track." Row-level reports (per-inquiry export,
+  dump report, site visit, supervisor review queue) stream their CSV via
+  the existing `streamCsv` utility instead of buffering.
+  **Upgrade-path note**: `company_admin` and `sales_manager` inherit both
+  new permissions automatically (the `presales.*` prefix filter in
+  `roles.ts`), but only for a role created fresh from today onward — on
+  an EXISTING install, that prefix filter doesn't retroactively re-grant
+  anything, so an admin must grant `presales.report.export`/
+  `presales.report.print` to those roles manually via Admin → Roles
+  after upgrading if export/print access is wanted (view access needs no
+  action — `sales_executive` already had `presales.report.view` before
+  this release, and every role's existing grants are otherwise
+  untouched). `sales_executive` gets `presales.report.view` only, not
+  export or print, in both a fresh install and on upgrade (added
+  directly to its `ROLE_PERMISSIONS` entry, not inherited via a prefix
+  filter) — reports are already scoped to that rep's own data, but a
+  portable CSV/print copy of it stays manager+ only by default.
+
 ### Fixed
 
 - **Reloading a few times, or letting your browser restore several tabs,
@@ -241,6 +291,25 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   it to any custom admin-equivalent role of your own via Admin → Roles.
   Deliberately not granted to `sales_manager`: seeing your own subtree
   is the point of the hierarchy.
+
+- **Manager-wise interaction counts silently ignored the team hierarchy,
+  and the CI guard meant to catch exactly this class of bug didn't
+  either.** `managerWiseInteractions` picked which users are managers via
+  a bare `role: { slug: 'sales_manager' }` filter — a legitimate way to
+  select the report's axis — but then counted only each manager's own
+  directly-logged follow-ups, never `TeamScopeService`'s real subtree, so
+  a manager's team roll-up silently undercounted the moment they had any
+  reports. `team-scope-guard.test.ts`'s existing checks (a bare
+  `SYSTEM_ROLES.SALES_EXECUTIVE` identifier; a bare
+  `where.assignedToId =`/`where.createdById =` scalar assignment) didn't
+  fire on this shape at all — a `role: { slug: ... }` query filter is
+  neither. Found while building the reporting suite above; the guard was
+  widened with a third check for exactly this pattern (verified it
+  correctly failed against the pre-fix code before the method itself was
+  fixed, the same discipline this project applies to every other
+  guard/regression pair), and the method now calls
+  `TeamScopeService.getVisibleUserIds` per manager to get their real
+  subtree.
 
 ### Changed
 

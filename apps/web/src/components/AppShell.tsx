@@ -29,7 +29,10 @@ const TOP_LEVEL: NavLeaf[] = [{ label: 'Dashboard', to: '/' }];
 const SECTIONS: NavSection[] = [
   {
     label: 'Pre-Sales',
-    items: [{ label: 'Inquiries', to: '/presales/inquiries', perm: PERMISSIONS.PRESALES_INQUIRY_READ }],
+    items: [
+      { label: 'Inquiries', to: '/presales/inquiries', perm: PERMISSIONS.PRESALES_INQUIRY_READ },
+      { label: 'Reports', to: '/presales/reports', perm: PERMISSIONS.PRESALES_REPORT_VIEW },
+    ],
   },
   {
     label: 'Inventory',
