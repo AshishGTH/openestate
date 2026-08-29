@@ -75,22 +75,46 @@ describeIf('Ledger property: balance == Σ(ledger) for random sequences', () => 
     await tenantPrisma.$disconnect();
   }, 300_000);
 
-  // Timeout is 1_800_000 (30min), not the old 600_000 — raised as part of
-  // the Phase 7 CI-reliability fix (CLAUDE.md's Decisions log). The old
-  // 600s timeout was tight enough that CPU/IO contention under the FULL
-  // concurrent suite (not this test in isolation, which finishes in ~96s
-  // at 500 runs) could push a real, still-succeeding run past it. Vitest's
-  // it(fn, timeout) only stops AWAITING on timeout — it does not cancel
-  // the in-flight fast-check loop, which kept issuing real Postgres writes
-  // concurrently with afterAll's cleanupCompany() delete sweep, producing
-  // a genuine 40P01 deadlock (confirmed via the Postgres server's own
-  // log, not just the client-side error). Raising the timeout removes the
-  // false-positive trigger for that self-race rather than papering over
-  // the race itself; the vitest maxForks cap (vitest.config.ts)
-  // additionally reduces the contention that made 600s too tight in the
-  // first place. GitHub Actions' own job timeout (360min default, unset
-  // in ci.yml) is the real backstop against a genuine hang.
-  it(`holds across ${resolveNumRuns()} random sequences`, async () => {
+  // Timeout is 1_800_000 (30min) at the 500-run PR/push strength, not the
+  // old 600_000 — raised as part of the Phase 7 CI-reliability fix
+  // (CLAUDE.md's Decisions log). The old 600s timeout was tight enough
+  // that CPU/IO contention under the FULL concurrent suite (not this test
+  // in isolation, which finishes in ~96s at 500 runs) could push a real,
+  // still-succeeding run past it. Vitest's it(fn, timeout) only stops
+  // AWAITING on timeout — it does not cancel the in-flight fast-check
+  // loop, which kept issuing real Postgres writes concurrently with
+  // afterAll's cleanupCompany() delete sweep, producing a genuine 40P01
+  // deadlock (confirmed via the Postgres server's own log, not just the
+  // client-side error). Raising the timeout removes the false-positive
+  // trigger for that self-race rather than papering over the race
+  // itself; the vitest maxForks cap (vitest.config.ts) additionally
+  // reduces the contention that made 600s too tight in the first place.
+  //
+  // At the CI_DEFAULT 2000-run nightly/workflow_dispatch strength, 30min
+  // is NOT enough — confirmed by a real failure, not assumed: a genuine
+  // workflow_dispatch run (2026-08-29) hit exactly this 1_800_000ms
+  // timeout with the test still in flight (fast-check had not finished
+  // 2000 iterations), killed by vitest's own it() timeout, not GitHub
+  // Actions' job-level timeout-minutes (raised to 90 for schedule/
+  // workflow_dispatch in the same fix that surfaced this). The two
+  // timeouts are independent knobs — raising the job's 30min ceiling to
+  // 90min (ci.yml) does nothing for this test's own internal 30min
+  // ceiling, which fires first regardless of how much job budget remains.
+  // PROPERTY_TEST_TIMEOUT_MS below scales with numRuns so the 500-run
+  // path keeps its already-proven-sufficient 30min budget unchanged,
+  // while the 2000-run path gets enough headroom (80min) to actually
+  // finish inside the 90min job budget rather than being killed by its
+  // own stopwatch partway through. 80min (not a tighter value closer to
+  // the observed 30.1min failure point) is deliberate: the failed run
+  // only proves the test needed MORE than 30min, not how much more —
+  // fast-check's loop doesn't report interim progress, so there is no
+  // way to know from that one data point whether it was close to done
+  // or a third of the way through. GitHub Actions' own job timeout
+  // (360min default, or 90min for schedule/workflow_dispatch since the
+  // ci.yml fix) is still the real backstop against a genuine hang.
+  const numRunsForTimeout = resolveNumRuns();
+  const PROPERTY_TEST_TIMEOUT_MS = numRunsForTimeout >= CI_DEFAULT ? 80 * 60_000 : 30 * 60_000;
+  it(`holds across ${numRunsForTimeout} random sequences`, async () => {
     const numRuns = resolveNumRuns();
     // Explicit, unconditional log — not just the test title above. A test
     // NAME is invisible to some reporters (the JSON reporter CI uses for
@@ -226,7 +250,7 @@ describeIf('Ledger property: balance == Σ(ledger) for random sequences', () => 
       }),
       { numRuns, seed: process.env.FC_SEED ? Number(process.env.FC_SEED) : undefined },
     );
-  }, 1_800_000);
+  }, PROPERTY_TEST_TIMEOUT_MS);
 
   async function entryCount(bookingId: string): Promise<number> {
     return systemPrisma.ledgerEntry.count({ where: { companyId: fx.companyId, bookingId } });
