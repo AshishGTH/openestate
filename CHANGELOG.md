@@ -40,6 +40,39 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **E2E gate was overridden three times in one session because the
+  refresh-rotation cascade under CI concurrency logged sessions out
+  mid-test.** Under aggressive back-to-back page navigations on 2-core
+  CI runners, each mount-time `/auth/refresh` got aborted mid-flight by
+  the next navigation; the cookie jar kept re-presenting the same
+  token; the server-side grace window forgave each re-presentation with
+  a new rotation until the cascade outlived the 30-second window and
+  the still-un-updated token tripped replay detection, revoking the
+  family and parking the browser on /login. Fixed by adding a 5-second
+  sessionStorage cooldown to both `apps/web` and `apps/portal`'s
+  `AuthProvider` mount effect — if a successful refresh landed within
+  that window, hydrate from a cached JWT PAYLOAD (never the raw token —
+  Phase 1's rule protects the raw bearer, not the claims) and skip
+  firing another `/auth/refresh`. The cascade never starts. `api()`'s
+  401-retry gate was also relaxed to fire without a prior in-memory
+  access token so the first API call after a cooldown-skip still works,
+  and `REFRESH_REUSE_GRACE_SECONDS` default was bumped from 30 to 60 as
+  defence in depth for slightly wider real-world races (multi-tab
+  restore, flaky-network double-refresh) — NOT to 120: if the client
+  cooldown works, the ceiling is never approached, so widening further
+  would hide a client-side regression. Cache is rendering-only, audited
+  clean; server remains the sole authorization authority. See CLAUDE.md
+  Decisions log for the full account, including why the two prior
+  mitigations (`refreshSession()` single-flight, the server grace
+  window) each correctly covered their own failure modes but did not
+  address this one.
+- **CI E2E merge gate now self-audits.** New step in
+  `e2e-playwright`: if the job fails but produced no Playwright traces
+  in `apps/e2e/test-results/`, it fails loud with a specific message
+  stating the merge check must not be overridden without a trace to
+  inspect. Traces are now uploaded as their own artifact alongside the
+  HTML report. Structural cost added to bypassing the gate, closing the
+  incentive that let three overrides land in one session.
 - **Correctness bug: construction-linked payment plans could show a
   customer overdue, and accrue delay interest, against a construction
   stage the builder had not reached.** Every payment-plan milestone

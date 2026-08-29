@@ -1,3 +1,4 @@
+import type { JwtPayload } from '@openestate/shared';
 import { toast } from './toast';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
@@ -12,6 +13,101 @@ export function setAccessToken(token: string | null) {
 export function getAccessToken() {
   return accessToken;
 }
+
+// -------------------------- session cooldown cache --------------------------
+//
+// Breaks the CI-only refresh-rotation cascade documented in CLAUDE.md's E2E
+// Decisions entry. Under aggressive back-to-back page.goto()s in Playwright
+// (which every login-heavy spec runs), each mount's /auth/refresh gets
+// aborted mid-flight by the next navigation; the server has already rotated
+// a cookie whose acknowledgement never lands, and the jar keeps re-presenting
+// the same old token. REFRESH_REUSE_GRACE_SECONDS forgives that — until the
+// cascade outlives the window, at which point the still-un-updated token is
+// past grace, replay-detection fires, and the family is revoked (session
+// dead, parked on /login).
+//
+// The cooldown breaks the cascade by NOT firing a fresh /auth/refresh on a
+// mount that already saw one within AUTH_COOLDOWN_MS. It does NOT weaken
+// refresh in any other case: a tab left open then reloaded much later still
+// refreshes (stale cache), and any API call whose access token has actually
+// expired still hits api()'s 401-retry below (which now works without a
+// prior in-memory accessToken — see the relaxed gate).
+//
+// The cache holds the DECODED JWT PAYLOAD, not the raw token. Phase 1's
+// "access token in memory, not localStorage" decision specifically protects
+// the raw bearer credential — an XSS reading it gains a 15-minute reusable
+// session. The payload has no such property: the server re-verifies the
+// signature on every request, and any successful API response already
+// discloses those claims. Storing the payload is not a Phase 1 violation;
+// see CLAUDE.md's E2E entry for the full read.
+//
+// RENDERING ONLY. This cache MUST NEVER be consulted to decide access — only
+// to decide what to draw (nav visibility, greeting name, permission-gated
+// button rendering). A tampered sessionStorage entry granting UI access the
+// server would refuse is a real vulnerability; the server is the sole
+// authorization authority, and every gated action is checked there.
+//
+// The 5s window matches the timescale of the Playwright cascade (page.goto()s
+// land <1s apart). Do not widen without re-reading the cascade analysis.
+
+// Distinct key per app: in production both apps live on the same origin
+// (nginx serves /admin from apps/web, /portal from apps/portal), so a shared
+// sessionStorage key would let a staff session in one tab briefly mis-hydrate
+// a portal session's user state in another (and vice versa) before the first
+// API call's 401-retry corrected it via the app-specific refresh endpoint.
+const AUTH_CACHE_KEY = '_authCacheStaff';
+export const AUTH_COOLDOWN_MS = 5000;
+
+export interface AuthCache {
+  payload: JwtPayload;
+  refreshedAt: number;
+}
+
+export function decodeJwt(token: string): JwtPayload | null {
+  try {
+    const payload = token.split('.')[1];
+    return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+  } catch {
+    return null;
+  }
+}
+
+export function readAuthCache(): AuthCache | null {
+  try {
+    const raw = sessionStorage.getItem(AUTH_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AuthCache;
+    if (typeof parsed.refreshedAt !== 'number' || !parsed.payload) return null;
+    if (Date.now() - parsed.refreshedAt > AUTH_COOLDOWN_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function writeAuthCache(token: string): void {
+  const payload = decodeJwt(token);
+  if (!payload) return;
+  try {
+    sessionStorage.setItem(
+      AUTH_CACHE_KEY,
+      JSON.stringify({ payload, refreshedAt: Date.now() }),
+    );
+  } catch {
+    // sessionStorage disabled (Safari private mode, quota exceeded) — best
+    // effort; a cache miss falls through to a normal refresh call.
+  }
+}
+
+export function clearAuthCache(): void {
+  try {
+    sessionStorage.removeItem(AUTH_CACHE_KEY);
+  } catch {
+    // as above
+  }
+}
+
+// ----------------------------------------------------------------------------
 
 function getCsrfToken(): string | null {
   const match = document.cookie
@@ -30,6 +126,7 @@ async function refreshAccessToken(): Promise<string | null> {
     if (!res.ok) return null;
     const data = await res.json();
     accessToken = data.accessToken;
+    if (accessToken) writeAuthCache(accessToken);
     return accessToken;
   } catch {
     return null;
@@ -83,7 +180,14 @@ export async function api<T = unknown>(
     credentials: 'include',
   });
 
-  if (res.status === 401 && accessToken) {
+  // No `&& accessToken` guard: after a cooldown-skipped mount refresh (see
+  // the auth-cache block above), accessToken is null on a fresh page load
+  // even though the refresh cookie is still valid — the first call would
+  // otherwise be un-retriable and the whole page would fail. refreshSession()
+  // returns null cleanly when there's no valid session, so a genuine
+  // logged-out 401 still short-circuits back to the caller after one wasted
+  // refresh probe (cheap; deduped by refreshSession's own single-flight).
+  if (res.status === 401) {
     const newToken = await refreshSession();
     if (newToken) {
       headers.set('Authorization', `Bearer ${newToken}`);
