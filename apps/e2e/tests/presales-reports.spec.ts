@@ -47,7 +47,15 @@ test('an admin browses the report catalogue, toggles the chart view, and exports
     });
 
     await login(page, fixture);
-    await page.goto('/presales/reports');
+    // A client-side nav click, not page.goto() — goto() is a real browser
+    // navigation that remounts the whole SPA and re-fires AuthProvider's
+    // mount-time /auth/refresh; this suite's own trace evidence shows
+    // that extra, avoidable refresh call is exactly what pushed OTHER
+    // unrelated specs into the refresh-rotation grace-window race under
+    // real CI concurrency. The "Pre-Sales" nav section starts collapsed
+    // from Dashboard, so it needs expanding first.
+    await page.getByRole('button', { name: 'Pre-Sales' }).click();
+    await page.getByRole('link', { name: 'Reports', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Pre-Sales Reports' })).toBeVisible();
 
     // Switch to Funnel — no date-range default to fight, and it must show
