@@ -1,7 +1,8 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
-import type { CreateFollowUpDto, UpdateFollowUpDto } from '@openestate/shared';
+import { ACTIVE_INQUIRY_STATUSES, type CreateFollowUpDto, type UpdateFollowUpDto, type Clock } from '@openestate/shared';
+import { CLOCK } from '../common/clock.provider';
 import { InquiryService, type InquiryScope } from './inquiry.service';
 
 @Injectable()
@@ -12,6 +13,8 @@ export class FollowUpService {
     private readonly tenantPrisma: any,
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
+    @Inject(CLOCK)
+    private readonly clock: Clock,
     private readonly inquiryService: InquiryService,
   ) {}
 
@@ -53,6 +56,17 @@ export class FollowUpService {
         const inquiry = await tx.inquiry.findFirst({ where: inquiryWhere });
         if (!inquiry) throw new NotFoundException('Inquiry not found');
 
+        // SOP rule 2: "if the lead remains in Followups, a next
+        // follow-up time should normally be required." A lead is still
+        // in the active follow-up workflow whenever its status is
+        // OPEN/CONTINUED — refuse rather than silently letting it go
+        // idle with no scheduled next action.
+        if ((ACTIVE_INQUIRY_STATUSES as readonly string[]).includes(inquiry.status) && !dto.nextActionAt) {
+          throw new BadRequestException(
+            'A next follow-up time is required while this lead is active. Set one, or change the lead\'s disposition first.',
+          );
+        }
+
         const followUp = await tx.followUp.create({
           data: {
             companyId,
@@ -60,6 +74,7 @@ export class FollowUpService {
             typeId: dto.typeId,
             notes: dto.notes,
             outcome: dto.outcome,
+            interactionAt: dto.interactionAt ?? this.clock.now(),
             nextActionAt: dto.nextActionAt,
             scheduledAt: dto.scheduledAt,
             venue: dto.venue,
@@ -68,8 +83,11 @@ export class FollowUpService {
         });
 
         // Advance the inquiry's own next-followup cursor when this
-        // follow-up carries a next action date; also flips DUMPED/SUCCESSFUL
-        // inquiries back to CONTINUED when a new follow-up is logged.
+        // follow-up carries a next action date. Only OPEN flips to
+        // CONTINUED here — a DUMPED/SUCCESSFUL inquiry's status is left
+        // untouched (this ternary's `: inquiry.status` branch), a logged
+        // interaction never reopens a closed lead. See docs/todo.md for
+        // the open product question this raises.
         if (dto.nextActionAt) {
           await tx.inquiry.update({
             where: { id: inquiryId },

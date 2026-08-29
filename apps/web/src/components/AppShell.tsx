@@ -29,7 +29,10 @@ const TOP_LEVEL: NavLeaf[] = [{ label: 'Dashboard', to: '/' }];
 const SECTIONS: NavSection[] = [
   {
     label: 'Pre-Sales',
-    items: [{ label: 'Inquiries', to: '/presales/inquiries', perm: PERMISSIONS.PRESALES_INQUIRY_READ }],
+    items: [
+      { label: 'Inquiries', to: '/presales/inquiries', perm: PERMISSIONS.PRESALES_INQUIRY_READ },
+      { label: 'Reports', to: '/presales/reports', perm: PERMISSIONS.PRESALES_REPORT_VIEW },
+    ],
   },
   {
     label: 'Inventory',
@@ -65,6 +68,7 @@ const SECTIONS: NavSection[] = [
       { label: 'Masters', to: '/admin/masters', perm: PERMISSIONS.ADMIN_MASTER_READ },
       { label: 'Custom Fields', to: '/admin/custom-fields', perm: PERMISSIONS.ADMIN_CUSTOM_FIELD_READ },
       { label: 'Letter Templates', to: '/admin/letter-templates', perm: PERMISSIONS.ADMIN_MASTER_READ },
+      { label: 'Lead Stages', to: '/admin/lead-stages', perm: PERMISSIONS.ADMIN_MASTER_READ },
       { label: 'Company Config', to: '/admin/config', perm: PERMISSIONS.ADMIN_CONFIG_READ },
       { label: 'Audit Log', to: '/admin/audit', perm: PERMISSIONS.ADMIN_AUDIT_READ },
       { label: 'Plugins', to: '/admin/plugins', perm: PERMISSIONS.ADMIN_PLUGIN_READ },

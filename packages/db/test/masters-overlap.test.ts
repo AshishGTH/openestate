@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { PrismaClient } from '@prisma/client';
 import { createSystemPrismaClient } from '../src/index';
+import { deleteCompaniesSafely } from './helpers/delete-company-safely';
 
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
 const shouldRun = !!SYSTEM_URL;
@@ -77,7 +78,10 @@ describeIf('Masters: overlapping effective-date validation (h)', () => {
   afterAll(async () => {
     await prisma.gstRate.deleteMany({ where: { companyId } });
     await prisma.tdsRule.deleteMany({ where: { companyId } });
-    await prisma.company.delete({ where: { id: companyId } });
+    // Retries on syncLeadStages' own race — see delete-company-safely.ts's
+    // doc comment for the exact mechanism (a single delete-then-delete
+    // sequence is not enough).
+    await deleteCompaniesSafely(prisma, [companyId]);
     await prisma.$disconnect();
   });
 

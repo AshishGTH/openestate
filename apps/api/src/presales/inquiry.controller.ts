@@ -82,7 +82,7 @@ export class InquiryController {
   @ApiOperation({ summary: 'Update inquiry' })
   async update(@Param('id') id: string, @Body() dto: UpdateInquiryDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.inquiryService.update(user.companyId, id, dto, await this.scopeFor(user));
+    return this.inquiryService.update(user.companyId, id, dto, await this.scopeFor(user), user.sub);
   }
 
   @Patch(':id/assign')

@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { SYSTEM_ROLES, ROLE_PERMISSIONS, ROLE_DISPLAY_NAMES, SEED_GST_RATES, SEED_TDS_RULES } from '@openestate/shared';
 import * as argon2 from '@node-rs/argon2';
-import { syncPermissions } from './sync-permissions';
+import { syncPermissions, syncLeadStages } from './sync-permissions';
 
 const prisma = new PrismaClient();
 
@@ -107,6 +107,9 @@ async function main() {
       dateFormat: 'DD-MM-YYYY',
     },
   });
+
+  console.log('Seeding default lead-stage pipeline...');
+  await syncLeadStages(prisma);
 
   console.log('Seeding Indian master defaults...');
 

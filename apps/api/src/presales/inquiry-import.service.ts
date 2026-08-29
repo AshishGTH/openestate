@@ -4,6 +4,8 @@ import { TENANT_PRISMA } from '../database/database.module';
 import { importInquiryRowSchema, normalizePhone, normalizeEmail } from '@openestate/shared';
 import * as ExcelJS from 'exceljs';
 import { AssignmentService } from './assignment.service';
+import { LeadStageTransitionService } from './lead-stage-transition.service';
+import { InquiryDispositionTransitionService } from './inquiry-disposition-transition.service';
 
 export interface ImportRowError {
   row: number;
@@ -50,6 +52,8 @@ export class InquiryImportService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private readonly tenantPrisma: any,
     private readonly assignmentService: AssignmentService,
+    private readonly leadStageTransition: LeadStageTransitionService,
+    private readonly dispositionTransition: InquiryDispositionTransitionService,
   ) {}
 
   /**
@@ -137,6 +141,9 @@ export class InquiryImportService {
         const projectCache = new Map<string, string | null>();
         const sourceCache = new Map<string, string | null>();
         const inquiryTypeCache = new Map<string, string | null>();
+        // Same for every row in this import — resolved once, not per row,
+        // same reasoning as the three caches above.
+        const resolvedStageId = await this.leadStageTransition.resolveInitialStage(tx, companyId, undefined);
 
         for (const { rowNum, data } of validRows) {
           const primaryPhoneNormalized = normalizePhone(data.primaryPhone);
@@ -213,12 +220,31 @@ export class InquiryImportService {
               inquiryTypeId: inquiryTypeId ?? null,
               budgetMinPaise: data.budgetMinPaise != null ? BigInt(data.budgetMinPaise) : null,
               budgetMaxPaise: data.budgetMaxPaise != null ? BigInt(data.budgetMaxPaise) : null,
+              stageId: resolvedStageId,
               customFields: data.notes ? { importNotes: data.notes } : undefined,
               // No human creator for a batch-imported row — no creator to
               // retain ownership for, so this always goes through
               // round-robin, same as inbound-lead intake.
             },
           });
+          // No human actor for a batch-imported row — same reasoning as
+          // the round-robin assignment below.
+          await this.leadStageTransition.writeStageTransition(
+            tx,
+            companyId,
+            importedInquiry.id,
+            null,
+            resolvedStageId,
+            null,
+          );
+          await this.dispositionTransition.writeDispositionTransition(
+            tx,
+            companyId,
+            importedInquiry.id,
+            null,
+            importedInquiry.status,
+            null,
+          );
 
           if (projectId) {
             const assignedToId = await this.assignmentService.autoAssign(tx, companyId, projectId);

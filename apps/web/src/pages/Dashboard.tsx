@@ -5,6 +5,13 @@ import { useAuth } from '../lib/auth';
 import { api } from '../lib/api';
 import DataTable, { type Column } from '../components/DataTable';
 
+interface MyDayInquiry {
+  id: string;
+  nextFollowupAt: string | null;
+  applicant: { name: string };
+  project: { name: string } | null;
+}
+
 interface StatusCount {
   status: string;
   count: number;
@@ -116,11 +123,29 @@ function SummaryBlock({ summary }: { summary: Summary }) {
   );
 }
 
+/** Same "midnight in the browser's own timezone" boundary the backend's
+ *  DashboardService.bounds()/InquiryService.myDay() use for "today". */
+function isOverdue(nextFollowupAt: string): boolean {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  return new Date(nextFollowupAt) < startOfToday;
+}
+
 export default function Dashboard() {
   const { user, hasPermission } = useAuth();
   const { data, isLoading, isError } = useQuery<DashboardData>({
     queryKey: ['dashboard'],
     queryFn: () => api('/dashboard'),
+    retry: false,
+  });
+
+  // GET /inquiries/my-day has existed since v0.4 (today's + overdue
+  // follow-ups assigned to the caller) with no frontend caller until now
+  // — same endpoint the dashboard's own "due today"/"overdue" counts
+  // above summarize, just the actual rows instead of a count.
+  const { data: myDay } = useQuery<MyDayInquiry[]>({
+    queryKey: ['my-day'],
+    queryFn: () => api('/inquiries/my-day'),
     retry: false,
   });
 
@@ -178,6 +203,37 @@ export default function Dashboard() {
           <section className="mt-6">
             <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500">My work</h2>
             <SummaryBlock summary={data.mine} />
+          </section>
+
+          <section className="mt-8" data-testid="my-day">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-slate-500">My day</h2>
+            <p className="mt-1 text-xs text-slate-500">
+              Leads assigned to you that are due today or overdue, oldest due date first.
+            </p>
+            <ul className="mt-3 space-y-2">
+              {(myDay ?? []).length === 0 ? (
+                <li className="text-sm text-slate-500">Nothing due — you're caught up.</li>
+              ) : (
+                myDay!.map((inq) => (
+                  <li key={inq.id} className="flex items-center justify-between rounded-md border border-slate-200 bg-white p-3 text-sm">
+                    <div>
+                      <Link to={`/presales/inquiries/${inq.id}`} className="font-medium text-blue-600 hover:underline">
+                        {inq.applicant.name}
+                      </Link>
+                      {inq.project && <span className="text-slate-500"> · {inq.project.name}</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {inq.nextFollowupAt && isOverdue(inq.nextFollowupAt) && (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Overdue</span>
+                      )}
+                      <span className="text-slate-500">
+                        {inq.nextFollowupAt ? new Date(inq.nextFollowupAt).toLocaleString() : '—'}
+                      </span>
+                    </div>
+                  </li>
+                ))
+              )}
+            </ul>
           </section>
 
           {data.team && (

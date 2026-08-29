@@ -1,0 +1,17 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1200" height="630" fill="#101A24"/>
+  <path d="M0 470C210 400 340 510 550 449C780 382 910 472 1200 377V630H0V470Z" fill="#132430"/>
+  <path d="M0 0H1200V630H0V0Z" fill="url(#grid)" opacity="0.15"/>
+  <rect x="90" y="88" width="108" height="108" rx="26" fill="#F5F0E8"/>
+  <path d="M116 164V119L144 103L172 119V164" stroke="#0F766E" stroke-width="8" stroke-linecap="square"/>
+  <path d="M144 128V164" stroke="#C96B3C" stroke-width="8" stroke-linecap="square"/>
+  <path d="M132 164H156" stroke="#101A24" stroke-width="8" stroke-linecap="square"/>
+  <text x="90" y="298" fill="#F5F0E8" font-family="Arial, Helvetica, sans-serif" font-size="72" font-weight="700" letter-spacing="-3">OpenEstate</text>
+  <text x="94" y="346" fill="#A9B6BC" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" letter-spacing="5">BY THE IT GUYS</text>
+  <text x="90" y="470" fill="#54C6B5" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="700">Open-source property sales, kept on your terms.</text>
+  <defs>
+    <pattern id="grid" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M64 0H0V64" stroke="#54C6B5" stroke-width="1"/>
+    </pattern>
+  </defs>
+</svg>

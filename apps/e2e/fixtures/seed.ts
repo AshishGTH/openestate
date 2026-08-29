@@ -5,7 +5,7 @@
 // company/role/user/inventory pattern used throughout this project's test
 // suite) at the small cost of some duplication.
 import { createSystemPrismaClient } from '@openestate/db';
-import { ALL_PERMISSIONS, SYSTEM_ROLES, ROLE_PERMISSIONS, ROLE_DISPLAY_NAMES } from '@openestate/shared';
+import { ALL_PERMISSIONS, SYSTEM_ROLES, ROLE_PERMISSIONS, ROLE_DISPLAY_NAMES, DEFAULT_LEAD_STAGES } from '@openestate/shared';
 import * as argon2 from '@node-rs/argon2';
 
 export interface E2eFixture {
@@ -122,7 +122,27 @@ export async function seedE2eFixture(
         // apps/api/test/helpers/postsales-harness.ts's own default.
         gstStateCode: '09',
         companyGstin: '09ABCDE1234F1Z5',
+        leadStagesSeededAt: new Date(),
       },
+    });
+
+    // Mirrors packages/db/prisma/sync-permissions.ts's syncLeadStages —
+    // not imported from it (that file lives under packages/db/prisma,
+    // not @openestate/db's published src/ exports, same "mirror, don't
+    // cross-import a private script" discipline this file's own header
+    // comment already states for company/role/user creation). Without
+    // this, a real company creation (via seed.ts or the upgrade sync)
+    // seeds the default pipeline but this harness's fixture companies
+    // silently wouldn't — lead-stage.spec.ts's admin-page assertions
+    // would see zero stages, not the real product's actual first-boot
+    // state.
+    await prisma.leadStage.createMany({
+      data: DEFAULT_LEAD_STAGES.map((name, i) => ({
+        companyId: company.id,
+        name,
+        sortOrder: i,
+        isDefault: i === 0,
+      })),
     });
 
     // Minimal inventory for scenario 3's booking flow — direct Prisma

@@ -15,6 +15,7 @@ import RoleForm from './pages/admin/RoleForm';
 import MastersPage from './pages/admin/Masters';
 import CustomFieldsPage from './pages/admin/CustomFields';
 import LetterTemplatesPage from './pages/admin/LetterTemplates';
+import LeadStagesPage from './pages/admin/LeadStages';
 import CompanyConfigPage from './pages/admin/CompanyConfig';
 import AuditLogPage from './pages/admin/AuditLog';
 import BookingWizard from './pages/postsales/BookingWizard';
@@ -34,6 +35,7 @@ import ProjectsPage from './pages/inventory/Projects';
 import ProjectDetailPage from './pages/inventory/ProjectDetail';
 import InquiriesPage from './pages/presales/Inquiries';
 import InquiryDetailPage from './pages/presales/InquiryDetail';
+import PresalesReportsPage from './pages/presales/Reports';
 import TicketsPage from './pages/support/Tickets';
 import TicketDetailPage from './pages/support/TicketDetail';
 
@@ -56,6 +58,7 @@ export default function App() {
             <Route path="admin/masters" element={<RequirePermission perm={PERMISSIONS.ADMIN_MASTER_READ}><MastersPage /></RequirePermission>} />
             <Route path="admin/custom-fields" element={<RequirePermission perm={PERMISSIONS.ADMIN_CUSTOM_FIELD_READ}><CustomFieldsPage /></RequirePermission>} />
             <Route path="admin/letter-templates" element={<RequirePermission perm={PERMISSIONS.ADMIN_MASTER_READ}><LetterTemplatesPage /></RequirePermission>} />
+            <Route path="admin/lead-stages" element={<RequirePermission perm={PERMISSIONS.ADMIN_MASTER_READ}><LeadStagesPage /></RequirePermission>} />
             <Route path="admin/config" element={<RequirePermission perm={PERMISSIONS.ADMIN_CONFIG_READ}><CompanyConfigPage /></RequirePermission>} />
             <Route path="admin/audit" element={<RequirePermission perm={PERMISSIONS.ADMIN_AUDIT_READ}><AuditLogPage /></RequirePermission>} />
             <Route path="admin/plugins" element={<RequirePermission perm={PERMISSIONS.ADMIN_PLUGIN_READ}><PluginsPage /></RequirePermission>} />
@@ -78,6 +81,7 @@ export default function App() {
 
             <Route path="presales/inquiries" element={<RequirePermission perm={PERMISSIONS.PRESALES_INQUIRY_READ}><InquiriesPage /></RequirePermission>} />
             <Route path="presales/inquiries/:id" element={<RequirePermission perm={PERMISSIONS.PRESALES_INQUIRY_READ}><InquiryDetailPage /></RequirePermission>} />
+            <Route path="presales/reports" element={<RequirePermission perm={PERMISSIONS.PRESALES_REPORT_VIEW}><PresalesReportsPage /></RequirePermission>} />
 
             <Route path="support/tickets" element={<RequirePermission perm={PERMISSIONS.ADMIN_TICKET_RESPOND}><TicketsPage /></RequirePermission>} />
             <Route path="support/tickets/:id" element={<RequirePermission perm={PERMISSIONS.ADMIN_TICKET_RESPOND}><TicketDetailPage /></RequirePermission>} />

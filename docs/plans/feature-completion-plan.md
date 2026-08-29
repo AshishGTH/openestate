@@ -299,7 +299,7 @@ new ones):
 
 Every tab: date-range + project filter, CSV export, and print-friendly layout.
 
-**Two known backend caveats to handle, not paper over:**
+**Three known backend caveats to handle, not paper over:**
 
 - `managerWiseInteractions()` currently reports each manager's **own** logged interactions, not a
   team roll-up (`docs/todo.md` — deliberate, from before `User.managerId` existed). `TeamScopeService.getVisibleUserIds`
@@ -308,6 +308,18 @@ Every tab: date-range + project filter, CSV export, and print-friendly layout.
   mislabelled as a team figure.
 - Charts need a library. **[DECISION NEEDED]** — pick one (Recharts is the conventional fit for this
   stack) and record it in CLAUDE.md's decisions log; do not let two chart libraries enter the repo.
+- **The funnel must be rebuilt around `LeadStage`, not `InquiryStatus`, and must exclude
+  `InquiryStageHistory.isAdministrative` rows by default.** Phase 0's own investigation (see
+  CLAUDE.md's decisions entry) found the existing `GET /reports/presales/funnel` groups by
+  `InquiryStatus` (OPEN/CONTINUED/DUMPED/SUCCESSFUL) — a disposition, not a pipeline position — which
+  is the reason `LeadStage`/`InquiryStageHistory` were built at all; this row's "Stage funnel with
+  conversion % between stages" description is the TARGET behavior, not what exists today. Separately,
+  `LeadStageService.reassignOccupants` (Phase 0) writes bulk `isAdministrative: true` history rows
+  when an admin retires an occupied stage — moving every affected lead onto the target stage in one
+  request, often backward through the pipeline. A funnel query that doesn't filter these out would
+  show a stage retirement as thousands of leads "reaching" (or regressing into) the target stage on
+  one date, permanently distorting the conversion figures. Default to `WHERE NOT is_administrative`;
+  do not add a toggle to include them without a specific request for one.
 
 **Acceptance (browser)**
 Open each of the seven tabs against seeded demo data → cross-check at least two figures per tab

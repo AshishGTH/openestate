@@ -6,11 +6,16 @@ import { GstRateModule } from './gst-rate/gst-rate.module';
 import { TdsRuleModule } from './tds-rule/tds-rule.module';
 import { SmsTemplateModule } from './sms-template/sms-template.module';
 import { LetterTemplateModule } from './letter-template/letter-template.module';
+import { LeadStageModule } from './lead-stage/lead-stage.module';
 
 const SIMPLE_MASTERS = [
   { modelName: 'UnitType', routePath: 'unit-types', apiTag: 'Unit Types' },
   { modelName: 'PlcType', routePath: 'plc-types', apiTag: 'PLC Types' },
   { modelName: 'InquirySource', routePath: 'inquiry-sources', apiTag: 'Inquiry Sources' },
+  // No seeded defaults, deliberately — see DumpReason's own schema doc
+  // comment (docs/plans/followup-spec-gap-analysis.md gap #2): the SOP
+  // gives no canonical reason list to seed from, unlike LeadStage.
+  { modelName: 'DumpReason', routePath: 'dump-reasons', apiTag: 'Dump Reasons' },
   { modelName: 'InquiryType', routePath: 'inquiry-types', apiTag: 'Inquiry Types' },
   { modelName: 'InquiryTemperature', routePath: 'inquiry-temperatures', apiTag: 'Inquiry Temperatures' },
   { modelName: 'FollowUpType', routePath: 'follow-up-types', apiTag: 'Follow-Up Types' },
@@ -100,6 +105,13 @@ const simpleMasterModules = SIMPLE_MASTERS.map((config) =>
 );
 
 @Module({
-  imports: [...simpleMasterModules, GstRateModule, TdsRuleModule, SmsTemplateModule, LetterTemplateModule],
+  imports: [
+    ...simpleMasterModules,
+    GstRateModule,
+    TdsRuleModule,
+    SmsTemplateModule,
+    LetterTemplateModule,
+    LeadStageModule,
+  ],
 })
 export class MastersModule {}
