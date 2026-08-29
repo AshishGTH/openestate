@@ -289,6 +289,7 @@ describeIf('Presales reports: new report methods (v0.5 reporting suite)', () => 
         unitId: unit.id,
         primaryApplicantId: applicantB.id,
         bookingNumber: `BKG-${Date.now()}`,
+        bookingDate: FROZEN_NOW,
         agreedPricePaise: 1000000n,
         sourceInquiryId: inqB.id,
       },
