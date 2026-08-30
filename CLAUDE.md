@@ -6382,10 +6382,80 @@ not enforce in structure.
 cleanly — and, crucially, that the raw token never enters storage
 (the test reads sessionStorage's raw contents and asserts the token
 substring and the signature segment are both absent). These prove the
-MECHANISM works; they do NOT prove the CI cascade is fixed. The proof
-of that is three consecutive green full-suite CI runs after this push,
-per the ledger property test's own precedent. Local reproduction was
-attempted first per instruction; not feasible on this Windows dev box
-(no Postgres/Redis, no reachable verification VM), so the loop is
-one-shot-plus-push, per the accepted fallback in the same
-instruction.
+MECHANISM works.
+
+**CI proof — three consecutive green full-suite runs on one commit
+(9bbae76), attempts 1, 2 and 3 of run 33292860530, all five jobs
+success on every attempt:**
+
+- Lint, typecheck, unit tests, build: 2m38s / 2m39s / 2m34s
+- Integration tests (Postgres + Redis): 4m33s / 4m45s / 3m42s
+- E2E (Playwright + built frontend): 2m56s / 3m3s / 3m2s
+- Native install (real Postgres/Redis/nginx): 3m12s / 2m31s / 3m0s
+- Native upgrade (populated DB): 3m50s / 3m10s / 2m41s
+
+Consistent-duration runs — real work happening each time, not cache-
+hit no-ops. Playwright ran 40 specs on every attempt; attempts 2 and
+3 were 40/40 clean; attempt 1 had ONE flaky-recovery
+(`cheque-bounce.spec.ts`, a spec this fix did not touch — flagged
+below).
+
+**Cascade fix confirmed by trace evidence, not just by boolean-green.**
+The two most login-heavy specs, `team-scope` and
+`rapid-reload-session`, ran green on every attempt (the latter's
+`portal: a burst of full page loads does not end the session` test
+in 5.1s on attempt 3). Neither existed in this session's failing
+subset because both had cleared before the residual mechanism (the
+default-throttle exhaustion, see the two follow-up commits below)
+was identified — but both are exactly the shape of test the /login
+cascade would fail first. Zero traces across the three attempts show
+a browser parked on /login mid-test; every failure that ever
+appeared on this branch, before or after the fix, showed the test
+past `expect(toHaveURL('/'))` and failing further along.
+
+**The residual failures after the auth fix were a separate,
+pre-existing class the cascade had been masking.** Four of the five
+originally-failing specs (`ticket-reply`, `successful-to-booking`,
+`role-permission-edit`, `user-role-edit`) hit 429s on
+`/auth/refresh` — the shared per-IP default throttle bucket
+(100 req/60s) exhausted by four parallel Playwright workers on the
+one runner IP. Trace counts across the first post-fix run:
+9/6/5/2/0/1/1 429s across the five failing specs, plus 429s on
+non-auth endpoints (`/company/config`, `/reports/postsales/
+zero-gst-bookings-count`) confirming the exhaustion was
+system-wide, not auth-specific. `DEFAULT_THROTTLE_LIMIT` env
+override, set to 10000 for the harness's webServer only, closes
+this. The fifth spec (`user-deactivate-reactivate`, 0 429s) was a
+genuine DOM race — the mutation returned but the row's re-render
+after `invalidateQueries(['users'])`'s refetch didn't happen within
+Playwright's default 5s `toBeVisible` timeout; fixed by waiting for
+the refetch response explicitly before asserting on the DOM (the
+CLAUDE.md booking-wizard-option-count pattern). Same
+throttle-exhaustion also blocked six tests across three
+integration-test files (`e2e-plugins`, `e2e-booking-gst-validation`,
+`e2e-inquiry-disposition`) once the E2E job started passing,
+addressed by setting `DEFAULT_THROTTLE_LIMIT=10000` in
+`apps/api/vitest.config.ts`'s `test.env` block.
+
+**Local reproduction was attempted first per instruction**; not
+feasible on this Windows dev box (no Postgres/Redis, no reachable
+verification VM), so the loop was one-shot-plus-push per the
+accepted fallback. The first post-fix push, second post-fix push
+(AGENTS.md deletion), and third (attempted `pnpm test` locally +
+theorising) all went RED on the same throttle mechanism — the
+diagnosis came from reading the traces the CI artifact rule this
+same commit series added, not from guessing.
+
+**cheque-bounce flake on attempt 1 is a separate, single-observation
+signal, not the cascade.** Test failed once at
+`cheque-bounce.spec.ts:70:72` (an `expect(locator).not.toHaveValue`
+assertion), passed on Playwright's own `retries: 1`. Not touched by
+this fix, not in the original failing subset. Could be a DOM race
+of the same class the `user-deactivate-reactivate` fix addressed, or
+a genuine correctness issue that only manifests under specific
+timing; needs its own trace-driven diagnosis if it recurs across
+future runs. Recorded here rather than papered over; do NOT extend
+Playwright's `retries: 1` on the basis of "it self-recovers" — a
+retry-that-passes-once is exactly the shape of the signal that
+became this session's whole investigation, and hiding it further
+would put the merge gate back where it started.
