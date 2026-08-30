@@ -4,91 +4,52 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
-## `e2e-playwright`'s CI flakiness — NEXT REAL WORK, not deferred further
+## `cheque-bounce.spec.ts` — one known E2E flake, observed once, not investigated further
 
-**Stated plainly: this is no longer an "exception," it's a broken gate.**
-The documented-exception pattern (merge on 4/5 jobs green, name the
-pre-existing flakiness, cite evidence) has now been invoked THREE times in
-a single session — PR #27, PR #30, PR #28 — each with real, individually
-solid evidence that the specific PR wasn't the cause. That is exactly the
-problem: a required CI check that a human has to manually override three
-times in one session by reasoning about it fresh each time is not
-providing signal anymore, it's providing noise with extra steps. The next
-real regression this job SHOULD catch will look identical to noise by
-then, and get merged past on the same reasoning. This entry exists so the
-next session picks this up as the actual next task, not as a "someday"
-line item behind whatever feature is next.
+The `e2e-playwright` CI flakiness that used to live here (the rotating
+subset overridden three times as a documented exception, tied to the
+/login refresh-rotation cascade) is resolved in PR #31 — see CLAUDE.md's
+"E2E refresh-rotation cascade" Decisions entry for the fix, its trace
+evidence, and its three-consecutive-green proof. The cascade was
+MASKING four downstream failures; unmasking them surfaced two more
+mechanisms (a default-throttle bucket exhausted under 4-way Playwright
+parallelism on the shared runner IP, and one genuine DOM race on
+`user-deactivate-reactivate`), both fixed in the same PR.
 
-**What's already known, so the next session doesn't re-walk it:**
+**The one remaining E2E flake observed but NOT fixed by that PR** — one
+occurrence across four consecutive full-suite runs of the same commit
+(the three-of-three green bar plus a fourth on the docs-amendment
+commit), on the ONLY attempt where any spec required a retry:
 
-- **The failure signature**: `Test timeout of 30000ms exceeded` on an
-  ordinary `.fill()`/`.click()` against an element that should already be
-  interactive — never an assertion mismatch, always a timeout. The
-  specific line varies run to run for most affected specs (`team-scope
-  .spec.ts` failed at three different lines across three runs this
-  session alone), which is itself evidence of a timing race rather than a
-  deterministic bug in any one spec.
-- **The rotating set, this session's occurrences**: `team-scope.spec.ts`,
-  `user-role-edit.spec.ts`, `ticket-reply.spec.ts`,
-  `rapid-reload-session.spec.ts`, and now `user-deactivate-reactivate
-  .spec.ts` (new this session — confirmed via its own unmodified,
-  pre-extension form failing identically in an earlier run, so it's a
-  victim of the same class, not a new source of it). PR #27's own
-  decisions entry names the same core group plus `successful-to-booking
-  .spec.ts`. The specific pair/trio that fails on any given run appears
-  to depend on CI's actual scheduling that run, not on which PR is being
-  tested — proven decisively this session by PR #30, a **docs-only**
-  change with zero code or test files touched, hitting the exact same
-  spec set on two separate runs.
-- **Root mechanism, per PR #27's own investigation (Playwright trace
-  artifacts, not speculation)**: the browser sits on `/login` mid-test in
-  every failure snapshot examined, despite the test code believing it was
-  elsewhere. This matches CLAUDE.md's own documented `AuthProvider`
-  mount-refresh race — `page.goto()` in Playwright is a REAL browser
-  navigation (not a client-side route transition), so it remounts the
-  whole SPA and re-fires `AuthProvider`'s unconditional mount-time
-  `/auth/refresh` call. Under real CI concurrency (many specs' backend
-  traffic overlapping, unlike a solo local run), this appears to exceed
-  the existing `REFRESH_REUSE_GRACE_SECONDS` mitigation (see CLAUDE.md's
-  own "Decision: `REFRESH_REUSE_GRACE_SECONDS` stays at 30" entry for why
-  that window exists and what it does and doesn't cover), losing the
-  session mid-test.
-- **Four theories already ruled out (PR #27's investigation) — do not
-  re-test these without new evidence**:
-  1. Fixture/company isolation — moved a spec's user creation onto a
-     fully independent company; didn't fully resolve it.
-  2. Pagination hiding a just-created row — real, separate bug, fixed
-     (search-by-name instead of assuming page-1 ordering), but not the
-     cause of the timeout class itself.
-  3. "Just needs more time" — raised the CI timeout 30s→45s; the same
-     failures recurred at the new ceiling, disproving this directly.
-  4. An avoidable extra `page.goto()` reload — replaced with a
-     client-side nav click in one spec; didn't fully resolve it either.
-  5. Deleting the suspect spec entirely and re-running — the SAME job
-     still failed, with a DIFFERENT pair of unrelated specs. This is the
-     decisive diagnostic that redirected the investigation from "which
-     spec is broken" to "the concurrency itself is the cause," and it's
-     exactly what PR #30's docs-only failure re-confirmed this session.
+- **Spec**: `tests/cheque-bounce.spec.ts:28:5` — "book a unit → record a
+  cheque receipt → bounce it → Collection Summary ends up unchanged"
+- **Assertion that failed**: `expect(locator).not.toHaveValue(expected)`
+  at `tests/cheque-bounce.spec.ts:70:72`
+- **Recovery**: Playwright's own `retries: 1` re-ran the test and it
+  passed (marked "1 flaky" in the run summary)
+- **Not touched by PR #31**: this spec has no auth mutations wrapped in
+  the fixes above; the failure mode doesn't match the throttle-exhaustion
+  or refetch-race classes either
+- **Not in the original failing subset**: appeared for the first time on
+  attempt 1 of the three-green run; absent on all three attempts of the
+  preceding red run and on attempts 2/3 and the follow-up docs run
 
-**Candidate fix directions, not yet attempted**: widen
-`REFRESH_REUSE_GRACE_SECONDS` further (cheap, but only shrinks the window,
-doesn't close the race); make the heaviest/most concurrent specs reuse an
-already-authenticated storage state instead of each doing a fresh
-`page.goto()` + login (addresses the actual trigger — fewer concurrent
-mount-refresh races — rather than widening the race's tolerance); or
-reduce Playwright's own worker parallelism in CI specifically (trades
-total CI wall-clock time for less real concurrent backend load, the same
-tradeoff already applied to `apps/api`'s vitest `maxForks` cap for the
-identical reason in the Phase 7→8 CI-reliability work).
+**This is logged, not diagnosed.** The purpose of the entry is to
+prevent the exact reversion the E2E gate just recovered from — a single
+observed flake absorbed into a general "E2E is sometimes flaky" belief.
+The trace for this failure was uploaded by the artifact rule PR #31 also
+added (`playwright-traces` on the failing attempt) and can be pulled via
+`gh run download 33292860530 --pattern playwright-traces`. When it
+recurs (or if a change touches `apps/web/src/pages/postsales/` and this
+starts failing again), read the trace before theorising, exactly the
+way PR #31's own diagnosis went.
 
-**Standing note, unchanged from PR #27's own version of it**: none of this
-is a licence to wave off a *future* E2E failure. Every one of the three
-exceptions invoked this session was backed by a real, specific diagnostic
-(an unmodified "before" comparison, a docs-only PR hitting the identical
-set, matching the exact documented signature) — not "E2E is flaky
-sometimes." A failure in a spec a change actually touches, or a new
-failure shape, is still that change's responsibility until proven
-otherwise with comparable rigor.
+**Do NOT widen Playwright's `retries: 1` to hide this further.** A
+retry-that-passes-once is exactly the shape of signal that took two
+sessions to unmask above. The `1 flaky` line in the run summary is the
+correct level of visibility — see it, log if it becomes a pattern,
+diagnose from the trace if it does. That is now the sole owner of the
+E2E gate's noise, and it doesn't get to accumulate silently.
 
 ## Nightly property test now takes ~32min at 2000 runs — consider sharding across matrix jobs instead of one long job
 

@@ -6376,6 +6376,19 @@ whoever overrides has at minimum to look at the trace, which is what
 this file's own primary lesson already required in principle but did
 not enforce in structure.
 
+**The artifact rule paid for itself on its first real run.** One
+trace pull from the first post-fix red CI diagnosed what nine
+consecutive runs of pattern-matching across two prior sessions could
+not: the failing subset wasn't rotating because of some deep
+concurrency subtlety, it was rotating because the /login cascade was
+MASKING at least four independent downstream failures, and which one
+surfaced first depended on which spec's mount refresh happened to
+land in the aborted-cascade window. Read once, diagnosed
+definitively — no theorising, no rotation, no third session pretending
+the exception was tenable. That is the argument for the rule in one
+sentence: **an artifact you can read is worth more than nine runs you
+can only pattern-match on.**
+
 **Regression coverage.** 8 new unit tests (4 per app, in the existing
 `api.test.ts`) prove the cache primitive round-trips, expires after
 `AUTH_COOLDOWN_MS`, refuses malformed input without throwing, clears
@@ -6414,20 +6427,35 @@ appeared on this branch, before or after the fix, showed the test
 past `expect(toHaveURL('/'))` and failing further along.
 
 **The residual failures after the auth fix were a separate,
-pre-existing class the cascade had been masking.** Four of the five
-originally-failing specs (`ticket-reply`, `successful-to-booking`,
-`role-permission-edit`, `user-role-edit`) hit 429s on
-`/auth/refresh` — the shared per-IP default throttle bucket
-(100 req/60s) exhausted by four parallel Playwright workers on the
-one runner IP. Trace counts across the first post-fix run:
-9/6/5/2/0/1/1 429s across the five failing specs, plus 429s on
-non-auth endpoints (`/company/config`, `/reports/postsales/
-zero-gst-bookings-count`) confirming the exhaustion was
-system-wide, not auth-specific. `DEFAULT_THROTTLE_LIMIT` env
-override, set to 10000 for the harness's webServer only, closes
-this. The fifth spec (`user-deactivate-reactivate`, 0 429s) was a
-genuine DOM race — the mutation returned but the row's re-render
-after `invalidateQueries(['users'])`'s refetch didn't happen within
+pre-existing class the cascade had been masking — and this is why
+the failing set kept rotating across every prior CI run.** A masking
+bug makes everything downstream of it look intermittent: any spec
+whose /login cascade fires first appears as the failure, hiding
+that four other specs would have failed too if the cascade hadn't
+gotten to them first. Which one shows up on any given run is a race
+between the auth cascade and whichever downstream race the runner
+happens to expose that moment — which reads exactly like "the
+failing subset rotates depending on what else is running," the
+pattern this file's own tail entry documented across two prior
+sessions as an unsolved mystery. It wasn't a mystery; it was the
+signature of a bug that swallowed every downstream failure into
+itself, and the trace evidence surfaced all four downstream classes
+at once the moment the cascade stopped consuming them.
+
+Four of the five originally-failing specs (`ticket-reply`,
+`successful-to-booking`, `role-permission-edit`, `user-role-edit`)
+hit 429s on `/auth/refresh` — the shared per-IP default throttle
+bucket (100 req/60s) exhausted by four parallel Playwright workers
+on the one runner IP. Trace counts across the first post-fix run:
+9/6/5/4/10 429s across those four specs plus zero on
+user-deactivate-reactivate, plus 429s on non-auth endpoints
+(`/company/config`, `/reports/postsales/zero-gst-bookings-count`)
+confirming the exhaustion was system-wide, not auth-specific.
+`DEFAULT_THROTTLE_LIMIT` env override, set to 10000 for the
+harness's webServer only, closes this. The fifth spec
+(`user-deactivate-reactivate`, 0 429s) was a genuine DOM race —
+the mutation returned but the row's re-render after
+`invalidateQueries(['users'])`'s refetch didn't happen within
 Playwright's default 5s `toBeVisible` timeout; fixed by waiting for
 the refetch response explicitly before asserting on the DOM (the
 CLAUDE.md booking-wizard-option-count pattern). Same
