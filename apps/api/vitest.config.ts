@@ -4,6 +4,21 @@ export default defineConfig({
   test: {
     include: ['src/**/*.spec.ts', 'test/**/*.test.ts'],
     environment: 'node',
+    // Raise the default throttle bucket for every apps/api test run,
+    // local or CI. Each of the 4 forked test files boots its own
+    // NestFactory.create() with its own RedisThrottlerStorage instance
+    // (Phase 8 decisions), but Redis itself is SHARED — they all read
+    // and write the SAME per-IP keys. Under supertest running against
+    // 127.0.0.1, the production default of 100 req/60s per IP is
+    // easily exceeded across 90+ test files' aggregate traffic
+    // (auth logins, mount refreshes, plugin/webhook e2e requests),
+    // exactly the same throttle-exhaustion mechanism the E2E harness
+    // hit — see app.module.ts's DEFAULT_THROTTLE_LIMIT block and
+    // CLAUDE.md's "E2E refresh-rotation cascade" Decisions entry.
+    // Production installs never set this and continue at 100.
+    env: {
+      DEFAULT_THROTTLE_LIMIT: '10000',
+    },
     // Capped, not left at vitest's default (== CPU count, 16 on this
     // machine's dev box). Instrumentation (see CLAUDE.md's Phase 7
     // CI-reliability decisions) showed the full-suite flakiness was NOT
