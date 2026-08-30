@@ -84,6 +84,17 @@ export default defineConfig({
         PAN_ENCRYPTION_KEY: HARNESS_HEX_KEY,
         TOTP_ENCRYPTION_KEY: HARNESS_HEX_KEY,
         PLUGIN_SECRET_ENCRYPTION_KEYS: `1:${HARNESS_HEX_KEY}`,
+        // Raise the default throttle bucket well above what any single
+        // production per-IP client would ever legitimately generate.
+        // Four parallel Playwright workers, each doing a full spec's
+        // login/mount-refresh/dashboard/reports/whatever-the-spec-does,
+        // legitimately exceed the production 100/60s bucket combined
+        // (they all share the one runner IP). See app.module.ts's
+        // DEFAULT_THROTTLE_LIMIT comment for the trace evidence — this
+        // is the ONE knob that fixes 4 of 5 residual failing specs at
+        // their root, and only for this harness's disposable API
+        // instance. Real installs never set this.
+        DEFAULT_THROTTLE_LIMIT: '10000',
         // NODE_ENV=production here is deliberate, not an oversight: the
         // Secure-cookie bug this harness's first scenario regression-tests
         // (CLAUDE.md "Secure cookies over plain HTTP") was NODE_ENV driving

@@ -93,7 +93,22 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
       useFactory: () => ({
         storage: new RedisThrottlerStorage(),
         throttlers: [
-          { ttl: 60_000, limit: 100 },
+          // Default bucket for every route that doesn't opt into a named
+          // one (staff auth, most reads/writes). 100/60s is the production
+          // baseline that protects against unauthenticated scraping/
+          // brute-force volume per IP. Overridable via
+          // DEFAULT_THROTTLE_LIMIT specifically for the apps/e2e harness,
+          // where 4 parallel Playwright workers all originate from the
+          // one runner IP and legitimately exceed 100 requests/minute in
+          // combined normal traffic (each spec's login + AuthProvider
+          // mount refresh + AppShell banners' company-config/zero-gst
+          // reads + whatever data the spec actually exercises); production
+          // deployments never set this and continue at 100. See CLAUDE.md
+          // Decisions log ("E2E refresh-rotation cascade") for the trace
+          // evidence — 4 of 5 residual failing specs after the cascade
+          // fix hit 429s on /auth/refresh, blocking the client's own
+          // 401-retry from ever getting a fresh token.
+          { ttl: 60_000, limit: Number(process.env.DEFAULT_THROTTLE_LIMIT ?? 100) },
           { name: 'portal-auth', ttl: 300_000, limit: 5 },
           { name: 'portal-read', ttl: 60_000, limit: 60 },
           // Password-change/reset-confirm across staff and portal — see
