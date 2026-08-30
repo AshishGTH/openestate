@@ -111,6 +111,18 @@ test('deactivating and reactivating a user, through the real button clicks', asy
   ]);
   expect(deactivateResponse.request().method()).toBe('POST');
   expect(deactivateResponse.ok()).toBe(true);
+  // useApiMutation's onSuccess invalidates ['users'] which triggers a
+  // GET /users refetch — the row's 'Inactive' text only appears once
+  // that lands and TanStack Query re-renders. Under CI load, the gap
+  // between mutation response and re-render exceeds Playwright's default
+  // 5s expect timeout. Waiting for the refetch's response before asserting
+  // the DOM makes the assertion pass as soon as the state exists, not
+  // after a fixed sleep. Same shape as the CLAUDE.md booking-wizard
+  // option-count-wait fix — assert the precondition explicitly rather
+  // than trusting the mutation's return as a proxy for re-render.
+  await page.waitForResponse(
+    (r) => /\/api\/v1\/users(\?|$)/.test(r.url()) && r.request().method() === 'GET' && r.ok(),
+  );
   await expect(row.getByText('Inactive', { exact: true })).toBeVisible();
 
   // The actual point of this test: a deactivated user must be genuinely
@@ -132,6 +144,10 @@ test('deactivating and reactivating a user, through the real button clicks', asy
   ]);
   expect(reactivateResponse.request().method()).toBe('POST');
   expect(reactivateResponse.ok()).toBe(true);
+  // Same refetch-then-assert pattern as the deactivate branch above.
+  await page.waitForResponse(
+    (r) => /\/api\/v1\/users(\?|$)/.test(r.url()) && r.request().method() === 'GET' && r.ok(),
+  );
   await expect(reloadedRow.getByText('Active', { exact: true })).toBeVisible();
 
   await page.reload();
