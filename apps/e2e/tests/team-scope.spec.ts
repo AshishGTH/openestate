@@ -57,7 +57,7 @@ test('manager sees a report\'s inquiry; a peer with no management relationship d
     await controlAfterLabel(page, 'Password').fill(staffPassword);
     await controlAfterLabel(page, 'Role').selectOption({ label: staffRole.name });
     const [managerCreateRes] = await Promise.all([
-      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST' && r.status() !== 401),
+      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST'),
       page.getByRole('button', { name: 'Create User' }).click(),
     ]);
     expect(managerCreateRes.ok()).toBe(true);
@@ -71,7 +71,7 @@ test('manager sees a report\'s inquiry; a peer with no management relationship d
     await controlAfterLabel(page, 'Password').fill(staffPassword);
     await controlAfterLabel(page, 'Role').selectOption({ label: staffRole.name });
     const [peerCreateRes] = await Promise.all([
-      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST' && r.status() !== 401),
+      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST'),
       page.getByRole('button', { name: 'Create User' }).click(),
     ]);
     expect(peerCreateRes.ok()).toBe(true);
@@ -85,7 +85,7 @@ test('manager sees a report\'s inquiry; a peer with no management relationship d
     await controlAfterLabel(page, 'Role').selectOption({ label: staffRole.name });
     await controlAfterLabel(page, 'Manager').selectOption({ label: 'E2E Manager' });
     const [execCreateRes] = await Promise.all([
-      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST' && r.status() !== 401),
+      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST'),
       page.getByRole('button', { name: 'Create User' }).click(),
     ]);
     expect(execCreateRes.ok()).toBe(true);
@@ -130,7 +130,7 @@ test('manager sees a report\'s inquiry; a peer with no management relationship d
     // the display name isn't.
     await controlAfterLabel(page, 'Project').selectOption({ value: fixture.projectId });
     const [inquiryCreateRes] = await Promise.all([
-      page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST' && r.status() !== 401),
+      page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST'),
       page.getByRole('button', { name: 'Create' }).click(),
     ]);
     expect(inquiryCreateRes.ok()).toBe(true);

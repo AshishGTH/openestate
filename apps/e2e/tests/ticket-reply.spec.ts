@@ -45,14 +45,14 @@ test('customer raises a ticket, staff replies and resolves it, customer sees the
   const replyBody = 'A plumber has been scheduled for tomorrow morning.';
   await page.locator('textarea').fill(replyBody);
   await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/respond') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/respond') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Send Reply' }).click(),
   ]);
   await expect(page.getByText(replyBody)).toBeVisible();
 
   // 4. Staff marks it resolved.
   await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/status') && r.request().method() === 'PATCH' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/status') && r.request().method() === 'PATCH'),
     page.getByRole('button', { name: 'Mark RESOLVED' }).click(),
   ]);
   await expect(page.getByText('Status: RESOLVED')).toBeVisible();
