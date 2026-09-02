@@ -39,7 +39,7 @@ test('download the template, upload a bad file (row errors, nothing created), th
     buffer: badFile,
   });
   const [badResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/inquiries/import') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/inquiries/import') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Upload' }).click(),
   ]);
   expect(badResponse.ok()).toBe(true); // row errors are a 201 with success:false, not an HTTP failure
@@ -53,7 +53,7 @@ test('download the template, upload a bad file (row errors, nothing created), th
     buffer: goodFile,
   });
   const [goodResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/inquiries/import') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/inquiries/import') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Upload' }).click(),
   ]);
   expect(goodResponse.ok()).toBe(true);

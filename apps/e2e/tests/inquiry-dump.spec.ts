@@ -28,7 +28,7 @@ test('Dump Reasons master is manageable from Admin → Masters, and dumping a le
   await page.getByRole('button', { name: 'Add Item' }).click();
   await controlAfterLabel(page, 'Name').fill(reasonName);
   const [createReasonResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/masters/dump-reasons') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().includes('/masters/dump-reasons') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Create' }).click(),
   ]);
   expect(createReasonResponse.ok()).toBe(true);
@@ -41,7 +41,7 @@ test('Dump Reasons master is manageable from Admin → Masters, and dumping a le
   await controlAfterLabel(page, 'Applicant Name').fill(applicantName);
   await controlAfterLabel(page, 'Phone').fill(`9${String(Date.now()).slice(-9)}`);
   const [inquiryCreateResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Create' }).click(),
   ]);
   expect(inquiryCreateResponse.ok()).toBe(true);
@@ -61,7 +61,7 @@ test('Dump Reasons master is manageable from Admin → Masters, and dumping a le
   await expect(confirmButton).toBeEnabled();
 
   const [dumpResponse] = await Promise.all([
-    page.waitForResponse((r) => /\/inquiries\/[0-9a-f-]{36}$/.test(r.url()) && r.request().method() === 'PATCH'),
+    page.waitForResponse((r) => /\/inquiries\/[0-9a-f-]{36}$/.test(r.url()) && r.request().method() === 'PATCH' && r.status() !== 401),
     confirmButton.click(),
   ]);
   expect(dumpResponse.ok()).toBe(true);

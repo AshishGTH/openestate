@@ -31,7 +31,7 @@ test('Lead Stages admin: seeded pipeline, default flip, occupied-stage deactivat
   await controlAfterLabel(page, 'Name').fill(stageName);
   await page.getByLabel('Default stage for new leads').check();
   const [createResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/masters/lead-stages') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().includes('/masters/lead-stages') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Create' }).click(),
   ]);
   expect(createResponse.ok()).toBe(true);
@@ -50,7 +50,7 @@ test('Lead Stages admin: seeded pipeline, default flip, occupied-stage deactivat
   await controlAfterLabel(page, 'Applicant Name').fill(applicantName);
   await controlAfterLabel(page, 'Phone').fill(`9${String(Date.now()).slice(-9)}`);
   const [inquiryCreateResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Create' }).click(),
   ]);
   expect(inquiryCreateResponse.ok()).toBe(true);
@@ -58,7 +58,7 @@ test('Lead Stages admin: seeded pipeline, default flip, occupied-stage deactivat
   await page.getByRole('link', { name: applicantName }).click();
   await expect(page).toHaveURL(/\/presales\/inquiries\/[0-9a-f-]{36}$/);
   const [stagePatchResponse] = await Promise.all([
-    page.waitForResponse((r) => /\/inquiries\/[0-9a-f-]{36}$/.test(r.url()) && r.request().method() === 'PATCH'),
+    page.waitForResponse((r) => /\/inquiries\/[0-9a-f-]{36}$/.test(r.url()) && r.request().method() === 'PATCH' && r.status() !== 401),
     controlAfterLabel(page, 'Stage').selectOption({ label: stageName }),
   ]);
   expect(stagePatchResponse.ok()).toBe(true);
@@ -70,7 +70,7 @@ test('Lead Stages admin: seeded pipeline, default flip, occupied-stage deactivat
   await seededNewRow.getByRole('button', { name: 'Edit' }).click();
   await page.getByLabel('Default').check();
   const [defaultFlipResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/masters/lead-stages/') && r.request().method() === 'PATCH'),
+    page.waitForResponse((r) => r.url().includes('/masters/lead-stages/') && r.request().method() === 'PATCH' && r.status() !== 401),
     page.getByRole('button', { name: 'Save' }).click(),
   ]);
   expect(defaultFlipResponse.ok()).toBe(true);
@@ -86,7 +86,7 @@ test('Lead Stages admin: seeded pipeline, default flip, occupied-stage deactivat
 
   await page.getByLabel('Reassign to').selectOption({ label: 'New' });
   const [deactivateResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/masters/lead-stages/') && r.request().method() === 'PATCH'),
+    page.waitForResponse((r) => r.url().includes('/masters/lead-stages/') && r.request().method() === 'PATCH' && r.status() !== 401),
     page.getByRole('button', { name: 'Reassign and deactivate' }).click(),
   ]);
   expect(deactivateResponse.ok()).toBe(true);

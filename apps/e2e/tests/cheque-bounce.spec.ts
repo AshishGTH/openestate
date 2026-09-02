@@ -99,7 +99,7 @@ test('book a unit → record a cheque receipt → bounce it → Collection Summa
   await page.getByRole('button', { name: 'Auto-fill oldest-dues-first' }).click();
 
   const [receiptResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/receipts') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/receipts') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Save & Print Receipt' }).click(),
   ]);
   expect(receiptResponse.ok()).toBe(true);
@@ -117,7 +117,7 @@ test('book a unit → record a cheque receipt → bounce it → Collection Summa
   await chequeRow.getByRole('button', { name: 'Bounce' }).click();
   await page.getByPlaceholder('Reason (e.g. insufficient funds)').fill('E2E test bounce — insufficient funds');
   const [bounceResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/cheque-event') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().includes('/cheque-event') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Confirm bounce' }).click(),
   ]);
   expect(bounceResponse.ok()).toBe(true);

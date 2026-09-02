@@ -40,7 +40,7 @@ test('creating a second inquiry with a duplicate phone shows the candidate; conf
     await controlAfterLabel(page, 'Applicant Name').fill(firstName);
     await controlAfterLabel(page, 'Phone').fill(phone);
     const [firstRes] = await Promise.all([
-      page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST'),
+      page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST' && r.status() !== 401),
       page.getByRole('button', { name: 'Create' }).click(),
     ]);
     expect(firstRes.ok()).toBe(true);
@@ -52,7 +52,7 @@ test('creating a second inquiry with a duplicate phone shows the candidate; conf
     await controlAfterLabel(page, 'Applicant Name').fill(secondName);
     await controlAfterLabel(page, 'Phone').fill(phone);
     const [secondRes] = await Promise.all([
-      page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST'),
+      page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST' && r.status() !== 401),
       page.getByRole('button', { name: 'Create' }).click(),
     ]);
     expect(secondRes.ok()).toBe(true);
@@ -64,7 +64,7 @@ test('creating a second inquiry with a duplicate phone shows the candidate; conf
 
     const confirmButton = candidateRow.getByRole('button', { name: 'Confirm distinct' });
     const [confirmRes] = await Promise.all([
-      page.waitForResponse((r) => r.url().includes('/confirm-distinct') && r.request().method() === 'POST'),
+      page.waitForResponse((r) => r.url().includes('/confirm-distinct') && r.request().method() === 'POST' && r.status() !== 401),
       confirmButton.click(),
     ]);
     expect(confirmRes.ok()).toBe(true);

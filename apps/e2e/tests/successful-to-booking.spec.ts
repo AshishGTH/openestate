@@ -47,7 +47,7 @@ test('marking a lead Successful surfaces a Create Booking link that prefills the
   await controlAfterLabel(page, 'Applicant Name').fill(applicantName);
   await controlAfterLabel(page, 'Phone').fill(`9${String(Date.now()).slice(-9)}`);
   const [inquiryCreateResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Create' }).click(),
   ]);
   expect(inquiryCreateResponse.ok()).toBe(true);
@@ -58,7 +58,7 @@ test('marking a lead Successful surfaces a Create Booking link that prefills the
 
   await expect(page.getByRole('link', { name: 'Create Booking' })).not.toBeVisible();
   const [statusResponse] = await Promise.all([
-    page.waitForResponse((r) => /\/inquiries\/[0-9a-f-]{36}$/.test(r.url()) && r.request().method() === 'PATCH'),
+    page.waitForResponse((r) => /\/inquiries\/[0-9a-f-]{36}$/.test(r.url()) && r.request().method() === 'PATCH' && r.status() !== 401),
     page.getByRole('button', { name: 'Mark SUCCESSFUL' }).click(),
   ]);
   expect(statusResponse.ok()).toBe(true);
@@ -104,8 +104,8 @@ test('marking a lead Successful surfaces a Create Booking link that prefills the
   await page.getByRole('button', { name: 'Next' }).click(); // step 3 → 4
 
   const [bookingResponse, sourceInquiryResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/bookings') && r.request().method() === 'POST'),
-    page.waitForResponse((r) => r.url().includes('/source-inquiry') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/bookings') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/source-inquiry') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Confirm & Book' }).click(),
   ]);
   expect(bookingResponse.ok()).toBe(true);

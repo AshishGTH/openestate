@@ -37,7 +37,7 @@ test('staff uploads a layout plan through the real UI; the customer sees and dow
     buffer: Buffer.from('%PDF-1.4\n%%EOF'),
   });
   const [uploadResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/media') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/media') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Upload' }).click(),
   ]);
   expect(uploadResponse.ok()).toBe(true);
@@ -85,7 +85,7 @@ test('staff publishes a construction update with a photo through the real UI; th
   await controlAfterLabel(page, 'Description').fill('3rd floor slab cast');
   await controlAfterLabel(page, 'Date').fill(new Date().toISOString().slice(0, 10));
   const [createResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/admin/construction-updates') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/admin/construction-updates') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Publish Update' }).click(),
   ]);
   expect(createResponse.ok()).toBe(true);
@@ -98,7 +98,7 @@ test('staff publishes a construction update with a photo through the real UI; th
     buffer: ONE_PX_PNG,
   });
   const [mediaResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/media') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/media') && r.request().method() === 'POST' && r.status() !== 401),
     updateRow.getByRole('button', { name: 'Add Photo' }).click(),
   ]);
   expect(mediaResponse.ok()).toBe(true);
