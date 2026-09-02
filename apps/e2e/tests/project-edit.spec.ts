@@ -23,7 +23,7 @@ test('editing a project through the real UI persists after reload', async ({ pag
   await controlAfterLabel(page, 'Address').fill('221B Baker Street');
 
   const [patchResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes(`/projects/`) && r.request().method() === 'PATCH' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes(`/projects/`) && r.request().method() === 'PATCH'),
     page.getByRole('button', { name: 'Save' }).click(),
   ]);
   expect(patchResponse.ok()).toBe(true);
@@ -113,7 +113,7 @@ test('changing a project\'s area/location with existing bookings shows the GST-c
   await expect(page.getByText(/will not change/)).toBeVisible();
 
   const [patchResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes(`/projects/`) && r.request().method() === 'PATCH' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes(`/projects/`) && r.request().method() === 'PATCH'),
     page.getByRole('button', { name: 'Yes, save' }).click(),
   ]);
   expect(patchResponse.ok()).toBe(true);

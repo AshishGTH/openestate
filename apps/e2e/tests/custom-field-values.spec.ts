@@ -33,7 +33,7 @@ test('define a custom field → capture a value on a real form → see it on det
   await controlAfterLabel(page, 'Label').fill(label);
   await controlAfterLabel(page, 'Field Name').fill(key);
   const [defRes] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/custom-fields') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/custom-fields') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Create Field' }).click(),
   ]);
   expect(defRes.ok()).toBe(true);
@@ -54,7 +54,7 @@ test('define a custom field → capture a value on a real form → see it on det
   await cfInput.fill(value);
 
   const [createRes] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/inquiries') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/inquiries') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Create', exact: true }).click(),
   ]);
   expect(createRes.ok()).toBe(true);
@@ -112,7 +112,7 @@ test('hard purge refuses to run until the field key is typed back', async ({ pag
   await controlAfterLabel(page, 'Label').fill(label);
   await controlAfterLabel(page, 'Field Name').fill(key);
   await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/custom-fields') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/custom-fields') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Create Field' }).click(),
   ]);
 
@@ -133,7 +133,7 @@ test('hard purge refuses to run until the field key is typed back', async ({ pag
   await expect(confirmBtn).toBeEnabled();
 
   const [purgeRes] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/purge') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/purge') && r.request().method() === 'POST'),
     confirmBtn.click(),
   ]);
   expect(purgeRes.ok()).toBe(true);

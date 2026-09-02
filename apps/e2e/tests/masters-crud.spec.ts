@@ -28,7 +28,7 @@ test('create a master with type-specific optional fields → edit it → deactiv
   await controlAfterLabel(page, 'Frequency').selectOption('YEARLY');
 
   const [createResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/masters/interest-rules') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/masters/interest-rules') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Create' }).click(),
   ]);
   expect(createResponse.ok()).toBe(true);
@@ -42,7 +42,7 @@ test('create a master with type-specific optional fields → edit it → deactiv
   await row.getByRole('button', { name: 'Edit' }).click();
   await controlAfterLabel(page, 'Rate %').fill('24');
   const [updateResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/masters/interest-rules/') && r.request().method() === 'PATCH' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/masters/interest-rules/') && r.request().method() === 'PATCH'),
     page.getByRole('button', { name: 'Update' }).click(),
   ]);
   expect(updateResponse.ok()).toBe(true);
@@ -57,7 +57,7 @@ test('create a master with type-specific optional fields → edit it → deactiv
   // Active checkbox was only ever set once, at creation).
   await page.locator('label', { hasText: 'Active' }).locator('input[type="checkbox"]').uncheck();
   const [deactivateResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/masters/interest-rules/') && r.request().method() === 'PATCH' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/masters/interest-rules/') && r.request().method() === 'PATCH'),
     page.getByRole('button', { name: 'Update' }).click(),
   ]);
   expect(deactivateResponse.ok()).toBe(true);

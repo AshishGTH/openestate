@@ -35,7 +35,7 @@ test('logging a follow-up shows who logged it, requires a next follow-up time, a
   await controlAfterLabel(page, 'Applicant Name').fill(applicantName);
   await controlAfterLabel(page, 'Phone').fill('9812322222');
   const [createResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Create' }).click(),
   ]);
   expect(createResponse.ok()).toBe(true);
@@ -47,7 +47,7 @@ test('logging a follow-up shows who logged it, requires a next follow-up time, a
   // be refused — the exact bug this whole item exists to close.
   await page.locator('textarea').first().fill('Called, forgot to set a next date');
   const [rejected] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/follow-ups') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/follow-ups') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Log Follow-up' }).click(),
   ]);
   expect(rejected.ok()).toBe(false);
@@ -57,7 +57,7 @@ test('logging a follow-up shows who logged it, requires a next follow-up time, a
   await controlAfterLabel(page, 'Next follow-up').fill(toDatetimeLocalValue(yesterday));
   await page.locator('textarea').first().fill('Called, interested, will visit site next week');
   const [followUpResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/follow-ups') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/follow-ups') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Log Follow-up' }).click(),
   ]);
   expect(followUpResponse.ok()).toBe(true);

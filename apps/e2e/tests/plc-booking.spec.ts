@@ -39,7 +39,7 @@ test('assign a PLC and a GST-rated charge to a unit, book it, and confirm the to
   await page.locator('select').filter({ has: page.locator('option', { hasText: fixture.plcTypeName! }) }).selectOption({ label: fixture.plcTypeName! });
   await controlAfterLabel(page, 'Percentage of base rate').fill(String(plcPercent));
   const [plcResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/plcs') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/plcs') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Add PLC' }).click(),
   ]);
   expect(plcResponse.ok()).toBe(true);
@@ -48,7 +48,7 @@ test('assign a PLC and a GST-rated charge to a unit, book it, and confirm the to
   await page.locator('select').filter({ has: page.locator('option', { hasText: fixture.chargeTypeName! }) }).selectOption({ label: fixture.chargeTypeName! });
   await controlAfterLabel(page, 'Amount (₹)').fill(String(chargeRupees));
   const [chargeResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/charges') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().includes('/charges') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Add Charge' }).click(),
   ]);
   expect(chargeResponse.ok()).toBe(true);
@@ -115,7 +115,7 @@ test('assign a PLC and a GST-rated charge to a unit, book it, and confirm the to
   await expect(confirmDl).toContainText(rupeesText(baseRupees + plcRupees + chargeRupees));
 
   const [bookingResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/bookings') && r.request().method() === 'POST' && r.status() !== 401),
+    page.waitForResponse((r) => r.url().endsWith('/bookings') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Confirm & Book' }).click(),
   ]);
   expect(bookingResponse.ok()).toBe(true);

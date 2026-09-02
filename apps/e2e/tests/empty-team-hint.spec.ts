@@ -63,7 +63,7 @@ test('manager-tier user with zero reports sees the empty-team hint; it disappear
     await controlAfterLabel(page, 'Password').fill(staffPassword);
     await controlAfterLabel(page, 'Role').selectOption({ label: managerRole.name });
     const [managerCreateRes] = await Promise.all([
-      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST' && r.status() !== 401),
+      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST'),
       page.getByRole('button', { name: 'Create User' }).click(),
     ]);
     expect(managerCreateRes.ok()).toBe(true);
@@ -74,7 +74,7 @@ test('manager-tier user with zero reports sees the empty-team hint; it disappear
     await controlAfterLabel(page, 'Password').fill(staffPassword);
     await controlAfterLabel(page, 'Role').selectOption({ label: execRole.name });
     const [execCreateRes] = await Promise.all([
-      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST' && r.status() !== 401),
+      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST'),
       page.getByRole('button', { name: 'Create User' }).click(),
     ]);
     expect(execCreateRes.ok()).toBe(true);
@@ -129,7 +129,7 @@ test('manager-tier user with zero reports sees the empty-team hint; it disappear
     await expect(controlAfterLabel(page, 'Name')).toHaveValue('E2E Empty Team Exec');
     await controlAfterLabel(page, 'Manager').selectOption({ label: 'E2E Empty Team Manager' });
     const [updateRes] = await Promise.all([
-      page.waitForResponse((r) => r.url().includes('/users/') && r.request().method() === 'PATCH' && r.status() !== 401),
+      page.waitForResponse((r) => r.url().includes('/users/') && r.request().method() === 'PATCH'),
       page.getByRole('button', { name: 'Update User' }).click(),
     ]);
     expect(updateRes.ok()).toBe(true);
@@ -150,7 +150,7 @@ test('manager-tier user with zero reports sees the empty-team hint; it disappear
     await controlAfterLabel(page, 'Phone').fill('9800800001');
     await controlAfterLabel(page, 'Project').selectOption({ value: fixture.projectId });
     const [inquiryCreateRes] = await Promise.all([
-      page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST' && r.status() !== 401),
+      page.waitForResponse((r) => r.url().endsWith('/inquiries') && r.request().method() === 'POST'),
       page.getByRole('button', { name: 'Create' }).click(),
     ]);
     expect(inquiryCreateRes.ok()).toBe(true);
