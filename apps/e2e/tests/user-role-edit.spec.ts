@@ -90,6 +90,17 @@ test('editing a user (name + role) persists, through the real form submit', asyn
     // Reload the list + reopen edit fresh — confirms the change actually
     // persisted server-side, not just a 200 that silently dropped it.
     await page.reload();
+    // Wait for the users list refetch after reload — the cooldown-skipped
+    // mount leaves accessToken null on the fresh runtime, so the first
+    // /users GET 401s and api() retries after a refresh. Same
+    // wait-for-precondition pattern as user-deactivate-reactivate's
+    // deactivate/reactivate checks, for the same reason: under CI load
+    // the full 401 → retry → refetch → re-render cycle exceeds the
+    // 5s default toBeVisible timeout. See CLAUDE.md's E2E
+    // refresh-rotation cascade entry.
+    await page.waitForResponse(
+      (r) => /\/api\/v1\/users(\?|$)/.test(r.url()) && r.request().method() === 'GET' && r.ok(),
+    );
     const editedRow = page.getByRole('row', { name: new RegExp(editedName) });
     await expect(editedRow).toBeVisible();
     await editedRow.getByRole('link', { name: 'Edit' }).click();
