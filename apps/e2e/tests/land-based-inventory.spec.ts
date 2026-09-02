@@ -38,7 +38,7 @@ test('create a LAND_BASED project, group, plots in acre and gunta, book one, and
   // project's setup; area locations are company-wide, not project-scoped.
   await controlAfterLabel(page, 'Area/Location').selectOption({ index: 1 });
   const [createResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/projects') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/projects') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Create' }).click(),
   ]);
   expect(createResponse.ok()).toBe(true);
@@ -56,7 +56,7 @@ test('create a LAND_BASED project, group, plots in acre and gunta, book one, and
   await controlAfterLabel(page, 'Name').fill(groupName);
   await controlAfterLabel(page, 'Code').fill(`SECA-${tag}`);
   const [groupResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/inventory-groups') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().includes('/inventory-groups') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Create' }).click(),
   ]);
   expect(groupResponse.ok()).toBe(true);
@@ -77,7 +77,7 @@ test('create a LAND_BASED project, group, plots in acre and gunta, book one, and
   await controlAfterLabel(page, 'Rate Unit').selectOption({ value: 'ACRE' });
   await controlAfterLabel(page, 'Base Rate (₹ per Rate Unit)').fill('5000000'); // ₹50,00,000/acre
   const [plot1Response] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/units/land-based') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().includes('/units/land-based') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Create' }).click(),
   ]);
   expect(plot1Response.ok()).toBe(true);
@@ -91,7 +91,7 @@ test('create a LAND_BASED project, group, plots in acre and gunta, book one, and
   await controlAfterLabel(page, 'Rate Unit').selectOption({ value: 'GUNTA' });
   await controlAfterLabel(page, 'Base Rate (₹ per Rate Unit)').fill('100000'); // ₹1,00,000/gunta
   const [plot2Response] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/units/land-based') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().includes('/units/land-based') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Create' }).click(),
   ]);
   expect(plot2Response.ok()).toBe(true);
@@ -170,7 +170,7 @@ test('create a LAND_BASED project, group, plots in acre and gunta, book one, and
   await expect(confirmDl).not.toContainText('₹50,00,000');
 
   const [bookingResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/bookings') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/bookings') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Confirm & Book' }).click(),
   ]);
   expect(bookingResponse.ok()).toBe(true);

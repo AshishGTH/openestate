@@ -79,7 +79,7 @@ test('deactivating and reactivating a user, through the real button clicks', asy
   await controlAfterLabel(page, 'Role').selectOption({ label: ROLE_DISPLAY_NAMES[SYSTEM_ROLES.SUPER_ADMIN] });
 
   const [createResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST'),
+    page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST' && r.status() !== 401),
     page.getByRole('button', { name: 'Create User' }).click(),
   ]);
   expect(createResponse.ok()).toBe(true);

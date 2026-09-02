@@ -82,7 +82,7 @@ test('an unraised STAGE_LINKED installment shows "not yet due" in the schedule, 
     await page.getByLabel('Stage completed on').fill('2027-06-01');
 
     const [raiseResponse] = await Promise.all([
-      page.waitForResponse((r) => r.url().includes('/stage-raises') && r.request().method() === 'POST'),
+      page.waitForResponse((r) => r.url().includes('/stage-raises') && r.request().method() === 'POST' && r.status() !== 401),
       page.getByRole('button', { name: 'Confirm raise' }).click(),
     ]);
     expect(raiseResponse.ok()).toBe(true);

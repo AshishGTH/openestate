@@ -63,7 +63,7 @@ test('editing a user (name + role) persists, through the real form submit', asyn
     await controlAfterLabel(page, 'Role').selectOption({ label: ROLE_DISPLAY_NAMES[SYSTEM_ROLES.SUPER_ADMIN] });
 
     const [createResponse] = await Promise.all([
-      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST'),
+      page.waitForResponse((r) => r.url().endsWith('/users') && r.request().method() === 'POST' && r.status() !== 401),
       page.getByRole('button', { name: 'Create User' }).click(),
     ]);
     expect(createResponse.ok()).toBe(true);
@@ -81,7 +81,7 @@ test('editing a user (name + role) persists, through the real form submit', asyn
     await controlAfterLabel(page, 'Role').selectOption({ label: `${ROLE_DISPLAY_NAMES[SYSTEM_ROLES.ACCOUNTS]} E2E` });
 
     const [updateResponse] = await Promise.all([
-      page.waitForResponse((r) => r.url().includes('/users/') && r.request().method() === 'PATCH'),
+      page.waitForResponse((r) => r.url().includes('/users/') && r.request().method() === 'PATCH' && r.status() !== 401),
       page.getByRole('button', { name: 'Update User' }).click(),
     ]);
     expect(updateResponse.ok()).toBe(true); // pre-fix: 400 "Unrecognized key(s) in object: 'email'"
