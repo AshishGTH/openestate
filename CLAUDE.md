@@ -6398,20 +6398,37 @@ substring and the signature segment are both absent). These prove the
 MECHANISM works.
 
 **CI proof — three consecutive green full-suite runs on one commit
-(9bbae76), attempts 1, 2 and 3 of run 33292860530, all five jobs
+(6d75b68), attempts 1, 2 and 3 of run 33647780006, all five jobs
 success on every attempt:**
 
-- Lint, typecheck, unit tests, build: 2m38s / 2m39s / 2m34s
-- Integration tests (Postgres + Redis): 4m33s / 4m45s / 3m42s
-- E2E (Playwright + built frontend): 2m56s / 3m3s / 3m2s
-- Native install (real Postgres/Redis/nginx): 3m12s / 2m31s / 3m0s
-- Native upgrade (populated DB): 3m50s / 3m10s / 2m41s
+- Lint, typecheck, unit tests, build: 2m06s / 2m45s / 2m52s
+- Integration tests (Postgres + Redis): 4m57s / 4m43s / 5m04s
+- E2E (Playwright + built frontend): 2m54s / 3m13s / 2m59s
+- Native install (real Postgres/Redis/nginx): 2m09s / 3m13s / 3m24s
+- Native upgrade (populated DB): 4m36s / 4m15s / 4m16s
 
-Consistent-duration runs — real work happening each time, not cache-
-hit no-ops. Playwright ran 40 specs on every attempt; attempts 2 and
-3 were 40/40 clean; attempt 1 had ONE flaky-recovery
-(`cheque-bounce.spec.ts`, a spec this fix did not touch — flagged
-below).
+Consistent-duration runs — real work happening each time, not
+cache-hit no-ops. Playwright ran 40 specs on every attempt, all
+40/40 clean across all three.
+
+An earlier three-green run on commit 9bbae76 (run 33292860530) was
+also 3-of-3, but subsequent runs on the same fix branch (c35f4c3
+docs-only, and 33645314654 attempt 3 on this branch) each red on
+ONE spec — inquiry-dump and user-role-edit respectively — for a
+class of test-observability regression the initial three-green did
+not surface. Both failures traced to the same mechanism:
+Playwright's waitForResponse observes the first matching response,
+and my cooldown-skip on mount leaves accessToken null on fresh
+runtimes until api()'s own 401-retry populates it, so any test
+whose next assertion is `.ok()` on a POST/PATCH fired soon after
+page.goto/reload can catch the transient 401 before the retry
+resolves. Fixed with 59 predicate updates across 20 spec files
+(adding `&& r.status() !== 401` to the wait) plus wait-for-refetch
+preconditions on 4 post-reload assertions. Real users never
+observe the transient 401 — api()'s internal retry hides it — the
+race is purely a Playwright observability artifact of my cooldown
+widening the null-token window. See the two follow-up
+commits (a365279, 6d75b68) for the full test changes.
 
 **Cascade fix confirmed by trace evidence, not just by boolean-green.**
 The two most login-heavy specs, `team-scope` and
@@ -6474,16 +6491,16 @@ theorising) all went RED on the same throttle mechanism — the
 diagnosis came from reading the traces the CI artifact rule this
 same commit series added, not from guessing.
 
-**cheque-bounce flake on attempt 1 is a separate, single-observation
-signal, not the cascade.** Test failed once at
-`cheque-bounce.spec.ts:70:72` (an `expect(locator).not.toHaveValue`
-assertion), passed on Playwright's own `retries: 1`. Not touched by
-this fix, not in the original failing subset. Could be a DOM race
-of the same class the `user-deactivate-reactivate` fix addressed, or
-a genuine correctness issue that only manifests under specific
-timing; needs its own trace-driven diagnosis if it recurs across
-future runs. Recorded here rather than papered over; do NOT extend
-Playwright's `retries: 1` on the basis of "it self-recovers" — a
-retry-that-passes-once is exactly the shape of the signal that
-became this session's whole investigation, and hiding it further
-would put the merge gate back where it started.
+**cheque-bounce flake is now the only remaining known E2E flake.**
+Observed on the earlier 9bbae76 run's attempt 1 (retry-recovered);
+recurred once on the c35f4c3 docs-only run alongside inquiry-dump.
+Both times at `cheque-bounce.spec.ts:70:72`
+(`expect(locator).not.toHaveValue`). Not touched by this fix, not
+in the original cascade subset. Absent from all three attempts of
+the final 6d75b68 three-green — but only three attempts, not
+statistical proof. Full details, exact assertion, and the trace-
+retrieval command are logged in `docs/todo.md`. Do NOT extend
+Playwright's `retries: 1` to hide it further — a
+retry-that-passes-once is exactly the signal that led to this
+session's whole investigation, and hiding it further would put the
+merge gate back where it started.
