@@ -31,7 +31,16 @@ test('editing a project through the real UI persists after reload', async ({ pag
   await expect(page.getByRole('heading', { name: newName })).toBeVisible();
   await expect(page.getByText(new RegExp(`RERA: ${newRera}`))).toBeVisible();
 
+  // Wait for the project detail refetch after reload — the cooldown-
+  // skipped mount leaves accessToken null on the fresh runtime, so the
+  // first GET /projects/:id 401s and api() retries after a refresh.
+  // Under CI load the full 401 → retry → refetch → re-render cycle
+  // exceeds the default 5s toBeVisible timeout. See CLAUDE.md's E2E
+  // refresh-rotation cascade entry.
   await page.reload();
+  await page.waitForResponse(
+    (r) => /\/api\/v1\/projects\/[0-9a-f-]{36}$/.test(r.url()) && r.request().method() === 'GET' && r.ok(),
+  );
   await expect(page.getByRole('heading', { name: newName })).toBeVisible();
   await expect(page.getByText(new RegExp(`RERA: ${newRera}`))).toBeVisible();
   await expect(page.getByText('221B Baker Street')).toBeVisible();

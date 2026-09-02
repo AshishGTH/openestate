@@ -132,9 +132,18 @@ test('deactivating and reactivating a user, through the real button clicks', asy
   // AuthService.validateUser's `!user.isActive` check.
   await assertLoginRefused(browser, targetEmail, targetPassword);
 
-  // Persisted server-side, not just an optimistic client-side flip.
+  // Persisted server-side, not just an optimistic client-side flip. Wait
+  // for the search's own GET /users response before checking DOM — under
+  // CI load and the cooldown-skipped mount pattern, the fill → debounced
+  // fetch → render cycle can exceed the default 5s toBeVisible timeout.
+  // See CLAUDE.md's E2E refresh-rotation cascade entry.
   await page.reload();
-  await page.getByPlaceholder('Search by name or email…').fill(targetName);
+  await Promise.all([
+    page.waitForResponse(
+      (r) => /\/api\/v1\/users\?.*search=/.test(r.url()) && r.request().method() === 'GET' && r.ok(),
+    ),
+    page.getByPlaceholder('Search by name or email…').fill(targetName),
+  ]);
   const reloadedRow = page.getByRole('row', { name: new RegExp(targetName) });
   await expect(reloadedRow.getByText('Inactive', { exact: true })).toBeVisible();
 
@@ -151,7 +160,12 @@ test('deactivating and reactivating a user, through the real button clicks', asy
   await expect(reloadedRow.getByText('Active', { exact: true })).toBeVisible();
 
   await page.reload();
-  await page.getByPlaceholder('Search by name or email…').fill(targetName);
+  await Promise.all([
+    page.waitForResponse(
+      (r) => /\/api\/v1\/users\?.*search=/.test(r.url()) && r.request().method() === 'GET' && r.ok(),
+    ),
+    page.getByPlaceholder('Search by name or email…').fill(targetName),
+  ]);
   const finalRow = page.getByRole('row', { name: new RegExp(targetName) });
   await expect(finalRow.getByText('Active', { exact: true })).toBeVisible();
 
