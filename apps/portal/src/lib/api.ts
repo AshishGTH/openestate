@@ -137,6 +137,19 @@ export async function api<T = unknown>(
 ): Promise<T> {
   const url = `${API_BASE}/api/v1${path}`;
 
+  // Lazy proactive refresh — mirrors apps/web/src/lib/api.ts's identical
+  // block. See that file for the full reasoning; short version: cooldown-
+  // skipped mount hydrates state.user from cache but leaves accessToken
+  // null on this runtime. Rather than firing every request un-authed and
+  // doubling everything through 401 → retry, acquire the token once
+  // (single-flighted) before the first request. Fires lazily on
+  // user-initiated / useQuery-mount work, not from a mount effect —
+  // that's what keeps it out of the abort cascade the cooldown exists
+  // to break.
+  if (!accessToken && readAuthCache()) {
+    await refreshSession();
+  }
+
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type') && options.body) {
     headers.set('Content-Type', 'application/json');
@@ -155,12 +168,13 @@ export async function api<T = unknown>(
     credentials: 'include',
   });
 
-  // No `&& accessToken` guard — see apps/web/src/lib/api.ts's identical
-  // relaxed gate for the full explanation. Cooldown-skipped mounts leave
-  // accessToken null on a fresh page load even though the refresh cookie is
-  // still valid; without this relaxation the first API call would be
-  // un-retriable.
-  if (res.status === 401) {
+  // Reverted to the pre-cooldown `&& accessToken` gate — the proactive
+  // refresh above handles the cooldown-null-token case, so this only
+  // needs to fire on genuine mid-session expiries (accessToken was set
+  // but the JWT the server sees is stale, typically ~15 min in).
+  // Firing on every 401 would probe /auth/refresh even for genuinely
+  // logged-out requests, adding a wasted round trip.
+  if (res.status === 401 && accessToken) {
     const newToken = await refreshSession();
     if (newToken) {
       headers.set('Authorization', `Bearer ${newToken}`);
