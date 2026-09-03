@@ -93,7 +93,7 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
       useFactory: () => ({
         storage: new RedisThrottlerStorage(),
         throttlers: [
-          { ttl: 60_000, limit: 100 },
+          { ttl: 60_000, limit: Number(process.env.DEFAULT_THROTTLE_LIMIT ?? 100) },
           { name: 'portal-auth', ttl: 300_000, limit: 5 },
           { name: 'portal-read', ttl: 60_000, limit: 60 },
           // Password-change/reset-confirm across staff and portal — see
