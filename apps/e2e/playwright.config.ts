@@ -55,12 +55,7 @@ export default defineConfig({
   globalSetup: './global-setup.ts',
   use: {
     baseURL: WEB_URL,
-    // TEMPORARY: 'on' (not 'retain-on-failure') to capture traces for
-    // passing runs so we can prove the lazy-proactive-refresh commit
-    // eliminates the request-doubling (zero 401s on cooldown-hit page
-    // loads). Revert to 'retain-on-failure' after that trace evidence
-    // is captured.
-    trace: 'on',
+    trace: 'retain-on-failure',
   },
   webServer: [
     {
@@ -89,17 +84,23 @@ export default defineConfig({
         PAN_ENCRYPTION_KEY: HARNESS_HEX_KEY,
         TOTP_ENCRYPTION_KEY: HARNESS_HEX_KEY,
         PLUGIN_SECRET_ENCRYPTION_KEYS: `1:${HARNESS_HEX_KEY}`,
-        // Raise the default throttle bucket well above what any single
-        // production per-IP client would ever legitimately generate.
-        // Four parallel Playwright workers, each doing a full spec's
-        // login/mount-refresh/dashboard/reports/whatever-the-spec-does,
-        // legitimately exceed the production 100/60s bucket combined
-        // (they all share the one runner IP). See app.module.ts's
-        // DEFAULT_THROTTLE_LIMIT comment for the trace evidence — this
-        // is the ONE knob that fixes 4 of 5 residual failing specs at
-        // their root, and only for this harness's disposable API
-        // instance. Real installs never set this.
-        DEFAULT_THROTTLE_LIMIT: '10000',
+        // 2000 = ~2x the empirically-observed peak of 963 requests in
+        // any rolling 60s window under the full 40-spec suite (measured
+        // 2026-09-03 from the trace-capture run's own network logs
+        // across all specs, 4 parallel workers all sharing the runner
+        // IP). Production installs never set this and continue at 100.
+        //
+        // The earlier value of 10000 was ~10x more than needed because
+        // it was raised to accommodate the request-doubling bug (every
+        // cooldown-hit page load fired every request un-authed, 401,
+        // then retried) rather than fixing it. That bug is fixed in
+        // the lazy-proactive-refresh commit (74f9213 in the PR history);
+        // headroom is now sized to the actual traffic, with room for
+        // ~2x suite growth before hitting the limit. If a future spec
+        // burst blows it, tune deliberately with fresh trace evidence —
+        // don't blanket-raise. See app.module.ts's
+        // DEFAULT_THROTTLE_LIMIT block for the production default.
+        DEFAULT_THROTTLE_LIMIT: '2000',
         // NODE_ENV=production here is deliberate, not an oversight: the
         // Secure-cookie bug this harness's first scenario regression-tests
         // (CLAUDE.md "Secure cookies over plain HTTP") was NODE_ENV driving

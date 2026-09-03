@@ -17,7 +17,13 @@ export default defineConfig({
     // CLAUDE.md's "E2E refresh-rotation cascade" Decisions entry.
     // Production installs never set this and continue at 100.
     env: {
-      DEFAULT_THROTTLE_LIMIT: '10000',
+      // 2000 matches the value in apps/e2e/playwright.config.ts, which
+      // was sized to ~2x the empirically-observed 60s-window peak (963)
+      // once the request-doubling bug was fixed. Integration tests run
+      // vitest workers against an in-process NestJS app, all from
+      // localhost — one IP, one throttle bucket. Production installs
+      // never set this and continue at 100 (see app.module.ts).
+      DEFAULT_THROTTLE_LIMIT: '2000',
     },
     // Capped, not left at vitest's default (== CPU count, 16 on this
     // machine's dev box). Instrumentation (see CLAUDE.md's Phase 7
