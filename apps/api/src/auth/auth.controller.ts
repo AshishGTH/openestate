@@ -23,6 +23,7 @@ import {
 import type { JwtPayload } from '@openestate/shared';
 import { AuthService } from './auth.service';
 import { Public } from './guards/jwt-auth.guard';
+import { randomUUID } from 'node:crypto';
 import { STAFF_CSRF_COOKIE } from './csrf-cookie-names';
 import { PasswordChangeThrottlerGuard } from './guards/password-change-throttler.guard';
 
@@ -53,7 +54,7 @@ function setRefreshCookie(res: Response, token: string, expiresAt: Date) {
 }
 
 function setCsrfCookie(res: Response) {
-  const csrfToken = crypto.randomUUID();
+  const csrfToken = randomUUID();
   res.cookie(CSRF_COOKIE, csrfToken, {
     httpOnly: false,
     // req.secure reflects the CLIENT's real scheme via X-Forwarded-Proto
