@@ -159,6 +159,32 @@ export async function api<T = unknown>(
 ): Promise<T> {
   const url = `${API_BASE}/api/v1${path}`;
 
+  // Lazy proactive refresh: on a cooldown-skipped mount (see the auth-cache
+  // block above), state.user hydrates from cache but module `accessToken`
+  // stays null on the fresh runtime — the previous design let the first
+  // request fire un-authed, 401, refresh, retry, DOUBLING every request
+  // from a cooldown-hit page load (~8-10 mount queries per navigation,
+  // each doubled). Trace evidence at CLAUDE.md's "E2E refresh-rotation
+  // cascade" Decisions entry.
+  //
+  // Instead, when we see `!accessToken && readAuthCache()` — meaning a
+  // recent successful session (< AUTH_COOLDOWN_MS ago) is on record but
+  // this runtime doesn't have a token yet — acquire it once, before the
+  // request goes out. Single-flighted via refreshSession(), so concurrent
+  // mount-time useQuery hooks share ONE /auth/refresh instead of 8+.
+  //
+  // Why this doesn't reintroduce the abortable cascade the cooldown
+  // exists to break: the cascade formed because MOUNT effects fire
+  // refresh eagerly on every navigation, so a rapid page.goto sequence
+  // aborts refresh-in-flight response after refresh-in-flight response,
+  // and cookies never update. Firing lazily from api() ties the refresh
+  // to a user-initiated (or user-caused, via useQuery) action — those
+  // happen after the page has settled, past the abort window. If the
+  // cascade returns, this reasoning is wrong and needs rethinking.
+  if (!accessToken && readAuthCache()) {
+    await refreshSession();
+  }
+
   const headers = new Headers(options.headers);
   // FormData (file uploads) must NOT get an explicit Content-Type — the
   // browser sets multipart/form-data with the correct boundary itself;
@@ -180,14 +206,14 @@ export async function api<T = unknown>(
     credentials: 'include',
   });
 
-  // No `&& accessToken` guard: after a cooldown-skipped mount refresh (see
-  // the auth-cache block above), accessToken is null on a fresh page load
-  // even though the refresh cookie is still valid — the first call would
-  // otherwise be un-retriable and the whole page would fail. refreshSession()
-  // returns null cleanly when there's no valid session, so a genuine
-  // logged-out 401 still short-circuits back to the caller after one wasted
-  // refresh probe (cheap; deduped by refreshSession's own single-flight).
-  if (res.status === 401) {
+  // Original 401-retry: only fires when we HAD a token but the server
+  // rejected it (typically a JWT expired mid-session, ~15 min in). The
+  // proactive-refresh branch above handles the cooldown-null-token case,
+  // so this reverts to its pre-cooldown gate — no need to fire a refresh
+  // probe when we never had a session in the first place, which would
+  // just 401 too and add one wasted round trip to every genuine logged-out
+  // API call.
+  if (res.status === 401 && accessToken) {
     const newToken = await refreshSession();
     if (newToken) {
       headers.set('Authorization', `Bearer ${newToken}`);
