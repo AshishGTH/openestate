@@ -400,18 +400,14 @@ jobs:
           fi
           echo "Traces present: $(find test-results -name 'trace.zip' | wc -l) trace.zip file(s) across $(ls test-results | wc -l) test dir(s)."
 
-      # TEMPORARY: always() (not failure()) paired with playwright.config.ts's
-      # temporary trace: 'on' so we can pull traces from a passing run and
-      # prove the lazy-proactive-refresh commit eliminates the doubling
-      # via zero 401s on cooldown-hit navigation. Reverted immediately after.
       - name: Upload Playwright traces on failure
-        if: always()
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-traces
           path: apps/e2e/test-results/
           retention-days: 7
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload Playwright report on failure
         if: failure()
