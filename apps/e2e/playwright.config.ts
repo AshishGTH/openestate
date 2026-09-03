@@ -55,7 +55,12 @@ export default defineConfig({
   globalSetup: './global-setup.ts',
   use: {
     baseURL: WEB_URL,
-    trace: 'retain-on-failure',
+    // TEMPORARY: 'on' (not 'retain-on-failure') to capture traces for
+    // passing runs so we can prove the lazy-proactive-refresh commit
+    // eliminates the request-doubling (zero 401s on cooldown-hit page
+    // loads). Revert to 'retain-on-failure' after that trace evidence
+    // is captured.
+    trace: 'on',
   },
   webServer: [
     {
