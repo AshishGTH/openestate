@@ -164,8 +164,17 @@ export class PortalAuthController {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    setPortalRefreshCookie(res, result.refreshRaw, result.expiresAt);
-    setPortalCsrfCookie(res);
+    // E5: exhaustive kind check — see apps/api/src/auth/auth.controller.ts's
+    // identical block. TokenService is shared between staff and portal
+    // (portal-auth.service.ts:14 imports it directly), and the mirrored-
+    // auth standing rule requires the two controllers to handle the
+    // discriminated result the same way. Replays return the accessToken
+    // with no cookie mutation; the winner's response already delivered
+    // the rotated cookies to the same browser.
+    if (result.kind === 'rotated') {
+      setPortalRefreshCookie(res, result.refreshRaw, result.expiresAt);
+      setPortalCsrfCookie(res);
+    }
     return { accessToken: result.accessToken };
   }
 
