@@ -101,6 +101,19 @@ export default defineConfig({
         // don't blanket-raise. See app.module.ts's
         // DEFAULT_THROTTLE_LIMIT block for the production default.
         DEFAULT_THROTTLE_LIMIT: '2000',
+        // portal-auth (5 req / 5 min per IP) is exhausted by the full
+        // suite: 5 portal logins across 5 specs (media-gallery×2,
+        // rapid-reload-session×2, ticket-reply×1) hits the ceiling
+        // exactly, so any Playwright retry firing a 6th login 429s and
+        // cascades into unrelated spec failures. 50 = ~10x the observed
+        // 5-login baseline. Still tight enough that a real brute-force
+        // scenario in a portal-auth-focused test (e.g. account-lockout
+        // testing) would fire well past 50 and hit the guard. Production
+        // installs never set this and stay at 5 — the env var exists
+        // ONLY to give the harness's parallel worker pool headroom
+        // above the production per-IP ceiling. See app.module.ts's
+        // PORTAL_AUTH_THROTTLE_LIMIT block for the prod default.
+        PORTAL_AUTH_THROTTLE_LIMIT: '50',
         // NODE_ENV=production here is deliberate, not an oversight: the
         // Secure-cookie bug this harness's first scenario regression-tests
         // (CLAUDE.md "Secure cookies over plain HTTP") was NODE_ENV driving

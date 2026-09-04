@@ -111,6 +111,14 @@ describeIf('Phase 6 commit 4: portal-auth throttle bucket over real HTTP', () =>
   let app: INestApplication;
 
   beforeAll(async () => {
+    // Guarantee the production-default path: any prior CI/local env
+    // override of PORTAL_AUTH_THROTTLE_LIMIT (which exists solely as a
+    // test-harness knob for apps/e2e's parallel-worker headroom, see
+    // app.module.ts's PORTAL_AUTH_THROTTLE_LIMIT block) must not leak
+    // into THIS test's scenario — the it() below asserts the OUTCOME of
+    // the unset-env-var case, which is a specific security property of
+    // the prod default (5 req / 5 min per IP).
+    delete process.env.PORTAL_AUTH_THROTTLE_LIMIT;
     await clearPortalAuthThrottleState();
     app = await bootstrapApp();
   });
@@ -120,12 +128,20 @@ describeIf('Phase 6 commit 4: portal-auth throttle bucket over real HTTP', () =>
     await clearPortalAuthThrottleState();
   });
 
-  it('the 6th login attempt within 5 minutes from the same IP returns 429; the first 5 do not', async () => {
+  it('with PORTAL_AUTH_THROTTLE_LIMIT unset, the guard resolves to 5 (outcome: 6th login within 5 minutes 429s, first 5 do not)', async () => {
     // A non-existent identifier so PortalAuthService.login() throws
     // UnauthorizedException(401) WITHOUT touching any account's
     // failedLoginAttempts/lockedUntil — isolates the throttle guard's own
     // behaviour from the separate account-lockout mechanism, which also
     // lives on this same route and would otherwise confound the count.
+    //
+    // This asserts the RESOLVED effective limit through the guard's real
+    // behaviour, not the env var's absence: with PORTAL_AUTH_THROTTLE_LIMIT
+    // deleted in beforeAll above, the guard MUST accept exactly 5 requests
+    // and refuse the 6th with 429. If someone changes the code default in
+    // app.module.ts to anything other than 5, this test fails — which is
+    // the point, because 5 is a security-relevant baseline for brute-force
+    // protection, not an arbitrary number.
     const attempt = () =>
       request(app.getHttpServer()).post('/api/v1/portal/auth/login').send({ identifier: 'no-such-identifier', password: 'whatever' });
 
