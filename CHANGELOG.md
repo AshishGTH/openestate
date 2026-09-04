@@ -5,6 +5,37 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **Reuse-detection could be defeated for one legitimate session under
+  exact-concurrency refresh presentation.** `TokenService.rotateRefreshToken`
+  did `findFirst → update → create` as three separate auto-committed
+  statements, with no interactive transaction and no row lock. Two
+  refresh requests arriving within microseconds of each other (a
+  browser restoring several tabs, or a Playwright-scale rapid burst)
+  could both read the ancestor token as live, both call `rotateRow`,
+  and both INSERT a new successor for the same family. Result: the
+  family holds TWO live tokens for one legitimate session; only one
+  reaches the client's cookie jar and the other is orphaned server-
+  side. The family-revocation reuse-detection signal was defeated for
+  the exact theft-detection scenario the family model exists to
+  catch. Window is narrow (both requests must land in the ~ms between
+  the winner's UPDATE and INSERT commits) but the trade-off is real
+  and belongs in this callout rather than in the general Fixed list.
+  Also produced the more visible symptom of losers 401ing when they
+  landed in the OTHER window (loser reads AFTER winner's UPDATE but
+  BEFORE the INSERT — sees revoked-within-grace, finds no live
+  successor, revokes family, returns 401), which is what CI's
+  rapid-reload-session spec surfaced as "parked on /login mid-test".
+  Fixed by wrapping `rotateRefreshToken` in a single interactive
+  `$transaction` with `SELECT ... FOR UPDATE` on the token row via
+  `$queryRaw` — serializes concurrent callers and makes UPDATE+INSERT
+  atomic. Grace path switched from CHAIN (rotate the successor) to
+  REPLAY (return the successor unchanged; the caller mints an access
+  token from the userId but sets no new refresh cookie). Full account
+  in CLAUDE.md's "rotateRefreshToken — FOR UPDATE + REPLAY grace path
+  (E5)" Decisions entry.
+
 ### Removed
 
 - **Docker is gone as an install path.** `deploy/docker-compose.yml`, the
