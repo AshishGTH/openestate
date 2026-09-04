@@ -6,6 +6,43 @@ import { PrismaClient } from '@openestate/db';
 import { SYSTEM_PRISMA } from '../database/database.module';
 import type { JwtPayload } from '@openestate/shared';
 
+/**
+ * Discriminated result of a refresh-token rotation attempt.
+ *
+ * `rotated` — this caller was the SOLE OR WINNING presenter of the
+ * refresh token: it consumed the ancestor row and produced a fresh
+ * successor. Controller MUST set a new refresh cookie with `newRaw`
+ * and rotate the CSRF cookie.
+ *
+ * `replayed` — this caller lost the race (was concurrent with another
+ * presentation of the same token, waited on the FOR UPDATE lock, and
+ * arrived to find the token already consumed within the reuse-grace
+ * window with a live successor). No new refresh cookie is issued —
+ * the client's cookie jar already carries (or will carry, from the
+ * winner's response) the correct successor. Controller MUST NOT touch
+ * cookies; it should only mint and return an access token from
+ * `userId`.
+ *
+ * Under E5 (see CLAUDE.md's E2E refresh-rotation cascade Decisions
+ * entry): using a `null | { newRaw }` shape here would be a footgun —
+ * an optional field that silently means "skip the cookie" is exactly
+ * the kind of split-brain state this bug already burned twice on. The
+ * discriminated union makes exhaustive-check on `kind` mandatory at
+ * every call site; forgetting a branch is a TypeScript error.
+ */
+export type RotateRefreshTokenResult =
+  | { kind: 'rotated'; userId: string; newRaw: string; expiresAt: Date }
+  | { kind: 'replayed'; userId: string };
+
+type LockedTokenRow = {
+  id: string;
+  user_id: string;
+  family: string;
+  is_revoked: boolean;
+  revoked_at: Date | null;
+  expires_at: Date;
+};
+
 @Injectable()
 export class TokenService {
   private readonly refreshSecret: string;
@@ -102,79 +139,112 @@ export class TokenService {
   async rotateRefreshToken(
     rawToken: string,
     expiresInOverride?: string,
-  ): Promise<{
-    userId: string;
-    newRaw: string;
-    expiresAt: Date;
-  } | null> {
+  ): Promise<RotateRefreshTokenResult | null> {
     const hash = this.hashToken(rawToken);
 
-    const existing = await this.prisma.refreshToken.findFirst({
-      where: { tokenHash: hash },
-    });
+    // The whole function runs inside one interactive $transaction with
+    // SELECT ... FOR UPDATE on the token row. Rationale: the pre-fix
+    // code did findFirst → update → create as three separate
+    // auto-committed statements. Two exactly-concurrent callers with
+    // the same cookie could race between the winner's UPDATE (marks
+    // token revoked) and INSERT (creates successor): the loser reads
+    // the row as revoked-within-grace, finds NO live successor
+    // (winner's INSERT hasn't committed yet), falls through to
+    // revokeFamilyById + returns null → 401. Legitimate rapid-nav
+    // burst → parked on /login. See CLAUDE.md's E2E refresh-rotation
+    // cascade Decisions entry for the full account.
+    //
+    // FOR UPDATE serializes concurrent callers on this row; the
+    // transaction's atomicity ensures that when the loser's lock
+    // acquires, the family is in a coherent state (revoked ancestor +
+    // live successor, never revoked-with-no-successor). RefreshToken
+    // is NOT tenant-scoped (no companyId column, uses SYSTEM_PRISMA,
+    // not in TENANT_SCOPED_MODELS) so there's no tenant SET LOCAL to
+    // preserve inside the tx — the concern that a $transaction +
+    // $queryRaw would lose per-query tenant context does not apply
+    // here.
+    return this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<LockedTokenRow[]>`
+        SELECT id, user_id, family, is_revoked, revoked_at, expires_at
+        FROM refresh_tokens
+        WHERE token_hash = ${hash}
+        FOR UPDATE
+      `;
+      if (rows.length === 0) return null;
+      const existing = rows[0];
 
-    if (!existing) return null;
+      if (existing.is_revoked) {
+        const revokedAgoMs = existing.revoked_at
+          ? Date.now() - existing.revoked_at.getTime()
+          : Number.POSITIVE_INFINITY;
 
-    if (existing.isRevoked) {
-      const revokedAgoMs = existing.revokedAt
-        ? Date.now() - existing.revokedAt.getTime()
-        : Number.POSITIVE_INFINITY;
+        if (revokedAgoMs <= this.reuseGraceMs) {
+          // REPLAY path (E5): the winner's rotation already committed
+          // inside its own transaction on this same row's lock. If
+          // there's a live successor in the family, this caller is a
+          // legitimate concurrent presenter of the same-cookie burst —
+          // hand back a `replayed` result carrying only the userId, so
+          // the controller mints an access token but SKIPS the refresh/
+          // CSRF cookie set. The client's cookie jar converges
+          // deterministically on the winner's rotated cookie regardless
+          // of response-arrival order, and every caller in the burst
+          // still returns 200 with a fresh access token.
+          //
+          // Standard OAuth 2.0 rotation-with-reuse-detection pattern:
+          // N concurrent presentations of the same token → 1 rotation +
+          // N-1 replays. No new refresh_token rows created for replays.
+          // No orphaned successors. No cookie ambiguity.
+          const live = await tx.refreshToken.findFirst({
+            where: {
+              family: existing.family,
+              isRevoked: false,
+              expiresAt: { gt: new Date() },
+            },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (live) {
+            return { kind: 'replayed' as const, userId: existing.user_id };
+          }
+        }
 
-      if (revokedAgoMs <= this.reuseGraceMs) {
-        // Most recent live token in the same family, if the chain is intact.
-        const live = await this.prisma.refreshToken.findFirst({
-          where: {
-            family: existing.family,
-            isRevoked: false,
-            expiresAt: { gt: new Date() },
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-        if (live) return this.rotateRow(live, expiresInOverride);
+        // Genuine reuse: past the grace window, or the family is
+        // already dead. Trip full family revocation — this IS the
+        // reuse-detection signal the family model exists to catch.
+        await this.revokeFamilyById(existing.family);
+        return null;
       }
 
-      // Genuine reuse: outside the window, or the family is already dead.
-      await this.revokeFamilyById(existing.family);
-      return null;
-    }
+      if (existing.expires_at < new Date()) {
+        await tx.refreshToken.update({
+          where: { id: existing.id },
+          data: { isRevoked: true, revokedAt: new Date() },
+        });
+        return null;
+      }
 
-    if (existing.expiresAt < new Date()) {
-      await this.prisma.refreshToken.update({
+      // Winner path: rotate. UPDATE (mark revoked) + INSERT (create
+      // successor) both commit atomically as part of this same tx, so
+      // any serialized loser waiting on the FOR UPDATE lock finds a
+      // coherent family state when its lock acquires.
+      const newRaw = randomUUID();
+      const newHash = this.hashToken(newRaw);
+      const newJti = randomUUID();
+      const expiresAt = this.computeExpiry(expiresInOverride ?? this.refreshExpiresIn);
+      await tx.refreshToken.update({
         where: { id: existing.id },
         data: { isRevoked: true, revokedAt: new Date() },
       });
-      return null;
-    }
-
-    return this.rotateRow(existing, expiresInOverride);
-  }
-
-  /** Consumes one live token row and issues its successor in the same family. */
-  private async rotateRow(
-    row: { id: string; userId: string; family: string },
-    expiresInOverride?: string,
-  ): Promise<{ userId: string; newRaw: string; expiresAt: Date }> {
-    await this.prisma.refreshToken.update({
-      where: { id: row.id },
-      data: { isRevoked: true, revokedAt: new Date() },
+      await tx.refreshToken.create({
+        data: {
+          id: newJti,
+          userId: existing.user_id,
+          tokenHash: newHash,
+          family: existing.family,
+          expiresAt,
+        },
+      });
+      return { kind: 'rotated' as const, userId: existing.user_id, newRaw, expiresAt };
     });
-
-    const newRaw = randomUUID();
-    const newHash = this.hashToken(newRaw);
-    const newJti = randomUUID();
-    const expiresAt = this.computeExpiry(expiresInOverride ?? this.refreshExpiresIn);
-
-    await this.prisma.refreshToken.create({
-      data: {
-        id: newJti,
-        userId: row.userId,
-        tokenHash: newHash,
-        family: row.family,
-        expiresAt,
-      },
-    });
-
-    return { userId: row.userId, newRaw, expiresAt };
   }
 
   private async revokeFamilyById(family: string): Promise<void> {

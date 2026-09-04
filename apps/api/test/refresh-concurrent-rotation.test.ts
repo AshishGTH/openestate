@@ -41,17 +41,24 @@
  *   (1) Every response returns 200. No 401.
  *   (2) The family contains exactly ONE live refresh_token row after
  *       the burst (the rotated successor).
- *   (3a) All N responses in a burst carry the SAME newly-issued raw
- *        refresh token — proves the REPLAY semantics of the grace
- *        path (1 rotation + N-1 replays, not N chained rotations).
- *   (3b) Exactly ONE new refresh_token row was created in the family
- *        during the burst — proves rotation happened ONCE, not N
- *        times, and no orphaned successors were left in the DB.
+ *   (3) Exactly ONE response in the burst carries a Set-Cookie for the
+ *       refresh cookie; the other N-1 carry NONE. Proves the E5 REPLAY
+ *       design — losers stay silent on cookies, winner's Set-Cookie
+ *       reaches the browser, client's jar converges deterministically
+ *       regardless of response-arrival order.
+ *   (4) Exactly ONE new refresh_token row created in the family per
+ *       burst — proves the rotation happened ONCE (not N times), and
+ *       no orphaned successors were left in the DB.
+ *   (5) K-cycle forward progress: the previous cycle's cookie's row
+ *       is REVOKED after this burst, and this burst produced a NEW
+ *       live row. Proves each cycle advances rather than sticking on
+ *       the same token or replaying a stuck successor.
  *
- * K cycles per endpoint: each burst extracts the shared new cookie
- * value from the responses and uses it as the cookie for the next
- * burst. Proves both replay-correctness WITHIN a burst AND
- * forward-progress ACROSS bursts (the client's chain converges).
+ * K cycles per endpoint: each burst extracts the winner's Set-Cookie
+ * value from the sole response carrying one, and uses it as the cookie
+ * for the next burst. Proves both replay-correctness WITHIN a burst
+ * AND forward-progress ACROSS bursts (the client's chain converges
+ * and advances).
  *
  * Both endpoints exercised — staff /auth/refresh and portal
  * /portal/auth/refresh — because TokenService is SHARED, not
@@ -74,6 +81,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createRequire } from 'node:module';
+import { createHash } from 'node:crypto';
 import request from 'supertest';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
@@ -82,6 +90,11 @@ import type { INestApplication } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
 import * as argon2 from '@node-rs/argon2';
 import { makeClients, seedCompany, makePortalRole, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
+
+// Matches TokenService's private hashToken — SHA-256 hex. Used to look up
+// refresh_token rows by their raw value in invariant (5)'s forward-progress
+// check, since only the hash is stored server-side.
+const hashToken = (raw: string): string => createHash('sha256').update(raw).digest('hex');
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -230,18 +243,18 @@ describeIf('TokenService.rotateRefreshToken — N concurrent refreshes on one co
     userId: string,
   ): Promise<void> {
     let currentCookie = initialCookie;
+    const currentCookieHash = () => hashToken(currentCookie);
 
     for (let cycle = 0; cycle < K; cycle++) {
-      // Baseline for invariant (3b): total row count in this user's
-      // refresh_tokens BEFORE the burst. After a correct burst, exactly
-      // ONE new row exists (the successor) and the old one is now
-      // revoked, so total delta === 1.
+      // Baseline for invariants (4) and (5): total row count for this
+      // user's refresh_tokens BEFORE the burst.
       const preBurstTotal = await systemPrisma.refreshToken.count({ where: { userId } });
 
       // The race trigger: N concurrent POSTs with the same cookie via
       // Promise.all. Under Node's http.Agent defaults these fire
       // near-simultaneously — pre-fix, they reliably interleave inside
-      // the winner's UPDATE→INSERT window.
+      // the winner's UPDATE→INSERT window (measurement pre-fix on
+      // cycle=0: 1/5 staff, 2/5 portal, from run 33915421187).
       const responses = await Promise.all(
         Array.from({ length: N }, () =>
           request(app.getHttpServer()).post(endpoint).set('Cookie', `${cookieName}=${currentCookie}`),
@@ -249,8 +262,8 @@ describeIf('TokenService.rotateRefreshToken — N concurrent refreshes on one co
       );
 
       // Invariant (1): every response 200. No 401. Report every failure
-      // in the burst, not just the first, so the CI log tells us what
-      // fraction of concurrent callers lost the race.
+      // in the burst so the CI log names exactly which requests lost
+      // and what fraction.
       const statuses = responses.map((r) => r.status);
       const non200 = statuses.map((s, i) => ({ s, i })).filter(({ s }) => s !== 200);
       expect(
@@ -260,41 +273,44 @@ describeIf('TokenService.rotateRefreshToken — N concurrent refreshes on one co
           .join(', ')}] — full statuses: [${statuses.join(', ')}]`,
       ).toEqual([]);
 
-      // Invariant (3a): all N responses carry the SAME new refresh
-      // cookie. Under REPLAY semantics: 1 rotation + N-1 replays →
-      // every caller sees the SAME successor token. If we see distinct
-      // cookies, the grace path is CHAINING (each replay rotates the
-      // successor again) — the fix's grace-path change failed.
-      const newCookies = responses.map((r) => extractCookie(r, cookieName));
-      const uniqueCookies = new Set(newCookies);
+      // Invariant (3): exactly ONE response carries a Set-Cookie for
+      // the refresh cookie name; the other N-1 stay silent. Proves E5's
+      // winner/loser split — the winner rotates and sets a new cookie,
+      // losers mint an access token from userId but leave cookies alone.
+      // If more than one response carries Set-Cookie, the fix's
+      // discriminated-result design failed (either TokenService
+      // returned kind: 'rotated' for a loser, or the controller ignored
+      // kind and set the cookie unconditionally). If zero carry it,
+      // the winner also skipped — the fix's rotation path failed.
+      const withRefreshCookie = responses.map((r, i) => {
+        const setCookie = r.headers['set-cookie'];
+        const cookies = Array.isArray(setCookie) ? setCookie : setCookie ? [setCookie] : [];
+        return { i, hasIt: cookies.some((c) => c.startsWith(`${cookieName}=`)) };
+      });
+      const winnerIdxs = withRefreshCookie.filter((r) => r.hasIt).map((r) => r.i);
       expect(
-        uniqueCookies.size,
-        `cycle=${cycle} endpoint=${endpoint}: expected all ${N} responses to carry the SAME rotated cookie (REPLAY semantics), but got ${uniqueCookies.size} distinct token values — first 8 chars each: ${[
-          ...uniqueCookies,
-        ]
-          .map((c) => c.slice(0, 8))
-          .join(', ')}`,
+        winnerIdxs.length,
+        `cycle=${cycle} endpoint=${endpoint}: expected exactly 1 response to carry Set-Cookie ${cookieName}=..., got ${winnerIdxs.length} at indexes [${winnerIdxs.join(', ')}]`,
       ).toBe(1);
+      const winnerIdx = winnerIdxs[0];
 
-      // Invariant (2) and (3b) combined: exactly ONE new row was
-      // inserted, so the total for this user grew by exactly 1. Under
-      // the pre-fix race with no INSERT-time coordination, each of N
-      // concurrent callers would INSERT its own new row (total delta =
-      // N). Under the pure grace-only failure mode (loser 401s), delta
-      // is 1 but (1) already failed. Under the fix, exactly one
-      // rotation → exactly one new row.
+      // Invariant (4): exactly ONE new refresh_token row was created
+      // during the burst — proves the ROTATION happened once, not N
+      // times. Under pre-fix code with no INSERT-time coordination,
+      // each of N concurrent callers INSERTs its own new row (delta = N).
+      // Under FOR UPDATE serialization + CHAIN grace (E3/E4, rejected),
+      // delta = N sequential rotations. Under E5, delta = 1.
       const postBurstTotal = await systemPrisma.refreshToken.count({ where: { userId } });
       expect(
         postBurstTotal - preBurstTotal,
         `cycle=${cycle} endpoint=${endpoint}: expected exactly 1 new refresh_token row after the burst (baseline=${preBurstTotal}, post=${postBurstTotal}, delta=${postBurstTotal - preBurstTotal})`,
       ).toBe(1);
 
-      // Invariant (2): exactly ONE live row across the user's family
-      // now — the just-inserted successor. The old cookie's row is
-      // revoked. If we see > 1 live, an orphaned successor from the
-      // pre-fix "both readers see live" case is present, defeating
-      // reuse detection for the theft scenario the family model exists
-      // to catch.
+      // Invariant (2): exactly ONE live row for this user now — the
+      // just-inserted successor. Old cookie's row is revoked. > 1 live
+      // means an orphaned successor from the pre-fix "both readers see
+      // live" case is present, defeating reuse-detection for the theft
+      // scenario the family model exists to catch.
       const postBurstLive = await systemPrisma.refreshToken.count({
         where: { userId, isRevoked: false },
       });
@@ -303,10 +319,43 @@ describeIf('TokenService.rotateRefreshToken — N concurrent refreshes on one co
         `cycle=${cycle} endpoint=${endpoint}: expected exactly 1 live refresh_token in the user's family after the burst, found ${postBurstLive}`,
       ).toBe(1);
 
-      // Carry the winner's cookie into the next burst. Because all N
-      // callers should have returned the same cookie (invariant 3a),
-      // any element of newCookies works.
-      currentCookie = newCookies[0];
+      // Invariant (5) part A: the CURRENT cookie's row (the one all N
+      // callers presented) is now REVOKED. Proves the winner actually
+      // consumed the ancestor rather than replaying without rotating.
+      const consumedRow = await systemPrisma.refreshToken.findFirst({
+        where: { tokenHash: currentCookieHash() },
+      });
+      expect(
+        consumedRow,
+        `cycle=${cycle} endpoint=${endpoint}: expected the presented cookie's row to still exist in DB after the burst (revoked but not deleted); it was missing`,
+      ).not.toBeNull();
+      expect(
+        consumedRow?.isRevoked,
+        `cycle=${cycle} endpoint=${endpoint}: expected the presented cookie's row to be revoked after the burst (winner consumed it); it is still live`,
+      ).toBe(true);
+
+      // Winner's Set-Cookie value = the new cookie for next burst.
+      const nextCookie = extractCookie(responses[winnerIdx], cookieName);
+
+      // Invariant (5) part B: this burst produced a NEW live row —
+      // the successor from the winner's Set-Cookie. Look it up by hash
+      // to prove the wire value the client received matches the row
+      // the DB has.
+      const newLiveRow = await systemPrisma.refreshToken.findFirst({
+        where: { tokenHash: hashToken(nextCookie) },
+      });
+      expect(
+        newLiveRow,
+        `cycle=${cycle} endpoint=${endpoint}: expected the winner's Set-Cookie value to correspond to a real refresh_token row in DB; no matching row found`,
+      ).not.toBeNull();
+      expect(
+        newLiveRow?.isRevoked,
+        `cycle=${cycle} endpoint=${endpoint}: expected the winner's new cookie's row to be LIVE (the just-rotated successor); it is revoked`,
+      ).toBe(false);
+
+      // Carry into next burst — this proves forward progress across K
+      // cycles (each cycle consumes the previous cycle's successor).
+      currentCookie = nextCookie;
     }
   }
 

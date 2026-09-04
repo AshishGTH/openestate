@@ -90,6 +90,13 @@ describeIf('refresh-token rotation: reuse grace window', () => {
     // does when each refresh response is aborted before its Set-Cookie
     // can be applied. Pre-fix, iteration 2 revoked the family and every
     // one after it returned null.
+    //
+    // Under E5 (the FOR-UPDATE + REPLAY fix — see CLAUDE.md's E2E
+    // refresh-rotation cascade Decisions entry): iteration 1 rotates
+    // (`kind: 'rotated'`), iterations 2..N are REPLAYS (`kind: 'replayed'`)
+    // — they return the userId but no new raw token, and no new rows are
+    // created. Both kinds must yield a live session, which is what
+    // `not.toBeNull()` + userId equality asserts.
     for (let i = 1; i <= 6; i++) {
       const result = await svc.rotateRefreshToken(raw);
       expect(result, `re-presentation #${i} should still yield a session`).not.toBeNull();
@@ -110,7 +117,10 @@ describeIf('refresh-token rotation: reuse grace window', () => {
     let latest = raw;
     for (let i = 0; i < 3; i++) {
       const r = await svc.rotateRefreshToken(raw); // always the stale one
-      latest = r!.newRaw;
+      // Under E5 only the first iteration rotates; iterations 2 and 3
+      // are REPLAYS and carry no new raw. The client's cookie converges
+      // on the winner's rotated token — stored here as `latest`.
+      if (r!.kind === 'rotated') latest = r.newRaw;
     }
 
     // Whichever response the client finally applied is usable.
@@ -125,14 +135,14 @@ describeIf('refresh-token rotation: reuse grace window', () => {
     const { raw } = await svc.createRefreshToken(userId);
 
     const first = await svc.rotateRefreshToken(raw);
-    expect(first).not.toBeNull();
+    if (first?.kind !== 'rotated') throw new Error(`expected rotated result on first call; got ${JSON.stringify(first)}`);
 
     const replay = await svc.rotateRefreshToken(raw);
     expect(replay).toBeNull();
 
     // ...and the successor is dead too: that is the point of family
     // revocation — a thief must not be able to keep using the chain.
-    const second = await svc.rotateRefreshToken(first!.newRaw);
+    const second = await svc.rotateRefreshToken(first.newRaw);
     expect(second).toBeNull();
   });
 
@@ -140,10 +150,10 @@ describeIf('refresh-token rotation: reuse grace window', () => {
     const svc = makeService(30);
     const { raw } = await svc.createRefreshToken(userId);
     const first = await svc.rotateRefreshToken(raw);
-    expect(first).not.toBeNull();
+    if (first?.kind !== 'rotated') throw new Error(`expected rotated result on first call; got ${JSON.stringify(first)}`);
 
     // e.g. an explicit logout, or a genuine reuse detected elsewhere.
-    await svc.revokeFamily(first!.newRaw);
+    await svc.revokeFamily(first.newRaw);
 
     // The stale token is recently-revoked, so it is inside the grace
     // window — but its family has no live token, so there is nothing

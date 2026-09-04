@@ -166,7 +166,13 @@ export class PortalAuthService {
     });
   }
 
-  async refreshTokens(rawRefreshToken: string) {
+  async refreshTokens(
+    rawRefreshToken: string,
+  ): Promise<
+    | { kind: 'rotated'; accessToken: string; refreshRaw: string; expiresAt: Date }
+    | { kind: 'replayed'; accessToken: string }
+    | null
+  > {
     const result = await this.tokenService.rotateRefreshToken(rawRefreshToken, this.portalRefreshExpiresIn);
     if (!result) return null;
 
@@ -188,7 +194,12 @@ export class PortalAuthService {
       brokerId: user.brokerId ?? undefined,
     });
 
-    return { accessToken, refreshRaw: result.newRaw, expiresAt: result.expiresAt };
+    // Mirrors AuthService.refreshTokens's discriminated return —
+    // see TokenService's RotateRefreshTokenResult doc comment.
+    if (result.kind === 'replayed') {
+      return { kind: 'replayed', accessToken };
+    }
+    return { kind: 'rotated', accessToken, refreshRaw: result.newRaw, expiresAt: result.expiresAt };
   }
 
   async logout(rawRefreshToken: string) {
