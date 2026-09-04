@@ -109,7 +109,23 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
           // fix hit 429s on /auth/refresh, blocking the client's own
           // 401-retry from ever getting a fresh token.
           { ttl: 60_000, limit: Number(process.env.DEFAULT_THROTTLE_LIMIT ?? 100) },
-          { name: 'portal-auth', ttl: 300_000, limit: 5 },
+          // portal-auth: 5 req / 5 min per IP is the production baseline —
+          // protects portal login and refresh endpoints against
+          // brute-force attempts on any single IP. Overridable via
+          // PORTAL_AUTH_THROTTLE_LIMIT specifically for the apps/e2e
+          // harness, where the whole suite fires exactly 5 portal
+          // logins across 5 specs (media-gallery×2, rapid-reload-
+          // session×2, ticket-reply×1) — zero headroom, so any
+          // Playwright retry pushes the 6th login into 429 and cascades
+          // into unrelated spec failures. Production installs never set
+          // this and continue at 5. Trace evidence + count in
+          // CLAUDE.md's E2E refresh-rotation cascade Decisions entry.
+          //
+          // Prod default (5) MUST stay hardcoded here — do NOT add it to
+          // .env.example or deploy/native's setup. The env var exists
+          // only as a test-harness override; setting it in prod-facing
+          // config would weaken brute-force protection silently.
+          { name: 'portal-auth', ttl: 300_000, limit: Number(process.env.PORTAL_AUTH_THROTTLE_LIMIT ?? 5) },
           { name: 'portal-read', ttl: 60_000, limit: 60 },
           // Password-change/reset-confirm across staff and portal — see
           // PasswordChangeThrottlerGuard's doc comment for why one bucket
