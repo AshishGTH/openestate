@@ -26,7 +26,10 @@ commit), on the ONLY attempt where any spec required a retry:
 - **Assertion that failed**: `expect(locator).not.toHaveValue(expected)`
   at `tests/cheque-bounce.spec.ts:70:72`
 - **Recovery**: Playwright's own `retries: 1` re-ran the test and it
-  passed (marked "1 flaky" in the run summary)
+  passed (marked "1 flaky" in the run summary). Also observed on
+  attempt 1 of run 33916938865 (the same commit that eventually went
+  3-of-3 green) — same assertion, same retry-recovery, still no root
+  cause identified.
 - **Not touched by PR #31**: this spec has no auth mutations wrapped in
   the fixes above; the failure mode doesn't match the throttle-exhaustion
   or refetch-race classes either
