@@ -492,27 +492,6 @@ this note once it has a real, tested effect.
   Phase 6 commit 2 standing rule) to catch any that turn out to be
   portal-reachable after all.
 
-- **`makeApplicant()`'s phone counter (`appSeq`,
-  `apps/api/test/helpers/postsales-harness.ts`) is per-process, not
-  globally unique, and `PortalAuthService.login()`'s identifier lookup is
-  deliberately company-unscoped.** Two e2e test files that both call
-  `makeApplicant()` early can generate the identical phone number for
-  their first applicant; under `pnpm test`'s default forked parallelism,
-  a login in one file can occasionally resolve to another file's user row
-  and then 500 when that row is deleted by the other file's `afterAll`
-  cleanup mid-test. Confirmed as the cause of a flake in
-  `e2e-portal-throttle.test.ts` (Phase 6 commit 4) that only reproduced
-  running the full e2e trio together, never in isolation — see CLAUDE.md
-  Phase 6 commit 4 decisions. Worked around locally in that one file
-  (high-entropy phone numbers instead of `makeApplicant()`); the harness
-  helper itself and `PortalAuthService.login`'s cross-company lookup are
-  unchanged. Unblocked by either seeding `appSeq` from
-  `process.hrtime.bigint()`/a random offset instead of `0`, or scoping
-  test login lookups by a company-specific identifier prefix — whichever
-  is chosen should also close the identical gap
-  `e2e-portal.test.ts`'s own comment already flagged for id-based
-  assertions.
-
 ## Plugins (Phase 7)
 
 - **Plugin execution has no worker-thread/process isolation — a genuine

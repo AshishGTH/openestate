@@ -41,7 +41,7 @@ import type { INestApplication } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
 import * as argon2 from '@node-rs/argon2';
 import { ALL_PERMISSIONS, ROLE_PERMISSIONS, SYSTEM_ROLES } from '@openestate/shared';
-import { makeClients, seedCompany, makePortalRole, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
+import { makeClients, seedCompany, makeApplicant, makePortalRole, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -166,27 +166,20 @@ describeIf('Phase 6 commit 4: portal-read throttle bucket over real HTTP', () =>
       data: customerPermIds.map((permissionId) => ({ roleId: customerRoleId, permissionId })),
     });
 
-    // NOT makeApplicant() — its phone counter (appSeq) resets to 0 per
-    // forked test-file process, so two e2e files run concurrently by the
-    // default `pnpm test` invocation can generate the IDENTICAL phone
-    // number for their first applicant. PortalAuthService.login()'s
-    // identifier lookup is deliberately company-unscoped (phone/email
-    // must be globally unique across the whole install, CLAUDE.md Phase 6
-    // commit 1) — a collision there can resolve to a DIFFERENT test
-    // file's user entirely, which can then vanish mid-test when that
-    // file's own afterAll cleanup runs (observed as a flaky "no record
-    // found" 500, only when run alongside other e2e files, never in
-    // isolation). High-entropy phone numbers here sidestep the collision
-    // without touching the shared harness helper other tests rely on.
-    const uniquePhone = () => `9${Date.now()}${Math.floor(Math.random() * 10_000)}`.slice(0, 15);
-    phoneX = uniquePhone();
-    phoneY = uniquePhone();
-    const applicantXId = (await systemPrisma.applicant.create({
-      data: { companyId: fx.companyId, name: 'Throttle Test X', primaryPhone: phoneX, primaryPhoneNormalized: phoneX },
-    })).id as string;
-    const applicantYId = (await systemPrisma.applicant.create({
-      data: { companyId: fx.companyId, name: 'Throttle Test Y', primaryPhone: phoneY, primaryPhoneNormalized: phoneY },
-    })).id as string;
+    // makeApplicant() is safe to use directly here now — postsales-harness.ts's
+    // phone counter is seeded from a random per-process range, not a fixed
+    // 0, so two e2e files running concurrently under vitest's forked pool
+    // no longer risk generating the same phone for their first applicant.
+    // (This file used to hand-roll its own high-entropy phone numbers and
+    // bypass makeApplicant() entirely to sidestep that collision — see
+    // CLAUDE.md's Phase 6 commit 4 decisions for the flake that caused,
+    // and docs/todo.md's now-closed "makeApplicant's phone counter" entry
+    // for the fix.) makeApplicant() only returns the new id, so the actual
+    // phone value needed for login is read back with one follow-up query.
+    const applicantXId = await makeApplicant(systemPrisma, fx.companyId);
+    const applicantYId = await makeApplicant(systemPrisma, fx.companyId);
+    ({ primaryPhone: phoneX } = await systemPrisma.applicant.findUniqueOrThrow({ where: { id: applicantXId } }));
+    ({ primaryPhone: phoneY } = await systemPrisma.applicant.findUniqueOrThrow({ where: { id: applicantYId } }));
 
     for (const [applId, phone, name] of [
       [applicantXId, phoneX, 'Throttle Test X'],
