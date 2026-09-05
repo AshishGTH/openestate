@@ -108,14 +108,7 @@ const TYPE_FIELDS: Record<string, FieldDef[]> = {
     { key: 'amountPaise', label: 'Amount (₹) — if Fixed', type: 'number', moneyField: true },
     { key: 'percentage', label: 'Percentage — if Percentage', type: 'number' },
   ],
-  // Bank.ifscPrefix and AreaLocation's columns remain the deferred half of
-  // docs/todo.md's "AreaLocation/Bank/ChargeType have real optional
-  // columns the API never exposes" — ChargeType's own gstRateId/hsnSac are
-  // now exposed (below) because a wrong or missing GST rate on a charge
-  // silently understates an invoice; Bank/AreaLocation's gaps have no
-  // equivalent money-correctness stakes, so they stay deferred. No banks
-  // entry here deliberately: name/isActive/sortOrder are the only fields
-  // the live API accepts for Bank today.
+  'banks': [{ key: 'ifscPrefix', label: 'IFSC Prefix (e.g. SBIN)', type: 'text' }],
   'payment-plan-templates': [{ key: 'description', label: 'Description', type: 'text' }],
   // gstRateId/hsnSac are real Prisma columns the generic schema never
   // exposed. See booking.service.ts's cost-line loop: a cost line with no
