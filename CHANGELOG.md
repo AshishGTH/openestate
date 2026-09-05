@@ -33,8 +33,19 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   E5-only design traded that off against the stuck-client case, and
   that trade-off was wrong in the direction of denying real users
   access after ordinary browser behaviour (a mid-navigation abort that
-  prevented the browser committing the winner's Set-Cookie). Full
-  family revocation for genuine post-window reuse is unchanged. Tune
+  prevented the browser committing the winner's Set-Cookie).
+  **Scope of the recovery, stated explicitly**: this fix recovers a
+  stuck client that re-presents within the heal band — in the real
+  client that means a full-page reload (F5 / new tab / browser-restore
+  tabs) within `REFRESH_REUSE_GRACE_SECONDS` of the original abort.
+  A stuck client that does NOT re-present in that window (idle tab
+  past 60s, or a session whose next refresh is driven by the
+  15-minute access-token expiry rather than a mount) is still logged
+  out at `REFRESH_REUSE_GRACE_SECONDS`, unchanged from E5-only — not
+  a regression, but not fixed either. The fix's scope is precisely
+  "recover the rapid-reload case E5-only silently killed", and
+  everything outside that scope stays exactly as it was.
+  Full family revocation for genuine post-window reuse is unchanged. Tune
   or disable via `REFRESH_REPLAY_WINDOW_MS` and
   `REFRESH_REUSE_GRACE_SECONDS` — setting the latter to 0 restores the
   strict pre-fix behaviour and makes the replay window irrelevant.

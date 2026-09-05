@@ -6766,11 +6766,9 @@ broken behaviour. Fix follows.
 - **Access-token TTL is 15m** (`JWT_ACCESS_EXPIRES_IN=15m`,
   auth.module.ts:19) for both staff and portal (portal reuses the
   same `TokenService.signAccessToken` / same `JwtService`). Replay
-  window of 5000ms is 180× smaller, so a stuck client's next
-  scheduled refresh (~15 minutes later on token expiry, or on
-  next mount) lands well outside the replay band and in the
-  healing band or past-grace territory, depending on exact
-  timing.
+  window of 5000ms is 180× smaller, so a concurrent-burst loser's
+  fetch (Promise.all-scale spread) lands firmly inside the replay
+  band.
 - **Concurrent-burst spread from CI-measured timings**: run
   33916938865 attempt 4 integration-tests log — staff burst 1446ms
   / 20 = 72ms per burst, portal 1261ms / 20 = 63ms per burst,
@@ -6779,6 +6777,80 @@ broken behaviour. Fix follows.
   test's own doc comment. 5000ms is three orders of magnitude
   above the fetch-layer spread and ~65× above per-burst wall
   time.
+
+**Correction to an earlier revision of this bullet**: the
+15m-access-TTL bullet used to say "a stuck client's next scheduled
+refresh (~15 minutes later on token expiry, or on next mount)
+lands well outside the replay band and in the healing band or
+past-grace territory, depending on exact timing." That was wrong
+and misleading in the same direction: 15 minutes is well past
+`reuseGraceMs=60s`, so a stuck client whose next refresh is
+driven by access-token expiry lands in the past-grace-revoke
+branch, not the heal band. Only a mount-driven refresh (page
+reload / new tab / browser-restore tabs) within `reuseGraceMs`
+of the original abort can reach the heal band. See the "When
+the heal path actually fires in the real client" bullet below
+for the full audit of client-side refresh triggers this claim
+should have been grounded in.
+
+**When the heal path actually fires in the real client**
+(audit of `apps/web/src/lib/api.ts`, `apps/web/src/lib/auth.tsx`,
+and their apps/portal mirrors, per the mirrored-auth standing
+rule). There are exactly three call sites that fire
+`/auth/refresh` in each app:
+
+  1. `AuthProvider`'s mount effect (page load / new tab / tab
+     restore). Fires on every mount whose cooldown-cache lookup
+     misses (i.e. no successful refresh within the last 5s).
+  2. `api()`'s 401-retry, gated `if (res.status === 401 &&
+     accessToken)` — fires when a request we made carrying a
+     Bearer token got rejected, which for a healthy session
+     happens ~15 minutes in when the access token expires.
+  3. `api()`'s lazy proactive refresh, gated `if (!accessToken
+     && readAuthCache())` — fires once per cooldown-hit page
+     load right before the first API call, single-flighted with
+     any concurrent refreshSession(). This is the cooldown
+     cascade fix's own call site.
+
+  Crossed against the heal band (`(5s, 60s]` after the original
+  aborted rotation):
+
+  - (1) mount-driven: **hits the heal band** if and only if the
+    reload happens within 60s of the original abort. This is
+    the rapid-reload case (F5 / Cmd-R / same-tab navigate to
+    the same or a same-origin URL / new-tab open of a same-
+    origin URL / browser-startup tab restore). This is exactly
+    the case that produced the original bug.
+  - (2) 401-retry-driven: **does NOT hit the heal band**. Fires
+    at ~15 minutes (access-token expiry), which is well past
+    `reuseGraceMs=60s`. Lands in the past-grace-revoke branch,
+    same as pre-fix. If the client's cookie is still stuck on
+    T0 15 minutes after the abort, the family is revoked and
+    the user is logged out — exactly the pre-fix behaviour for
+    that timing.
+  - (3) lazy-proactive: **does NOT hit the heal band** on its
+    own. It only fires from a mount that already succeeded via
+    the cache — i.e. mount (1) never fired a refresh — so the
+    cookie in the jar is whatever the successful cooldown
+    session used, which is by definition NOT stuck.
+  - SPA navigation within an already-loaded app: fires no
+    refresh at all (no mount, no 401 while the access token is
+    valid). Cannot reach the heal band by construction.
+
+**Residual, stated explicitly**: this fix recovers a stuck
+client that re-presents within the heal band. In practice, that
+means the FULL-PAGE-RELOAD case (or its equivalents above). A
+stuck client that does NOT re-present within `reuseGraceMs` —
+e.g. an idle tab left open past 60s, or any session whose next
+refresh is driven by 15m access-token expiry — is still logged
+out at `reuseGraceMs`, unchanged from E5-only. That is not a
+regression from E5-only (nothing got worse), and it is not
+generally worse than pre-E5 either (pre-E5 the same idle-past-
+grace stuck cookie was revoked on presentation). The
+split-window fix's scope is precisely "recover the rapid-reload
+case E5-only silently killed", and that scope should be
+reflected in every future reference to this fix rather than
+generalising it to "stuck-client recovery" without qualification.
 
 **Nested FOR UPDATE on the successor row inside the heal path** —
 two concurrent stuck-client presentations must serialize on the
@@ -7108,3 +7180,66 @@ defence-in-depth. Not doing it pre-emptively because a config
 change to CI whose value only surfaces on the next red E2E
 run should be verified on that red run, not shipped ahead of
 one and assumed to work.
+
+### E5 split-window — concurrent-heal decision: option A, do nothing
+
+Recorded after the reviewer's read of the observed-behaviour probe
+and options list in the entry above.
+
+**Decision: option A.** The heal path stays as it is today. N
+concurrent stuck-client presentations of T0 in the heal band
+produce N distinct `kind:'rotated'` responses, N distinct new raws
+on the wire, and a linear chain of N successors in the family (all
+revoked except the last). The nested FOR UPDATE on the successor
+row keeps this CHAIN forward-progressing rather than forking — no
+orphaned successors, no reuse-detection-defeat. Family growth is
+bounded per band-entry by the number of concurrent stuck tabs.
+Client-side, all N callers return 200 with a valid access token;
+whichever Set-Cookie the browser's cookie jar committed last wins,
+and the client converges on that live successor.
+
+**Why not B3** (the option my own read named as the cleanest
+alternative): B3's advisory-lock-plus-freshness-check would trade
+one Postgres round trip per heal for a strictly bounded family (one
+new successor per band-entry regardless of concurrent-tab count).
+The gain is real but its impact is bounded by how often the heal
+path fires with concurrency > 1 in the first place, and the
+audited answer — see the "When the heal path actually fires in
+the real client" bullet in the previous entry — is: the heal path
+fires only on a mount-driven refresh within 60s of an abort, i.e.
+the rapid-reload case. Multi-tab concurrent-stuck-reload within
+that window is a corner of that corner. B3 guards a path that in
+production may rarely execute; A is already the documented shape
+(CHANGELOG's security callout names it as pre-E5 CHAIN semantics
+scoped to the healing band); rejected for now.
+
+**Why not B1/B2** (mutate T0.revokedAt / new last_heal_at column):
+B1 breaks the "T0.revokedAt set once by the winner and never
+touched" invariant the lock-ordering / deadlock argument in the
+previous entry depends on — that invariant would need re-derivation
+under mutable state. B2 requires a migration and adds a new fact
+for every future auth-adjacent question to account for. Both are
+disproportionate for a shape that isn't a live bug.
+
+**Why not C** (client-side cross-tab single-flight via
+BroadcastChannel): out of the server-side scope this decision
+addresses. Also doesn't change what the server does when the burst
+does hit it — just makes the burst less frequent. Worth considering
+independently if the trigger-audit's "rapid-reload is the only real
+heal-band case" conclusion ever proves incomplete.
+
+**Condition to revisit**: either of these observations from
+operational data or a real incident.
+- The heal-band path fires often enough in production that CHAIN
+  accumulation shows up in `refresh_tokens` size for a single
+  family, or in throughput of `rotateRefreshToken` under load.
+- A concurrent-stuck-multi-tab-reload scenario becomes a common
+  real-user pattern (e.g. a feature that opens N same-origin tabs
+  in one action after an abortable navigation), not just a
+  theoretical burst shape.
+
+Absent either, the observed-behaviour probe stays as a permanent
+regression guard for CURRENT behaviour: a future PR that alters
+the heal path so the shape changes fails a test with a clear name,
+which is when this decision gets re-opened rather than silently
+drifted past.
