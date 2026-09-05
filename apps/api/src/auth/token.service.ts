@@ -48,6 +48,7 @@ export class TokenService {
   private readonly refreshSecret: string;
   private readonly refreshExpiresIn: string;
   private readonly reuseGraceMs: number;
+  private readonly replayWindowMs: number;
 
   constructor(
     private readonly jwt: JwtService,
@@ -68,6 +69,26 @@ export class TokenService {
     // Tunable per-install; 0 restores the strict pre-fix behaviour.
     this.reuseGraceMs =
       Number(this.config.get('REFRESH_REUSE_GRACE_SECONDS') ?? 60) * 1000;
+    // The grace window is now SPLIT. Presentations of a just-revoked
+    // token in [0, replayWindowMs] are treated as concurrent-burst
+    // losers (REPLAY: no cookie, access token only — E5 semantics from
+    // the prior fix). Presentations in
+    // (replayWindowMs, reuseGraceMs] are treated as a legitimate
+    // stuck client whose winner's Set-Cookie never landed (the E5 gap
+    // — see refresh-e5-gap-stuck-client.test.ts): rotate the family's
+    // live successor and hand the caller a fresh cookie. This is the
+    // pre-E5 CHAIN behaviour, applied only in the healing band —
+    // acknowledged in CHANGELOG's security callout, not a comment.
+    // Default 5000ms: 3+ orders of magnitude above the observed
+    // concurrent-burst fetch spread (Promise.all against a local
+    // Nest server, sub-ms per the concurrent-rotation regression
+    // test), and 2 orders of magnitude below the access-token TTL
+    // (JWT_ACCESS_EXPIRES_IN=15m) so a stuck client's next scheduled
+    // refresh lands well outside the replay band. Tunable per-install
+    // via REFRESH_REPLAY_WINDOW_MS.
+    this.replayWindowMs = Number(
+      this.config.get('REFRESH_REPLAY_WINDOW_MS') ?? 5000,
+    );
   }
 
   signAccessToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
@@ -122,19 +143,47 @@ export class TokenService {
    * Benign re-presentation is recognised structurally, not assumed: the
    * presented token must be revoked RECENTLY (within reuseGraceMs) AND its
    * family must still have a live token — i.e. the chain moved on normally
-   * and was never revoked wholesale. We then rotate that live token and hand
-   * the caller the result, so the client converges on a valid cookie. Every
-   * concurrent load in a burst therefore succeeds, and out-of-order
-   * responses self-heal: whichever cookie the client ends up with is either
-   * live or recently-consumed, and both paths lead back here.
+   * and was never revoked wholesale. The grace window is SPLIT into two
+   * sub-windows so each half serves its own real case, not one policy
+   * approximating both:
    *
-   * Security: a token replayed after the window, or after the family was
-   * revoked, still triggers full family revocation exactly as before. The
-   * accepted trade-off (standard for rotation-with-grace) is that a token
-   * stolen AND replayed inside the window yields a session — a few seconds
-   * of exposure, against the alternative of logging real users out for
-   * ordinary browser behaviour. Tune or disable with
-   * REFRESH_REUSE_GRACE_SECONDS (0 restores the strict pre-fix behaviour).
+   *   [0, replayWindowMs]                       -> REPLAY (E5)
+   *     A concurrent-burst loser. The winner rotated a few ms ago; the
+   *     browser's cookie jar will receive the winner's Set-Cookie via a
+   *     sibling response in this same navigation. Return kind: 'replayed',
+   *     no cookie, access token only. Deterministic convergence; no
+   *     chain accumulation; no orphaned successors.
+   *
+   *   (replayWindowMs, reuseGraceMs]            -> HEAL (pre-E5 CHAIN)
+   *     A stuck client whose winner's response never landed (aborted
+   *     mid-navigation, so the browser never committed the Set-Cookie
+   *     header). By construction under E5-only, this client is
+   *     unrecoverable — every subsequent presentation of the ancestor
+   *     is a REPLAY carrying no new cookie, and past reuseGraceMs the
+   *     family is revoked and the user is logged out. Made observable
+   *     by refresh-e5-gap-stuck-client.test.ts. In the healing band we
+   *     rotate the family's live successor for the caller, mirroring
+   *     the pre-E5 CHAIN behaviour so a genuinely stuck client can
+   *     recover. Presented revoked token yields a fresh refresh token
+   *     (not just an access token) — this is a real difference from
+   *     E5-as-first-shipped, covered in CHANGELOG's security callout.
+   *
+   *   (reuseGraceMs, ∞)                         -> revoke family, null
+   *     Genuine reuse — either theft, or a client that stayed silent
+   *     long past any legitimate race window. Family revocation is the
+   *     detection signal the family model exists for. Unchanged.
+   *
+   * Security: the healing-band change widens the window during which a
+   * stolen-and-replayed token yields a session, but the shape (access
+   * token AND refresh cookie) has always been what the grace window was
+   * designed to permit. The narrower E5-only design (access token only in
+   * the whole grace band) traded that off against the stuck-client case,
+   * and that trade-off was wrong in the direction of denying real users
+   * access after ordinary browser behaviour. Full family revocation for
+   * genuine post-window reuse is unchanged. Tune per-install:
+   * REFRESH_REPLAY_WINDOW_MS (default 5000) and REFRESH_REUSE_GRACE_SECONDS
+   * (default 60). Setting REFRESH_REUSE_GRACE_SECONDS=0 restores the
+   * strict pre-fix behaviour and makes the replay window irrelevant.
    */
   async rotateRefreshToken(
     rawToken: string,
@@ -179,31 +228,107 @@ export class TokenService {
           : Number.POSITIVE_INFINITY;
 
         if (revokedAgoMs <= this.reuseGraceMs) {
-          // REPLAY path (E5): the winner's rotation already committed
-          // inside its own transaction on this same row's lock. If
-          // there's a live successor in the family, this caller is a
-          // legitimate concurrent presenter of the same-cookie burst —
-          // hand back a `replayed` result carrying only the userId, so
-          // the controller mints an access token but SKIPS the refresh/
-          // CSRF cookie set. The client's cookie jar converges
-          // deterministically on the winner's rotated cookie regardless
-          // of response-arrival order, and every caller in the burst
-          // still returns 200 with a fresh access token.
-          //
-          // Standard OAuth 2.0 rotation-with-reuse-detection pattern:
-          // N concurrent presentations of the same token → 1 rotation +
-          // N-1 replays. No new refresh_token rows created for replays.
-          // No orphaned successors. No cookie ambiguity.
-          const live = await tx.refreshToken.findFirst({
-            where: {
-              family: existing.family,
-              isRevoked: false,
-              expiresAt: { gt: new Date() },
-            },
-            orderBy: { createdAt: 'desc' },
-          });
-          if (live) {
-            return { kind: 'replayed' as const, userId: existing.user_id };
+          if (revokedAgoMs <= this.replayWindowMs) {
+            // REPLAY BAND — concurrent-burst loser (E5 semantics).
+            //
+            // The winner's rotation committed a few ms ago inside its
+            // own transaction on this same row's lock. If a live
+            // successor exists in the family, this caller is a
+            // legitimate loser in the same-cookie N-way burst — hand
+            // back `replayed` carrying only userId, so the controller
+            // mints an access token but SKIPS the refresh/CSRF cookie
+            // set. The client's cookie jar converges deterministically
+            // on the winner's Set-Cookie regardless of response-arrival
+            // order, and every caller in the burst returns 200 with a
+            // fresh access token.
+            //
+            // Standard OAuth 2.0 rotation-with-reuse-detection pattern:
+            // N concurrent presentations of the same token → 1 rotation
+            // + N-1 replays. No new refresh_token rows for replays. No
+            // orphaned successors. No cookie ambiguity.
+            const live = await tx.refreshToken.findFirst({
+              where: {
+                family: existing.family,
+                isRevoked: false,
+                expiresAt: { gt: new Date() },
+              },
+              orderBy: { createdAt: 'desc' },
+            });
+            if (live) {
+              return { kind: 'replayed' as const, userId: existing.user_id };
+            }
+            // No live successor within the replay window: fall through
+            // to full family revocation. This shape shouldn't arise
+            // under E5 (a burst always has a winner's successor to
+            // find), but if the family was independently revoked
+            // between the winner's INSERT and now, treat that as
+            // genuine reuse.
+          } else {
+            // HEALING BAND — stuck client whose winner's cookie never
+            // landed (the E5 gap made observable by
+            // refresh-e5-gap-stuck-client.test.ts). Rotate the family's
+            // live successor for this caller so it recovers rather
+            // than being logged out at reuseGraceMs.
+            //
+            // Re-select the live successor FOR UPDATE inside this same
+            // transaction so two concurrent stuck clients serialize on
+            // the SUCCESSOR row (we already hold FOR UPDATE on the
+            // ancestor row via the outer SELECT). Without this the
+            // heal path would race and could create orphaned
+            // successors — the exact bug class FOR UPDATE was
+            // introduced to close for the winner path.
+            // The ::uuid cast on the family parameter is load-bearing:
+            // Prisma's tagged-template $queryRaw binds string params as
+            // TEXT by default, and refresh_tokens.family is UUID —
+            // Postgres refuses `uuid = text` at query-plan time
+            // (error 42883). Same lesson as Phase 7 commit 2's
+            // decisions entry ("any new $executeRawUnsafe/$queryRaw
+            // comparing a parameter against a uuid-typed column
+            // needs an explicit ::uuid cast — nothing catches this
+            // at compile time, only a real query against a real
+            // Postgres schema does"). Caught here by the
+            // refresh-e5-gap-stuck-client HEAL band test on first
+            // run before commit.
+            const liveRows = await tx.$queryRaw<LockedTokenRow[]>`
+              SELECT id, user_id, family, is_revoked, revoked_at, expires_at
+              FROM refresh_tokens
+              WHERE family = ${existing.family}::uuid
+                AND is_revoked = false
+                AND expires_at > NOW()
+              ORDER BY created_at DESC
+              LIMIT 1
+              FOR UPDATE
+            `;
+            if (liveRows.length > 0) {
+              const live = liveRows[0];
+              const newRaw = randomUUID();
+              const newHash = this.hashToken(newRaw);
+              const newJti = randomUUID();
+              const expiresAt = this.computeExpiry(
+                expiresInOverride ?? this.refreshExpiresIn,
+              );
+              await tx.refreshToken.update({
+                where: { id: live.id },
+                data: { isRevoked: true, revokedAt: new Date() },
+              });
+              await tx.refreshToken.create({
+                data: {
+                  id: newJti,
+                  userId: live.user_id,
+                  tokenHash: newHash,
+                  family: live.family,
+                  expiresAt,
+                },
+              });
+              return {
+                kind: 'rotated' as const,
+                userId: live.user_id,
+                newRaw,
+                expiresAt,
+              };
+            }
+            // No live successor in the healing band either: family
+            // has already been revoked wholesale, fall through.
           }
         }
 

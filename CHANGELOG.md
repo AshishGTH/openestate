@@ -7,6 +7,41 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **`TokenService.rotateRefreshToken`'s grace window is now SPLIT into a
+  replay band (E5) and a healing band (pre-E5 CHAIN), tunable via
+  `REFRESH_REPLAY_WINDOW_MS` (default 5000).** Presenting a just-revoked
+  refresh token now yields different behaviour depending on how recently
+  it was revoked:
+    - `[0, REFRESH_REPLAY_WINDOW_MS]` — replay. Access token only, no
+      refresh cookie set. This is E5's concurrent-burst semantics.
+    - `(REFRESH_REPLAY_WINDOW_MS, REFRESH_REUSE_GRACE_SECONDS]` — heal.
+      The family's live successor is rotated for the caller and a fresh
+      refresh cookie is set. This is the pre-E5 CHAIN behaviour, applied
+      only in the healing band.
+    - `(REFRESH_REUSE_GRACE_SECONDS, ∞)` — full family revocation.
+      Unchanged.
+  **Real behavioural difference from E5-as-first-shipped, which
+  operators need to know**: a presented revoked token in the healing
+  band now yields a REFRESH token, not just an access token. This is
+  what the grace window was always designed to permit and matches the
+  pre-E5 behaviour every install ran before this rotation-race fix
+  landed, but it widens the window during which a stolen-and-replayed
+  token yields a fully-usable session (previously the healing-band
+  presentation was silently a dead end — a stuck legitimate client was
+  logged out at `REFRESH_REUSE_GRACE_SECONDS` regardless of whether the
+  presenter was the real user or an attacker). Rationale: the narrower
+  E5-only design traded that off against the stuck-client case, and
+  that trade-off was wrong in the direction of denying real users
+  access after ordinary browser behaviour (a mid-navigation abort that
+  prevented the browser committing the winner's Set-Cookie). Full
+  family revocation for genuine post-window reuse is unchanged. Tune
+  or disable via `REFRESH_REPLAY_WINDOW_MS` and
+  `REFRESH_REUSE_GRACE_SECONDS` — setting the latter to 0 restores the
+  strict pre-fix behaviour and makes the replay window irrelevant.
+  Full account in CLAUDE.md's "E5 gap — split the grace window"
+  Decisions entry and the `refresh-e5-gap-stuck-client.test.ts`
+  regression suite.
+
 - **Reuse-detection could be defeated for one legitimate session under
   exact-concurrency refresh presentation.** `TokenService.rotateRefreshToken`
   did `findFirst → update → create` as three separate auto-committed
