@@ -6407,12 +6407,51 @@ success on every attempt:**
 - Native install (real Postgres/Redis/nginx): 1m38s / 2m26s / 2m07s
 - Native upgrade (populated DB): 2m55s / 3m26s / 2m53s
 
-Attempt 1 on the same commit was RED on E2E (one transient
-user-role-edit toBeVisible flake, PASSED on retry) — the regression
-test (integration-tests) still went GREEN on that attempt, which is
-what proved the auth-race fix works independently of the E2E's
-own flake. The three-green bar started at attempt 2 per the
-"3-consecutive-green" rule.
+Attempt 1 on the same commit was RED on E2E, and the summary of
+what failed and why was written wrong in this file's earlier
+revision and in commit 8301b2e's own message — corrected here,
+with the mechanism recorded so a future session doesn't repeat
+the shortcut. The Playwright log for attempt 1 (job 101166977274)
+actually named:
+
+- `user-role-edit.spec.ts:21:5` — **hard fail** on both the
+  initial attempt AND `retry #1`. Initial attempt: line 105
+  `expect(editedRow).toBeVisible()` timed out at 5000ms. Retry #1:
+  line 105 passed (row appeared), then line 108
+  `expect(controlAfterLabel(page, 'Role')).toHaveValue(secondRoleId)`
+  failed because the Role `<select>` rendered a specific stale
+  UUID (`32d1fc24-cf69-43c4-b8be-f38c16524188` — an OLD role from
+  before the test's own edit) instead of `secondRoleId`. Marked
+  "1 failed" in the run summary. Recorded as a real, confirmed
+  bug in docs/todo.md; see that entry for the failure class and
+  the follow-up scope.
+- `cheque-bounce.spec.ts:28:5` — **flaky, passed on retry**. Line 70
+  `not.toHaveValue('')` for GST rate base price. Marked "1 flaky"
+  in the run summary. This is the entry the docs/todo.md
+  cheque-bounce section already tracks; that entry is unchanged.
+
+The regression test (integration-tests) still went GREEN on
+attempt 1, which is what proves the auth-race fix works
+independently of either E2E failure. The three-green bar started
+at attempt 2 per the "3-consecutive-green" rule.
+
+**How the earlier wrong summary happened, recorded because a
+future session will trust this log**: the "one transient
+user-role-edit toBeVisible flake, PASSED on retry" line was
+composed from attempt 4's run-level pass/fail totals (which
+were clean) rather than from attempt 1's own Playwright log
+(where the retry also failed and named a specific stale UUID).
+The write-up phase pulled the wrong artifact — GitHub's run
+summary shows the LATEST attempt's totals, and it was read as
+if it described attempt 1. A user push-back on this file's
+own claim forced the correction; without that, a real
+regression-class bug (post-mutation refetch/render race — see
+the docs/todo.md entry) would have shipped documented as a
+transient flake, and the next session hitting the same shape
+would have inherited the misdiagnosis. **Discipline for future
+CI write-ups in this file: cite the specific run+attempt+job
+id, and quote directly from that attempt's log, not from the
+top-level "N passed / M failed" line of a later attempt.**
 
 **The full story of what went wrong on this branch before landing here**
 — retained because the reasoning matters more than the specific

@@ -4,6 +4,128 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## `user-role-edit.spec.ts` — confirmed post-mutation refetch/render bug, not a flake
+
+Attempt 1 of run 33916938865 (E2E job 101166977274, commit 6f0dd65)
+failed on this spec, on BOTH the initial attempt AND Playwright's own
+`retry #1` within the same test invocation. This is the definition of
+a confirmed bug, not a flake — a flake would have passed on retry.
+
+Verbatim from the Playwright log for attempt 1:
+
+```
+✘ 41 tests/user-role-edit.spec.ts:21:5 (7.3s)
+✘ 42 tests/user-role-edit.spec.ts:21:5 (retry #1) (6.7s)
+
+1) tests/user-role-edit.spec.ts:21:5
+   Error: expect(locator).toBeVisible() failed
+   Timeout: 5000ms
+   Error: element(s) not found
+   > 105 |     await expect(editedRow).toBeVisible();
+     107 |     await expect(controlAfterLabel(page, 'Name')).toHaveValue(editedName);
+     108 |     await expect(controlAfterLabel(page, 'Role')).toHaveValue(secondRoleId);
+
+   Error: expect(locator).toHaveValue(expected) failed
+   Timeout:  5000ms
+   - unexpected value "32d1fc24-cf69-43c4-b8be-f38c16524188"
+     108 |     await expect(controlAfterLabel(page, 'Role')).toHaveValue(secondRoleId);
+```
+
+Initial attempt: line 105 `toBeVisible()` timed out — the edited row
+never appeared in the users table within 5s. Retry #1: line 105
+passed (row appeared), then line 108 failed with a *specific* stale
+UUID — an OLD role assigned before this test's own edit — not
+`secondRoleId`. That the retry's error names a concrete stale value
+rules out network-transient / DOM-timing-only causes: the request
+completed, the mutation committed, the list refetched, and the list
+rendered a stale row anyway.
+
+**Suspected class, NOT diagnosis** — a fresh session should pull the
+trace and read the actual sequence before treating this as decided.
+The shape is consistent with a post-mutation refetch/render race in
+the same family as `user-deactivate-reactivate.spec.ts`'s already-
+fixed variant (documented in `CLAUDE.md`'s E2E refresh-rotation
+cascade entry): the update mutation returns, `invalidateQueries`
+fires, the list refetch responds — but the resulting render either
+consumes a stale cache page or races the DOM commit, so the row
+under test displays a pre-edit value for a window long enough to
+miss Playwright's 5s toBeVisible/toHaveValue ceilings. That family
+was fixed spec-by-spec by explicitly waiting for the refetch
+`waitForResponse` before asserting on the DOM; the same technique
+may or may not apply cleanly here — a real diagnosis needs the
+trace, and the trace for this specific attempt has been lost (see
+the trace-retention entry below).
+
+**Does not block PR #31.** Pre-existing on master, not introduced by
+that branch — attempt 1's user-role-edit failure has the same
+symptom shape observed on run 33645314654 attempt 3 earlier in this
+branch's history (CLAUDE.md's post-superseded-cascade decisions
+entry lists that exact incident). PR #31's own fix (server-side E5
+FOR UPDATE + REPLAY, client-side lazy proactive refresh) is proven
+by the regression test file `refresh-concurrent-rotation.test.ts`
+and by integration-tests being GREEN on attempt 1 alongside this
+E2E failure — the two are independent.
+
+**Next work item after PR #31 merges**: pull a fresh trace when this
+recurs (the trace-retention fix logged below is a prerequisite —
+without it, a future attempt 1 red run's trace is again lost the
+moment a re-run succeeds), read the actual list refetch → render
+sequence around user-role-edit's Save click, confirm or refute the
+refetch/render-race hypothesis, and fix at the mechanism if
+confirmed. Do NOT extend `retries: 1` to hide it — same reasoning
+as the cheque-bounce entry below: a retry-that-flips-a-known-bug-
+to-green would put the merge gate back where it started.
+
+**Hand-verification step for anyone doing a full manual browser pass
+against this branch** (or against master until this is fixed): edit
+a real user's name AND role, save, reload the users list, confirm
+both the new name and the new role selection persist. If either
+reverts to the pre-edit value, this bug is live.
+
+## Trace retention — GitHub deletes an earlier failed attempt's artifacts when a later attempt of the same run succeeds. NOT a name-collision from later uploads.
+
+The obvious hypothesis was `actions/upload-artifact@v4` name-collision:
+attempt 1 uploaded `playwright-traces`, a later attempt uploaded the
+same name and replaced it. Verified against real data on run
+33916938865 (attempt 1 red on E2E, attempts 2-4 green), and this is
+NOT what happened:
+
+- Attempts 2, 3, 4 of E2E all succeeded, so the `if: failure()`
+  guard on the `Upload Playwright traces on failure` step evaluated
+  false and NOTHING was uploaded from them. There was no second
+  upload to collide with attempt 1's.
+- The repo-wide artifact listing
+  (`GET /repos/{owner}/{repo}/actions/artifacts`) filtered to
+  `workflow_run.id == 33916938865` returns **zero artifacts** — the
+  attempt 1 upload has been genuinely deleted, not merely hidden by
+  the per-run endpoint. Compare against run 33915421187 (attempt 1
+  failure, never re-run): its `playwright-report`/`playwright-traces`
+  artifacts are still present in the same listing, not expired.
+
+**Actual mechanism** (inferred from the two data points above, not
+independently documented by GitHub as far as I could find in one
+pass): GitHub's own artifact-reconciliation on re-run removes
+artifacts from earlier attempts of a run when the run's final
+conclusion becomes success. It is not gated by the artifact's name
+and not caused by anything upload-artifact does — it's a
+platform-side cleanup step. This means adding
+`${{ github.run_attempt }}` to the artifact name — the obvious
+patch — would only fix this if the reconciliation is name-scoped,
+which the evidence does not decide either way. If it is
+run-scoped, the run_attempt suffix accomplishes nothing.
+
+**Not patching.** Per the standing rule that a config change to CI
+whose real value only surfaces on the next red E2E run should be
+verified on that red run, not shipped ahead of one and assumed to
+work. The next E2E red run this branch or master hits (via
+`user-role-edit.spec.ts` per the entry above, or any other cause) is
+the moment to try the run_attempt suffix AND verify: fail E2E on
+attempt 1, re-run, confirm attempt 1's artifact survives the re-run.
+If it doesn't survive, the reconciliation is run-scoped and a
+different approach (a second artifact store, direct upload to a
+long-lived bucket, or accepting one-shot retention) is needed.
+
+
 ## `cheque-bounce.spec.ts` — one known E2E flake, observed once, not investigated further
 
 The `e2e-playwright` CI flakiness that used to live here (the rotating
