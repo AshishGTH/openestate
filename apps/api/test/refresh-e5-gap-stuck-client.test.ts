@@ -33,7 +33,10 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { createSystemPrismaClient } from '@openestate/db';
-import { TokenService } from '../src/auth/token.service';
+import {
+  TokenService,
+  type RotateRefreshTokenResult,
+} from '../src/auth/token.service';
 
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
 const describeIf = SYSTEM_URL ? describe : describe.skip;
@@ -256,4 +259,119 @@ describeIf('rotateRefreshToken — split-window grace (replay / heal / revoke)',
     expect(liveInFamily).toBe(0);
   });
 
+  it('OBSERVED behaviour probe — N concurrent stuck clients present T0 in the healing band', async () => {
+    // Two (or more) stuck clients — different tabs of the same
+    // session, each aborted independently at the same navigation —
+    // firing in the healing band simultaneously.
+    //
+    // NOT a design-guard test. This exists to REPORT the actual
+    // behaviour of the two-lock heal path under concurrent
+    // presentation, because previous investigations on this branch
+    // shipped a wrong summary and this specific shape (concurrent
+    // heal, no burst-scoped replay in the heal band) is exactly the
+    // case where the nested FOR UPDATE's semantics need direct
+    // observation, not inference. See CLAUDE.md's E5 split-window
+    // Decisions entry for the fuller account of what these
+    // assertions encode and the follow-up design question they
+    // surface (one-heal-per-band-entry vs many-heals-per-band-entry).
+    const svc = makeService(30, 500);
+    const { raw: t0 } = await svc.createRefreshToken(userId);
+    const family = await familyOfLatestLiveToken();
+
+    const winner = await svc.rotateRefreshToken(t0);
+    if (winner?.kind !== 'rotated') {
+      throw new Error(
+        `expected rotated on winner; got ${JSON.stringify(winner)}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 700));
+
+    const preCount = await prisma.refreshToken.count({
+      where: { family },
+    });
+
+    // N=4 concurrent stuck-client re-presentations of T0. Each opens
+    // its own tx, serializes on T0's FOR UPDATE lock, then on the
+    // live-successor row's FOR UPDATE lock. Behaviour under the
+    // current implementation is what this test decides — the
+    // observed shape is written into the assertions below verbatim
+    // and re-verified on every run, so a future change to the heal
+    // path that alters it fails a test with a clear name.
+    const results: (RotateRefreshTokenResult | null)[] = await Promise.all(
+      Array.from({ length: 4 }, () => svc.rotateRefreshToken(t0)),
+    );
+
+    // Every response must be non-null — none reach the revoke
+    // branch, since T0 is inside the healing band throughout the
+    // burst.
+    for (const r of results) {
+      expect(r).not.toBeNull();
+    }
+
+    const rotated = results.filter((r) => r!.kind === 'rotated');
+    const replayed = results.filter((r) => r!.kind === 'replayed');
+    const rotatedRawSet = new Set(
+      rotated.map((r) => (r as { newRaw: string }).newRaw),
+    );
+
+    // OBSERVED (record the CURRENT behaviour of the heal path under
+    // concurrent presentation; a future change that alters this
+    // will fail this assertion and force a Decisions-log update):
+    //
+    // Under READ COMMITTED + FOR UPDATE on T0, each concurrent
+    // caller acquires T0's lock sequentially. T0.revokedAt is set
+    // once (by the original winner) and never updated by any
+    // heal-path caller, so each concurrent caller sees the SAME
+    // revokedAgoMs when its lock acquires — all in the healing
+    // band. Each heal-path caller then acquires FOR UPDATE on the
+    // current live successor and rotates it. Result: N heals in
+    // a chain, N new rows, N different Set-Cookie values on the
+    // wire. This IS the pre-E5 CHAIN behaviour, and this is the
+    // cookie ambiguity the healing band inherits from that shape.
+    expect(rotated.length).toBe(4);
+    expect(replayed.length).toBe(0);
+
+    // Chain: every rotated raw is distinct (no orphaned successors,
+    // no duplicate rotations — that's what the nested FOR UPDATE on
+    // the successor row prevents; without it, two concurrent heals
+    // could both revoke the same successor and both INSERT their
+    // own, reintroducing the winner-path bug FOR UPDATE was
+    // introduced to close). N distinct new raws proves the chain
+    // walked forward instead of forking.
+    expect(rotatedRawSet.size).toBe(4);
+
+    // Family invariant despite the chain: exactly ONE live row in
+    // the family at the end (the last-committed successor). All
+    // prior successors are revoked. This is what "no orphaned
+    // successors" means concretely — the family accumulates a
+    // linear chain, not a fan-out.
+    const liveInFamily = await prisma.refreshToken.count({
+      where: { family, isRevoked: false },
+    });
+    expect(liveInFamily).toBe(1);
+
+    // Total rows grew by exactly 4 (the four heals). preCount at
+    // the top of the burst was 2 (T0 + T1). Post-burst is 6
+    // (T0, T1, T2, T3, T4, T5) — T0..T4 revoked, T5 live.
+    const postCount = await prisma.refreshToken.count({
+      where: { family },
+    });
+    expect(postCount - preCount).toBe(4);
+
+    // Sanity: the very last live row's tokenHash matches SOME
+    // rotated caller's newRaw (proves the observable live cookie
+    // is one the clients actually received, not something
+    // orphaned).
+    const rawHash = (s: string) => {
+      const { createHash } = require('node:crypto');
+      return createHash('sha256').update(s).digest('hex');
+    };
+    const rotatedHashes = new Set(
+      rotated.map((r) => rawHash((r as { newRaw: string }).newRaw)),
+    );
+    const liveRow = await prisma.refreshToken.findFirst({
+      where: { family, isRevoked: false },
+    });
+    expect(rotatedHashes.has(liveRow!.tokenHash)).toBe(true);
+  });
 });

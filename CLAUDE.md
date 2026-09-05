@@ -6880,3 +6880,231 @@ outer `revokedAgoMs <= reuseGraceMs` check as false and falls
 through to family revocation, exactly as before either fix
 existed. Kept for the operator whose threat model doesn't
 tolerate any grace at all.
+
+### E5 split-window follow-up — deadlock analysis, observed concurrent-heal behaviour, trace-retention process rule
+
+Three additions after the split-window fix landed on `a1ce150`,
+each addressing a specific gap the reviewer surfaced. Not
+independent decisions — they belong with the split-window entry
+above and are recorded here so the file's own primary lesson
+("two locks with an unstated ordering rule is the composition
+class that has bitten this branch repeatedly") is discharged
+before merge.
+
+**Lock ordering rule for the heal path — no cycle possible.**
+The heal path takes TWO row locks: first T0 (the ancestor,
+already held from the outer `SELECT ... FOR UPDATE`), then the
+current live successor T1 (inside the nested `$queryRaw` in the
+healing branch). Ordering rule stated explicitly: **any transaction
+that touches more than one refresh_token row locks the ancestor
+BEFORE the successor, never the other way around.** Verified
+against every path that takes a row lock:
+
+- **Winner path** (T0 is live, rotates T0 → T1). Takes FOR UPDATE
+  on T0 via the outer SELECT. INSERTs T1 (INSERT acquires a row-
+  level lock on the new row it creates, not on any pre-existing
+  row). No lock on any pre-existing successor row. Order: {T0}.
+- **Replay-band path** (T0 revoked <= replayWindowMs ago). Takes
+  FOR UPDATE on T0 via the outer SELECT. Reads the live successor
+  via `tx.refreshToken.findFirst` — no FOR UPDATE clause, plain
+  MVCC read. No lock on any successor. Order: {T0}.
+- **Heal-band path** (T0 revoked in (replayWindowMs, reuseGraceMs]).
+  Takes FOR UPDATE on T0 via the outer SELECT. Then takes FOR
+  UPDATE on the current live successor T1 via the nested
+  `$queryRaw`. Then rotates T1 → T2. Order: {T0, T1}.
+- **`revokeFamily(rawToken)` / `revokeAllForUser` / `revokeAllForUserExceptToken`**.
+  Bulk `updateMany` on `family = ...` or `userId = ...`. Postgres
+  locks the matched rows one-at-a-time in scan order, not
+  parent-first. Runs OUTSIDE any interactive transaction that
+  holds T0. Cannot participate in a T0-then-T1 vs T1-then-T0
+  cycle because it doesn't hold T0 (or any other single
+  refresh_token row) while trying to acquire another.
+- **`createRefreshToken`** — pure INSERT, acquires no pre-
+  existing row lock.
+
+Every path that locks two refresh_token rows in the same
+transaction locks the ancestor first. There is no path that
+locks a successor and then tries to lock its ancestor. **A
+deadlock cycle between two rotation transactions in this service
+is therefore not reachable by construction, not just not
+observed** — same "argue it, don't measure it" discipline the
+Phase 3 advisory-lock decisions entry established for that
+serialisation surface.
+
+The one composition risk left standing: a caller who holds the
+outer T0 lock AND makes any other Postgres call inside the same
+tx that could take a lock on a NEW refresh_token row (a helper
+that revoked family members, for instance). The current
+implementation makes no such call inside the interactive tx —
+`revokeFamilyById` runs only in the post-window path AFTER the
+tx returns, on `this.prisma` not `tx`. If a future change
+introduces such a helper, the ordering rule above (**never touch
+a second refresh_token row inside the outer tx except via the
+heal path's nested FOR UPDATE on the current live successor**)
+tells it what shape to take.
+
+**Observed behaviour under N concurrent stuck clients in the
+heal band — CHAIN, N distinct cookies on the wire.**
+Regression test `refresh-e5-gap-stuck-client.test.ts`, its
+fourth case: N=4 concurrent presentations of T0, all past
+replayWindowMs, all inside reuseGraceMs. Actual observed
+behaviour, encoded in the test's assertions verbatim so a
+future change fails a test with a clear name:
+
+- All 4 responses `kind: 'rotated'` (no replays).
+- 4 distinct new raws on the wire.
+- Family accumulates 4 heal steps: T0..T4 revoked, T5 live.
+- No orphaned successors — each heal correctly revokes the
+  previous successor before creating its own (the nested FOR
+  UPDATE on the successor row is what makes this hold; without
+  it, two concurrent heals would race on the same successor
+  and both INSERT their own, which IS the winner-path bug FOR
+  UPDATE was introduced to close).
+
+Mechanism: T0.revokedAt is set once by the original winner and
+never updated by any heal-path caller. Each concurrent caller
+serializes on T0's FOR UPDATE, sees the same revokedAgoMs (all
+past replayWindowMs, all inside reuseGraceMs), takes the heal
+path, acquires FOR UPDATE on the CURRENT live successor (which
+each subsequent caller finds as the previous caller's newly-
+committed successor), rotates it, commits. Serial by lock
+acquisition; monotonic chain in the family.
+
+**Client-side impact**: N concurrent tabs each get a distinct
+new refresh cookie in their response headers. The browser's
+cookie jar is shared across same-origin tabs, so the LAST
+response's Set-Cookie wins in the jar. All prior-in-chain
+successors are already revoked server-side. The client
+converges — the winning-in-jar cookie is live, subsequent
+refreshes rotate normally from it — but the family accumulated
+N chain steps per concurrent-stuck-tab burst.
+
+This IS the pre-E5 CHAIN behaviour, applied inside the healing
+band by construction (the reviewer's own read; matched
+empirically by the regression test). It is not a bug against
+the split-window fix's stated design — the split-window design
+guarantees the STUCK CLIENT CAN RECOVER, which is achieved by
+any of the N callers' responses landing. It is also not clearly
+correct as long-term shape:
+
+**Design question surfaced by this test, NOT decided:** should
+the second (and subsequent) concurrent healer REPLAY the
+already-healed successor rather than rotate it? "One heal per
+band entry" is the reviewer's phrasing. Options considered
+BELOW; deliberately not implemented in this session so the
+choice is a separate decision:
+
+- **A — Do nothing, accept CHAIN in the heal band.** Behaviour
+  is bounded (N chain steps per concurrent-tab burst),
+  converges, and matches the CHAIN semantics the CHANGELOG
+  security callout already names as the healing band's shape.
+  Real-world case (mid-navigation abort of a full page load) is
+  usually one tab at a time; N-way concurrent-stuck-tab is a
+  corner case within a corner case. Least risk. What we have
+  today.
+
+- **B1 — Update T0.revokedAt on heal (reset the ancestor's
+  clock).** Before rotating the successor, first UPDATE
+  T0.revokedAt = NOW(). Next concurrent caller acquires T0's
+  lock, reads the fresh T0.revokedAt (~ms ago), takes the
+  REPLAY branch instead of HEAL, returns kind:'replayed' with
+  no cookie. Clean "one heal per band entry" semantics.
+  **Breaks the invariant this file's own lock-ordering
+  argument above depends on** — T0.revokedAt "set once by the
+  winner and never touched" is what makes each stuck-client
+  presentation deterministic. Under B1 the ancestor's clock
+  becomes mutable, and every future review has to re-derive
+  the band decision for whatever state the ancestor's clock
+  is in. Doable but the surface expands.
+
+- **B2 — Track "last heal on this ancestor" separately.** New
+  column `refresh_tokens.last_heal_at` (default matches
+  `revokedAt`, updated by each heal). Band decision compares
+  `revokedAgoMs` against `last_heal_at`, not `revoked_at`.
+  Same net effect as B1 without mutating `revokedAt`. Real
+  migration + a new nullable column + a new fact for every
+  future auth-adjacent question to account for. Marginal
+  benefit for the surface added.
+
+- **B3 — Advisory lock on family for heal decisions.**
+  `pg_advisory_xact_lock(hashtext(family))` at the top of the
+  heal branch serializes concurrent heals of the same family.
+  First heal takes lock, rotates. Second heal takes lock
+  (waits), checks whether the current live successor's
+  `createdAt` is < some threshold (say, replayWindowMs) —
+  yes → REPLAY it; no → HEAL. Same shape as Phase 3's
+  round-robin fairness advisory lock (see that decisions
+  entry), similar footprint. Cleaner than B1/B2 because it
+  doesn't mutate any refresh_token state or add columns.
+  Extra Postgres round trip per heal.
+
+- **C — Client-side single-flight across tabs
+  (BroadcastChannel).** Prevent the concurrent-multi-tab
+  burst from ever hitting the server. Larger scope than this
+  branch; belongs alongside the existing per-tab
+  `refreshSession()` single-flight in api.ts, not inside
+  TokenService. Doesn't address the shape at the server —
+  same server-side design still stands, this just makes it
+  less likely to be exercised.
+
+**My read (not a decision):** A or B3. A is defensible because
+the CHAIN behaviour in the heal band is already documented as
+the healing band's shape in the CHANGELOG security callout, and
+the concurrent-multi-tab-stuck case is a corner of a corner
+that converges without user-visible harm (all N callers
+return 200, browser cookie jar converges on one live cookie).
+B3 is the cleanest server-side "one heal per band entry" if
+that shape is desired — it doesn't require mutating T0's
+revokedAt (preserves the lock-ordering argument above) and
+matches an existing Phase 3 pattern. B1 and B2 both trade
+surface expansion for a marginal correctness improvement.
+Neither is a live bug; either is a design choice for what
+we want the healing band's shape to be under concurrent
+presentation. Reviewer to decide.
+
+**Trace retention on re-runs — process rule, mechanism
+unconfirmed.**
+
+Empirical observation from ONE data point (run 33916938865:
+attempt 1 failed and uploaded traces per its own step-15 log,
+subsequent attempts 2-4 succeeded and did not upload — attempt
+1's artifact is nevertheless gone from the artifact API today,
+inside the 7-day retention window). One other run under the
+opposite condition (run 33915421187: attempt 1 failed, never
+re-run, artifact retained). Two data points support "artifacts
+from an earlier failed attempt are lost when a later attempt
+of the same run succeeds," but one/one is not enough to assert
+platform-side reconciliation as the CAUSE with certainty —
+GitHub's own re-run behaviour for artifacts across attempts is
+not well-documented in a way this session's search reached, and
+the observation could be produced by several mechanisms
+(reconciliation, GC, artifact TTL keyed on run's final
+conclusion, undocumented cleanup). The mechanism is UNCONFIRMED
+and the docs/todo.md entry has been softened to say so.
+
+**The remedy doesn't need the mechanism.** Process rule,
+recorded here as a standing discipline rather than a config
+patch (which is guessing without confirmed cause):
+
+> **Any time an E2E job fails on this repo, pull the
+> `playwright-traces` artifact BEFORE triggering a re-run.**
+> Use `gh run download <run-id> -n playwright-traces -D <dir>`
+> or the web UI. This is the ONE window during which the
+> trace is guaranteed available regardless of whether the
+> re-run succeeds. Attempt 1 of run 33916938865 was lost
+> exactly because a re-run was triggered before its trace
+> was pulled; that trace would have made the
+> user-role-edit refetch/render diagnosis in docs/todo.md a
+> straight read rather than a hypothesis.
+
+This rule applies whether the mechanism turns out to be
+platform-side reconciliation, name-collision, TTL, or
+something else — pulling before re-run makes each of them
+irrelevant. If a future session establishes the mechanism
+(e.g. a deliberately-triggered controlled re-run with
+artifact tracking), that can inform whether to also add
+`github.run_attempt` to the artifact name as a
+defence-in-depth. Not doing it pre-emptively because a config
+change to CI whose value only surfaces on the next red E2E
+run should be verified on that red run, not shipped ahead of
+one and assumed to work.

@@ -82,48 +82,59 @@ a real user's name AND role, save, reload the users list, confirm
 both the new name and the new role selection persist. If either
 reverts to the pre-edit value, this bug is live.
 
-## Trace retention — GitHub deletes an earlier failed attempt's artifacts when a later attempt of the same run succeeds. NOT a name-collision from later uploads.
+## Trace retention — earlier failed attempt's artifact was gone after a later attempt succeeded. Mechanism UNCONFIRMED; process rule is the remedy.
 
-The obvious hypothesis was `actions/upload-artifact@v4` name-collision:
-attempt 1 uploaded `playwright-traces`, a later attempt uploaded the
-same name and replaced it. Verified against real data on run
-33916938865 (attempt 1 red on E2E, attempts 2-4 green), and this is
-NOT what happened:
+Observation: run 33916938865 (E2E attempt 1 failed and uploaded
+traces per its own step-15 log, attempts 2-4 succeeded and did not
+upload since `Upload Playwright traces on failure` is gated
+`if: failure()`) shows zero artifacts today via
+`gh api repos/{owner}/{repo}/actions/artifacts` filtered to that
+run's `workflow_run.id`, inside the 7-day retention window. For
+comparison, run 33915421187 (attempt 1 failed, never re-run) has
+its `playwright-traces`/`playwright-report` artifacts still present
+in the same listing, not expired.
 
-- Attempts 2, 3, 4 of E2E all succeeded, so the `if: failure()`
-  guard on the `Upload Playwright traces on failure` step evaluated
-  false and NOTHING was uploaded from them. There was no second
-  upload to collide with attempt 1's.
-- The repo-wide artifact listing
-  (`GET /repos/{owner}/{repo}/actions/artifacts`) filtered to
-  `workflow_run.id == 33916938865` returns **zero artifacts** — the
-  attempt 1 upload has been genuinely deleted, not merely hidden by
-  the per-run endpoint. Compare against run 33915421187 (attempt 1
-  failure, never re-run): its `playwright-report`/`playwright-traces`
-  artifacts are still present in the same listing, not expired.
+**The obvious hypothesis (upload-artifact@v4 name collision from a
+later attempt's upload) is refuted** by the fact that attempts 2-4
+of run 33916938865 succeeded and therefore did NOT upload — there
+was no second upload to collide with attempt 1's. Whatever removed
+attempt 1's artifact happened without any subsequent upload.
 
-**Actual mechanism** (inferred from the two data points above, not
-independently documented by GitHub as far as I could find in one
-pass): GitHub's own artifact-reconciliation on re-run removes
-artifacts from earlier attempts of a run when the run's final
-conclusion becomes success. It is not gated by the artifact's name
-and not caused by anything upload-artifact does — it's a
-platform-side cleanup step. This means adding
-`${{ github.run_attempt }}` to the artifact name — the obvious
-patch — would only fix this if the reconciliation is name-scoped,
-which the evidence does not decide either way. If it is
-run-scoped, the run_attempt suffix accomplishes nothing.
+**What actually removed it is UNCONFIRMED.** Two data points
+(one/one across the "re-run to green succeeded" / "no re-run"
+axis) is enough to notice a pattern but not enough to assert a
+specific cause. Candidate mechanisms — none of which this session
+independently verified against public GitHub docs — include
+platform-side artifact reconciliation on green re-run, GC keyed on
+run's final conclusion, or an artifact-lifetime rule tied to
+attempt-vs-run scoping this session's searches did not reach. A
+future session with a controlled re-run (upload a marker artifact
+on attempt 1, force attempt 2 red then green, observe) could pin
+this down; not attempted here because the remedy below does not
+depend on the cause.
 
-**Not patching.** Per the standing rule that a config change to CI
-whose real value only surfaces on the next red E2E run should be
-verified on that red run, not shipped ahead of one and assumed to
-work. The next E2E red run this branch or master hits (via
-`user-role-edit.spec.ts` per the entry above, or any other cause) is
-the moment to try the run_attempt suffix AND verify: fail E2E on
-attempt 1, re-run, confirm attempt 1's artifact survives the re-run.
-If it doesn't survive, the reconciliation is run-scoped and a
-different approach (a second artifact store, direct upload to a
-long-lived bucket, or accepting one-shot retention) is needed.
+**Remedy — process rule, not a config patch** (recorded in
+CLAUDE.md's Decisions log alongside the E5 split-window follow-up):
+
+> **Any time an E2E job fails on this repo, pull the
+> `playwright-traces` artifact BEFORE triggering a re-run.**
+> `gh run download <run-id> -n playwright-traces -D <dir>` (or the
+> web UI). This is the one window during which the trace is
+> guaranteed available regardless of what a subsequent re-run
+> does. Attempt 1 of run 33916938865 was lost exactly because a
+> re-run was triggered before its trace was pulled; that trace
+> would have made this file's user-role-edit refetch/render
+> diagnosis a straight read from the trace rather than a
+> hypothesis assembled from the log excerpt.
+
+This rule is correct under any of the candidate mechanisms
+above — pulling before re-run makes each of them irrelevant to
+whether the trace is available for diagnosis. Adding
+`${{ github.run_attempt }}` to the artifact name is a possible
+defence-in-depth once the mechanism IS confirmed (if it turns out
+to be name-scoped rather than run-scoped), but shipping it
+pre-emptively is a config change whose real value only surfaces on
+the next red E2E run — verify on that run, don't guess.
 
 
 ## `cheque-bounce.spec.ts` — one known E2E flake, observed once, not investigated further
