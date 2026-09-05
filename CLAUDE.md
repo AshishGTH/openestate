@@ -6267,3 +6267,979 @@ wrong-turns-ruled-out account and the candidate fix directions for the
 underlying race, which needs its own real-browser click-through per
 this file's mirrored-auth standing rule before it's touched — a
 materially larger, separate undertaking correctly left out of this PR.
+
+### E2E refresh-rotation cascade — fixed at the source; supersedes the merged-red-anyway exception above
+
+The three-times-overridden gate documented in the entry above is now
+addressable, not just diagnosable. The failing subset (rapid-reload-
+session, team-scope, user-role-edit, ticket-reply, successful-to-booking,
+user-deactivate-reactivate) all shared one mechanism, per the Playwright
+trace evidence already gathered: under CI runner concurrency,
+mount-time /auth/refresh calls got aborted mid-flight by the next
+page.goto(); the cookie jar kept re-presenting the same token; the
+server-side grace window (`REFRESH_REUSE_GRACE_SECONDS=30`) forgave each
+re-presentation with a new rotation — until the cascade outlived that
+30-second window, the still-un-updated token tripped past-grace replay
+detection, and the family was revoked, parking the browser on /login.
+
+**Fixed at the source with a sessionStorage cooldown that stops the
+cascade forming.** Both apps' `AuthProvider` mount effect now consults a
+per-app `_authCache` (`_authCacheStaff`, `_authCachePortal` — distinct
+because the two apps share an origin in production and would otherwise
+cross-contaminate) before firing /auth/refresh; if a successful refresh
+landed within `AUTH_COOLDOWN_MS` (5s), it hydrates `state.user` from the
+cached JWT PAYLOAD (never the raw token — see the Phase 1 read below)
+and skips the refresh call entirely. The cascade never starts because
+the /auth/refresh calls that would abort each other are never fired.
+Seeded on successful login, verifyTotp, and every successful mount
+refresh; cleared on logout.
+
+**Two accompanying changes, both required for the cooldown to work:**
+- `api()`'s 401-retry gate relaxed from `if (res.status === 401 &&
+  accessToken)` to `if (res.status === 401)`, so a cooldown-skipped
+  mount that leaves accessToken null does not lose the first API call
+  after the skip (the retry path fires refreshSession(), gets a fresh
+  token via the still-valid cookie, retries). `refreshSession()` returns
+  null cleanly for a genuinely-logged-out user, so a real 401
+  short-circuits back to the caller after one wasted refresh probe —
+  cheap, and deduped by single-flight anyway.
+- `REFRESH_REUSE_GRACE_SECONDS` default 30→60 as defence in depth for a
+  slightly wider real-world race (multi-tab restore, flaky-network
+  double-refresh). **NOT 120**: if the client cooldown works, the
+  cascade never approaches this ceiling; if the ceiling still fires at
+  60, that proves the client fix failed and widening further would just
+  hide it. Tunable per-install; 0 restores strict pre-fix behaviour.
+  Supersedes the earlier "Decision: `REFRESH_REUSE_GRACE_SECONDS` stays
+  at 30" entry above, on the reasoning that the security trade-off named
+  there (a stolen token replayed within grace) is unchanged in kind
+  between 30 and 60s — genuine post-grace replay still revokes the whole
+  family, family revocation on explicit logout still refuses reuse, an
+  unknown token still returns null. Only the innocent-race forgiveness
+  window widens; the theft-detection ceiling above it is unchanged.
+
+**Cache is RENDERING ONLY.** Audited every reader of `_authCache` in
+both apps (two, one per app — each `AuthProvider` mount effect) and
+every downstream consumer of `state.user` it feeds: `ProtectedRoute`'s
+redirect if user missing, `RequirePermission`'s "No access" placeholder,
+`hasPermission()`'s button/link/nav rendering across ~8 files in
+apps/web (Dashboard, AppShell, Inquiries, InquiryDetail, Reports,
+BrokerDetail, RequirePermission, auth.tsx). Zero code paths use the
+cache to short-circuit a server call or grant an action; the server is
+the sole authorization authority. A tampered sessionStorage entry
+cannot grant access, only briefly mis-render a nav or button before the
+first API call the server refuses. This constraint is stated at the top
+of api.ts's own cache comment block so a future reader who reaches for
+`readAuthCache()` as a permission gate finds it before writing the
+code.
+
+**Phase 1 read, stated explicitly rather than assumed:** Phase 1's
+"access token in memory, not localStorage" decision specifically
+protects the RAW bearer credential — an XSS reading it gains a
+15-minute reusable session. The decoded PAYLOAD has no such property:
+the server re-verifies the signature on every request, and any
+successful API response already discloses those claims to any script
+that can observe fetch responses. Storing the payload in sessionStorage
+is a permitted, narrower thing than storing the token, not a Phase 1
+violation.
+
+**The two prior mitigations were correct for their own failure modes
+and simply did not address this one:**
+- **Client-side `refreshSession()` single-flight** (apps/e2e harness
+  entry, Phase 8) fixes React.StrictMode's synchronous double-invoke
+  of the mount effect — two concurrent /auth/refresh calls within one
+  page's JS lifetime. It is module-scoped by design, which is exactly
+  why it dies on `page.goto()`; it was never meant to survive
+  navigation and cannot.
+- **Server-side `REFRESH_REUSE_GRACE_SECONDS`** (own Decision entry
+  above) fixes aborted-response cascades UP TO its ceiling. It IS the
+  mitigation for this class of race — the sessionStorage cooldown
+  keeps the cascade under the ceiling that mitigation provides, and
+  the 30→60 bump widens the ceiling for cases the cooldown cannot
+  cover (a page load outside the 5s window; a client where the
+  cooldown didn't apply).
+
+Neither is being removed or weakened; each still covers what it always
+covered. The cooldown covers what neither did — the specific
+Playwright-under-CI-concurrency cascade — by not firing the aborted
+calls in the first place.
+
+**CI merge gate now self-audits — bypassing has a structural cost.**
+New step in `.github/workflows/ci.yml`'s `e2e-playwright` job: on
+failure, asserts `apps/e2e/test-results/` is non-empty (i.e.
+Playwright's `trace: 'retain-on-failure'` actually produced traces).
+If not — the harness itself crashed before any test ran — the job
+fails loud with a specific message stating the merge check must not
+be overridden without a trace to inspect. Uploads the traces as their
+own artifact alongside the existing `playwright-report/`. Three
+overrides in one session happened because bypassing cost nothing; now
+whoever overrides has at minimum to look at the trace, which is what
+this file's own primary lesson already required in principle but did
+not enforce in structure.
+
+**The artifact rule paid for itself on its first real run.** One
+trace pull from the first post-fix red CI diagnosed what nine
+consecutive runs of pattern-matching across two prior sessions could
+not: the failing subset wasn't rotating because of some deep
+concurrency subtlety, it was rotating because the /login cascade was
+MASKING at least four independent downstream failures, and which one
+surfaced first depended on which spec's mount refresh happened to
+land in the aborted-cascade window. Read once, diagnosed
+definitively — no theorising, no rotation, no third session pretending
+the exception was tenable. That is the argument for the rule in one
+sentence: **an artifact you can read is worth more than nine runs you
+can only pattern-match on.**
+
+**Regression coverage.** 8 new unit tests (4 per app, in the existing
+`api.test.ts`) prove the cache primitive round-trips, expires after
+`AUTH_COOLDOWN_MS`, refuses malformed input without throwing, clears
+cleanly — and, crucially, that the raw token never enters storage
+(the test reads sessionStorage's raw contents and asserts the token
+substring and the signature segment are both absent). These prove the
+MECHANISM works.
+
+**CI proof — three consecutive green full-suite runs on one commit
+(6f0dd65), attempts 2, 3 and 4 of run 33916938865, all five jobs
+success on every attempt:**
+
+- Lint, typecheck, unit tests, build: 2m13s / 2m54s / 2m46s
+- Integration tests (Postgres + Redis): 4m21s / 4m04s / 5m07s
+- E2E (Playwright + built frontend): 2m57s / 2m53s / 2m39s
+- Native install (real Postgres/Redis/nginx): 1m38s / 2m26s / 2m07s
+- Native upgrade (populated DB): 2m55s / 3m26s / 2m53s
+
+Attempt 1 on the same commit was RED on E2E, and the summary of
+what failed and why was written wrong in this file's earlier
+revision and in commit 8301b2e's own message — corrected here,
+with the mechanism recorded so a future session doesn't repeat
+the shortcut. The Playwright log for attempt 1 (job 101166977274)
+actually named:
+
+- `user-role-edit.spec.ts:21:5` — **hard fail** on both the
+  initial attempt AND `retry #1`. Initial attempt: line 105
+  `expect(editedRow).toBeVisible()` timed out at 5000ms. Retry #1:
+  line 105 passed (row appeared), then line 108
+  `expect(controlAfterLabel(page, 'Role')).toHaveValue(secondRoleId)`
+  failed because the Role `<select>` rendered a specific stale
+  UUID (`32d1fc24-cf69-43c4-b8be-f38c16524188` — an OLD role from
+  before the test's own edit) instead of `secondRoleId`. Marked
+  "1 failed" in the run summary. Recorded as a real, confirmed
+  bug in docs/todo.md; see that entry for the failure class and
+  the follow-up scope.
+- `cheque-bounce.spec.ts:28:5` — **flaky, passed on retry**. Line 70
+  `not.toHaveValue('')` for GST rate base price. Marked "1 flaky"
+  in the run summary. This is the entry the docs/todo.md
+  cheque-bounce section already tracks; that entry is unchanged.
+
+The regression test (integration-tests) still went GREEN on
+attempt 1, which is what proves the auth-race fix works
+independently of either E2E failure. The three-green bar started
+at attempt 2 per the "3-consecutive-green" rule.
+
+**How the earlier wrong summary happened, recorded because a
+future session will trust this log**: the "one transient
+user-role-edit toBeVisible flake, PASSED on retry" line was
+composed from attempt 4's run-level pass/fail totals (which
+were clean) rather than from attempt 1's own Playwright log
+(where the retry also failed and named a specific stale UUID).
+The write-up phase pulled the wrong artifact — GitHub's run
+summary shows the LATEST attempt's totals, and it was read as
+if it described attempt 1. A user push-back on this file's
+own claim forced the correction; without that, a real
+regression-class bug (post-mutation refetch/render race — see
+the docs/todo.md entry) would have shipped documented as a
+transient flake, and the next session hitting the same shape
+would have inherited the misdiagnosis. **Discipline for future
+CI write-ups in this file: cite the specific run+attempt+job
+id, and quote directly from that attempt's log, not from the
+top-level "N passed / M failed" line of a later attempt.**
+
+**The full story of what went wrong on this branch before landing here**
+— retained because the reasoning matters more than the specific
+missteps, and future sessions will hit similar shapes:
+
+- An earlier three-green run on commit 9bbae76 (run 33292860530)
+  was also 3-of-3 green, but subsequent runs on the same fix branch
+  (c35f4c3 docs-only, 33645314654 attempt 3) each red on ONE spec —
+  inquiry-dump and user-role-edit respectively. Superficial-fix
+  attempt was to widen 20 waitForResponse predicates with
+  `&& r.status() !== 401` (commit a365279), effectively teaching the
+  tests to ignore the 401s from the cooldown-skip's null-token
+  window. That was wrong. It hid the real defect (every cooldown-
+  hit page load fired every request un-authed → 401 → retry,
+  DOUBLING every request at the network layer, silently) and would
+  have masked every future auth-adjacent bug in the same class as
+  the 2FA CSRF-cookie, stale-CSRF, and missing-tempToken bugs this
+  file already documents as caught only because a test noticed the
+  401. Reverted in 270e0dd unconditionally.
+- Trace evidence from the doubling: 8 GETs 401 in a burst after a
+  cache-hit navigation to /presales/inquiries, one refresh, then 8
+  retries (well-attested by an earlier /admin/masters navigation
+  where the retry 2xxs are all visible in the same trace).
+  Contained at the handler by JwtAuthGuard, but leaked to every
+  downstream layer that counts requests: rate limiter, access log,
+  metrics. DEFAULT_THROTTLE_LIMIT=10000 was partly compensating
+  for this rather than fixing anything.
+- Correct app-side fix — **lazy proactive refresh** (commit
+  74f9213): on api() entry, when `!accessToken && readAuthCache()`
+  (cooldown-hit page load with a recent successful session on
+  record), await refreshSession() once before the request goes out.
+  Single-flighted, so N concurrent mount-time useQuery hooks share
+  ONE /auth/refresh instead of 8+1 (initial requests 401, one
+  shared refresh, 8 retries). Ties refresh to user-initiated /
+  useQuery-mount-initiated work, which happens after page settle
+  and past the abort window — so it does NOT reintroduce the
+  aborted-refresh cascade.
+- Proof that doubling was actually fixed by 74f9213 — a temporary
+  trace-capture push (commit 3b5d959, reverted in 542a62f) enabled
+  `trace: 'on'` and `if: always()` on the artifact upload, then
+  measured 401 counts across all 40 specs on the resulting green
+  run. Every previously-affected spec showed 0 401s on business
+  endpoints (the 1-2 401s per spec were all on `/auth/refresh`
+  itself — the initial no-session probe on /login before login,
+  not from the cooldown path).
+- DEFAULT_THROTTLE_LIMIT retuned 10000 → 2000 empirically (commit
+  542a62f) — measured peak from the trace-capture run's own
+  network logs: 963 requests in the widest 60s window across all
+  40 specs, 4 parallel workers on one runner IP. 2000 = ~2x
+  headroom, still 5x tighter than the earlier over-guess.
+
+**AGENTS.md is deleted** in this same PR (commit d164bc2). It was
+a manual mirror of CLAUDE.md that had drifted ~4 entries behind,
+including the PR #27 E2E-exception entry this Decisions entry
+supersedes. The drift is proven to recur without anyone noticing,
+and nothing in the repo consumes AGENTS.md — a stale file at a
+conventional path is worse than none.
+
+**Cascade fix confirmed by trace evidence, not just by boolean-green.**
+The two most login-heavy specs, `team-scope` and
+`rapid-reload-session`, ran green on every attempt (the latter's
+`portal: a burst of full page loads does not end the session` test
+in 5.1s on attempt 3). Neither existed in this session's failing
+subset because both had cleared before the residual mechanism (the
+default-throttle exhaustion, see the two follow-up commits below)
+was identified — but both are exactly the shape of test the /login
+cascade would fail first. Zero traces across the three attempts show
+a browser parked on /login mid-test; every failure that ever
+appeared on this branch, before or after the fix, showed the test
+past `expect(toHaveURL('/'))` and failing further along.
+
+**The residual failures after the auth fix were a separate,
+pre-existing class the cascade had been masking — and this is why
+the failing set kept rotating across every prior CI run.** A masking
+bug makes everything downstream of it look intermittent: any spec
+whose /login cascade fires first appears as the failure, hiding
+that four other specs would have failed too if the cascade hadn't
+gotten to them first. Which one shows up on any given run is a race
+between the auth cascade and whichever downstream race the runner
+happens to expose that moment — which reads exactly like "the
+failing subset rotates depending on what else is running," the
+pattern this file's own tail entry documented across two prior
+sessions as an unsolved mystery. It wasn't a mystery; it was the
+signature of a bug that swallowed every downstream failure into
+itself, and the trace evidence surfaced all four downstream classes
+at once the moment the cascade stopped consuming them.
+
+Four of the five originally-failing specs (`ticket-reply`,
+`successful-to-booking`, `role-permission-edit`, `user-role-edit`)
+hit 429s on `/auth/refresh` — the shared per-IP default throttle
+bucket (100 req/60s) exhausted by four parallel Playwright workers
+on the one runner IP. Trace counts across the first post-fix run:
+9/6/5/4/10 429s across those four specs plus zero on
+user-deactivate-reactivate, plus 429s on non-auth endpoints
+(`/company/config`, `/reports/postsales/zero-gst-bookings-count`)
+confirming the exhaustion was system-wide, not auth-specific.
+`DEFAULT_THROTTLE_LIMIT` env override, set to 10000 for the
+harness's webServer only, closes this. The fifth spec
+(`user-deactivate-reactivate`, 0 429s) was a genuine DOM race —
+the mutation returned but the row's re-render after
+`invalidateQueries(['users'])`'s refetch didn't happen within
+Playwright's default 5s `toBeVisible` timeout; fixed by waiting for
+the refetch response explicitly before asserting on the DOM (the
+CLAUDE.md booking-wizard-option-count pattern). Same
+throttle-exhaustion also blocked six tests across three
+integration-test files (`e2e-plugins`, `e2e-booking-gst-validation`,
+`e2e-inquiry-disposition`) once the E2E job started passing,
+addressed by setting `DEFAULT_THROTTLE_LIMIT=10000` in
+`apps/api/vitest.config.ts`'s `test.env` block.
+
+**Local reproduction was attempted first per instruction**; not
+feasible on this Windows dev box (no Postgres/Redis, no reachable
+verification VM), so the loop was one-shot-plus-push per the
+accepted fallback. The first post-fix push, second post-fix push
+(AGENTS.md deletion), and third (attempted `pnpm test` locally +
+theorising) all went RED on the same throttle mechanism — the
+diagnosis came from reading the traces the CI artifact rule this
+same commit series added, not from guessing.
+
+**cheque-bounce flake is now the only remaining known E2E flake.**
+Observed on the earlier 9bbae76 run's attempt 1 (retry-recovered);
+recurred once on the c35f4c3 docs-only run alongside inquiry-dump.
+Both times at `cheque-bounce.spec.ts:70:72`
+(`expect(locator).not.toHaveValue`). Not touched by this fix, not
+in the original cascade subset. Also flaked on attempt 1 of run
+33916938865 (this branch's final commit's very first attempt) —
+same assertion. Full details, exact assertion, and the trace-
+retrieval command are logged in `docs/todo.md`. Do NOT extend
+Playwright's `retries: 1` to hide it further — a
+retry-that-passes-once is exactly the signal that led to this
+session's whole investigation, and hiding it further would put the
+merge gate back where it started.
+
+### Server-side `rotateRefreshToken` — FOR UPDATE + REPLAY grace path (E5)
+
+The client-side lazy-proactive-refresh fix (74f9213 above) closed
+the doubling and put the harness back on a green footing, but it
+left the server-side race the whole cascade was originally caused
+by: `TokenService.rotateRefreshToken` did `findFirst → update →
+create` as three separate auto-committed statements, and two
+exactly-concurrent callers with the same cookie could race between
+the winner's UPDATE (marks token revoked) and INSERT (creates
+successor). Two failure modes on that race, both surfaced by the
+regression test committed alongside the fix:
+
+- **Loser reads AFTER winner's UPDATE commits but BEFORE the
+  INSERT**: sees token revoked-within-grace, queries family for a
+  live successor — finds none, winner's INSERT hasn't committed
+  yet — falls through to `revokeFamilyById` and returns null → 401.
+  Legitimate rapid-nav → parked on /login. This is the mode the
+  test measures at cycle 0: 1/5 losers on staff `/auth/refresh`,
+  2/5 on portal `/portal/auth/refresh` per commit N's CI log
+  (run 33915421187).
+- **Loser reads BEFORE winner's UPDATE commits**: both see token
+  live, both do their own rotateRow, both INSERT new tokens for
+  the same family. Both callers return 200; only one new token
+  reaches the client's cookie jar; the other is orphaned. **Family
+  now has TWO live tokens for one legitimate session — reuse-
+  detection is defeated for exactly the theft-detection scenario
+  the family model exists to catch.** Narrow window, but a real
+  security callout: goes in CHANGELOG.md's [Unreleased] Security
+  section, not just in prose here.
+
+**Fix (E5 — LOSER RETURNS NO COOKIE)**: whole-function interactive
+`$transaction` with `SELECT ... FOR UPDATE` on the token row via
+`$queryRaw`. The UPDATE + INSERT commit atomically inside the same
+tx, so a serialized loser waiting on the row lock always sees the
+family in a coherent state — revoked ancestor + live successor,
+never revoked-with-no-successor. Grace path is REPLAY, not
+CHAIN: sees the live successor, returns `{kind: 'replayed',
+userId}` with no rotation and no new raw. The controller mints an
+access token from `userId` and sets NO refresh cookie for
+replayed callers; the winner's `Set-Cookie` already reaches the
+browser, and the client's cookie jar converges deterministically
+on the winner's rotated token regardless of response-arrival
+order.
+
+**Why not the alternatives that were considered and rejected in
+this session's design work:**
+
+- **E1** — Redis-backed ephemeral cache of raw successor tokens
+  keyed on `(family, ancestor_hash)` for `reuseGraceMs`. Enables
+  REPLAY by giving losers the raw. Rejected because it widens the
+  DB-compromise blast radius: raws sit in Redis for the grace
+  window, keyed to the just-consumed ancestor's hash. A Redis-
+  compromise attacker gets recently-consumed-ancestor tokens'
+  successors for up to grace-window seconds. And E5 achieves the
+  same client outcome (deterministic cookie convergence) without
+  any raw-token storage.
+- **E2** — In-memory Map keyed by `(family, ancestor_hash)`.
+  Simpler than E1 but breaks the moment this project runs behind
+  more than one api instance (a loser hitting a different instance
+  than the winner gets a cache miss, falls through to revoke-
+  family or chain-rotate).
+- **E3/E4** — CHAIN with FOR UPDATE, no REPLAY: every replay
+  rotates the current live successor. FOR UPDATE serializes the
+  N callers, so N gets N sequential rotations. Family accumulates
+  a chain of dozens of rotations per session over time; family-
+  revocation (the reuse-detection signal) becomes noisier. Client
+  cookie is whichever response landed LAST — under aborted
+  responses that's a mid-chain revoked token, which trips the
+  grace window again on the next call and churns another rotation.
+  Rejected in favour of a deterministic cookie.
+
+**Discriminated result — the only safe API shape:**
+
+```ts
+export type RotateRefreshTokenResult =
+  | { kind: 'rotated';  userId; newRaw; expiresAt }
+  | { kind: 'replayed'; userId };
+```
+
+An `{ userId, newRaw?, expiresAt? } | null` shape that "silently
+means skip the cookie" when `newRaw` is missing would recreate
+exactly the split-brain state this branch already burned twice on.
+The discriminated union forces exhaustive `kind` checks at every
+call site — omitting a branch is a TypeScript error because
+`result.refreshRaw` doesn't exist on `kind: 'replayed'`. Applied
+symmetrically to `AuthService.refreshTokens` and
+`PortalAuthService.refreshTokens`, then unwrapped identically at
+both controller sites (`auth.controller.ts`, `portal-auth.controller.ts`)
+per the mirrored-auth standing rule. `TokenService` is SHARED
+(portal-auth.service.ts:14 imports it directly), so the fix lives
+once; the controllers are two separate call sites that both must
+handle the discriminated shape.
+
+**Regression test — outcome-only, no timings**
+(`apps/api/test/refresh-concurrent-rotation.test.ts`, both
+endpoints, N=5 concurrent × K=20 bursts per endpoint). Invariants
+per burst:
+
+1. every response returns 200
+2. exactly ONE live refresh_token in the family after the burst
+3. exactly ONE response carries a `Set-Cookie` for the refresh
+   cookie; the other N-1 carry NONE
+4. exactly ONE new refresh_token row created per burst
+5. K-cycle forward progress: the presented cookie's row is
+   revoked after the burst; the winner's new cookie's row is live
+
+Pre-fix (commit N=5097521, run 33915421187) failed on invariant
+(1) at cycle 0, deterministically — 1/5 losers 401 on staff,
+2/5 on portal. Fix (commit N+1=6f0dd65) passes all five invariants
+across the full K=20 cycles on both endpoints, on every attempt
+of run 33916938865 (integration-tests green on all 4 attempts,
+including attempt 1 where E2E failed HARD on user-role-edit — a
+separate, pre-existing post-mutation refetch/render bug, see
+docs/todo.md's user-role-edit entry; the earlier revision of this
+paragraph misdescribed that failure as a "flake" per the
+corrected attempt-1 write-up above).
+
+**RefreshToken is NOT tenant-scoped** — no `companyId` column
+(schema.prisma:215), not in `TENANT_SCOPED_MODELS`, uses
+`SYSTEM_PRISMA` (BYPASSRLS). The concern about `$transaction` +
+`$queryRaw` losing per-query tenant `SET LOCAL` context
+(applicable to the tenant extension in other services — see
+withTenantTx's docs) does not apply here. The interactive
+transaction is safe to compose with `$queryRaw FOR UPDATE`.
+
+**Existing `refresh-reuse-grace.test.ts` unit tests updated** to
+narrow on the discriminated result — 5 sites, most via
+`if (first?.kind !== 'rotated') throw` guards, one via
+`if (r!.kind === 'rotated') latest = r.newRaw` in a
+raw-successor-tracking loop that only advances `latest` when the
+call rotated (because replays don't produce a new raw). Pre-fix
+sequential-re-presentation semantics are preserved: iteration 1
+rotates, iterations 2..N are REPLAYS returning the userId with no
+new raw. Both kinds yield a live session; the family stays
+intact.
+
+### E5 gap — split the grace window into REPLAY + HEAL bands
+
+The E5 fix above (kind:'replayed' with no cookie for every
+presentation of a just-revoked token inside reuseGraceMs) closed
+the loser-401 and orphaned-successor races correctly for
+concurrent bursts of N callers on one cookie. It opened a new,
+narrower failure mode: a **stuck client whose winner's response
+never landed** — aborted mid-navigation before the browser
+committed the winner's Set-Cookie header. Under E5-only, that
+client keeps re-presenting T0, gets `kind:'replayed'` with no
+cookie every time, and at reuseGraceMs the family is revoked and
+the user is logged out. Browser abort timing was known to be
+narrow but not obviously irrelevant (a page.goto() before the
+server's first byte lands is a real abort path; bfcache /
+prerender abandonment has documented Chromium bug reports where
+in-flight Set-Cookie is dropped even after headers arrived), and
+the failure mode is silent — no error, just a logout minutes
+later.
+
+**Made observable, then fixed.** `refresh-e5-gap-stuck-client.test.ts`
+started as an investigation file (per direct instruction, report
+the observed behaviour first, don't fix). Three tests probed the
+E5-only design deterministically: N re-presentations of T0 stay
+`kind:'replayed'` inside grace; grace is anchored to T0.revokedAt
+(set once by the winner) and does NOT advance on replays; past
+grace, the family is revoked and the stuck client is logged out.
+All three passed against E5-only — encoding, not questioning, the
+broken behaviour. Fix follows.
+
+**Fix: split the grace window** via a new `REFRESH_REPLAY_WINDOW_MS`
+(default 5000):
+
+- `[0, replayWindowMs]` → REPLAY (unchanged E5). Concurrent-burst
+  loser. `kind:'replayed'`, access token only, no cookie.
+- `(replayWindowMs, reuseGraceMs]` → HEAL (pre-E5 CHAIN, scoped).
+  Stuck-client recovery. Re-lock the family's live successor with
+  a nested `SELECT ... FOR UPDATE`, rotate it, hand the caller a
+  fresh cookie via `kind:'rotated'`.
+- `(reuseGraceMs, ∞)` → revoke family, return null. Unchanged.
+
+**Preflight checks, done before writing the code, not assumed:**
+
+- **Access-token TTL is 15m** (`JWT_ACCESS_EXPIRES_IN=15m`,
+  auth.module.ts:19) for both staff and portal (portal reuses the
+  same `TokenService.signAccessToken` / same `JwtService`). Replay
+  window of 5000ms is 180× smaller, so a concurrent-burst loser's
+  fetch (Promise.all-scale spread) lands firmly inside the replay
+  band.
+- **Concurrent-burst spread from CI-measured timings**: run
+  33916938865 attempt 4 integration-tests log — staff burst 1446ms
+  / 20 = 72ms per burst, portal 1261ms / 20 = 63ms per burst,
+  including per-burst DB assertions and cookie extraction. Actual
+  Promise.all fetch-initiation spread is sub-millisecond per the
+  test's own doc comment. 5000ms is three orders of magnitude
+  above the fetch-layer spread and ~65× above per-burst wall
+  time.
+
+**Correction to an earlier revision of this bullet**: the
+15m-access-TTL bullet used to say "a stuck client's next scheduled
+refresh (~15 minutes later on token expiry, or on next mount)
+lands well outside the replay band and in the healing band or
+past-grace territory, depending on exact timing." That was wrong
+and misleading in the same direction: 15 minutes is well past
+`reuseGraceMs=60s`, so a stuck client whose next refresh is
+driven by access-token expiry lands in the past-grace-revoke
+branch, not the heal band. Only a mount-driven refresh (page
+reload / new tab / browser-restore tabs) within `reuseGraceMs`
+of the original abort can reach the heal band. See the "When
+the heal path actually fires in the real client" bullet below
+for the full audit of client-side refresh triggers this claim
+should have been grounded in.
+
+**When the heal path actually fires in the real client**
+(audit of `apps/web/src/lib/api.ts`, `apps/web/src/lib/auth.tsx`,
+and their apps/portal mirrors, per the mirrored-auth standing
+rule). There are exactly three call sites that fire
+`/auth/refresh` in each app:
+
+  1. `AuthProvider`'s mount effect (page load / new tab / tab
+     restore). Fires on every mount whose cooldown-cache lookup
+     misses (i.e. no successful refresh within the last 5s).
+  2. `api()`'s 401-retry, gated `if (res.status === 401 &&
+     accessToken)` — fires when a request we made carrying a
+     Bearer token got rejected, which for a healthy session
+     happens ~15 minutes in when the access token expires.
+  3. `api()`'s lazy proactive refresh, gated `if (!accessToken
+     && readAuthCache())` — fires once per cooldown-hit page
+     load right before the first API call, single-flighted with
+     any concurrent refreshSession(). This is the cooldown
+     cascade fix's own call site.
+
+  Crossed against the heal band (`(5s, 60s]` after the original
+  aborted rotation):
+
+  - (1) mount-driven: **hits the heal band** if and only if the
+    reload happens within 60s of the original abort. This is
+    the rapid-reload case (F5 / Cmd-R / same-tab navigate to
+    the same or a same-origin URL / new-tab open of a same-
+    origin URL / browser-startup tab restore). This is exactly
+    the case that produced the original bug.
+  - (2) 401-retry-driven: **does NOT hit the heal band**. Fires
+    at ~15 minutes (access-token expiry), which is well past
+    `reuseGraceMs=60s`. Lands in the past-grace-revoke branch,
+    same as pre-fix. If the client's cookie is still stuck on
+    T0 15 minutes after the abort, the family is revoked and
+    the user is logged out — exactly the pre-fix behaviour for
+    that timing.
+  - (3) lazy-proactive: **does NOT hit the heal band** on its
+    own. It only fires from a mount that already succeeded via
+    the cache — i.e. mount (1) never fired a refresh — so the
+    cookie in the jar is whatever the successful cooldown
+    session used, which is by definition NOT stuck.
+  - SPA navigation within an already-loaded app: fires no
+    refresh at all (no mount, no 401 while the access token is
+    valid). Cannot reach the heal band by construction.
+
+**Residual, stated explicitly**: this fix recovers a stuck
+client that re-presents within the heal band. In practice, that
+means the FULL-PAGE-RELOAD case (or its equivalents above). A
+stuck client that does NOT re-present within `reuseGraceMs` —
+e.g. an idle tab left open past 60s, or any session whose next
+refresh is driven by 15m access-token expiry — is still logged
+out at `reuseGraceMs`, unchanged from E5-only. That is not a
+regression from E5-only (nothing got worse), and it is not
+generally worse than pre-E5 either (pre-E5 the same idle-past-
+grace stuck cookie was revoked on presentation). The
+split-window fix's scope is precisely "recover the rapid-reload
+case E5-only silently killed", and that scope should be
+reflected in every future reference to this fix rather than
+generalising it to "stuck-client recovery" without qualification.
+
+**Nested FOR UPDATE on the successor row inside the heal path** —
+two concurrent stuck-client presentations must serialize on the
+successor too, not just on the ancestor, or the healing path
+reintroduces the exact orphaned-successor bug FOR UPDATE was
+introduced to close for the winner path. `tx.$queryRaw` with
+`SELECT ... WHERE family = ${existing.family}::uuid AND is_revoked
+= false ... FOR UPDATE`.
+
+**Real bug caught by the first test run, not review — Phase 7
+commit 2's lesson repeating**: the `::uuid` cast on the family
+parameter is load-bearing. Prisma's tagged-template `$queryRaw`
+binds string params as TEXT by default, and `refresh_tokens.family`
+is UUID. Postgres refuses `uuid = text` at query-plan time
+(error 42883). The exact same bug this file's own Phase 7 commit
+2 decisions entry documented (`WebhookDeliveryProcessor`'s raw
+UPDATE against `webhook_deliveries.id`) — and the exact standing
+rule that entry recorded: **any new `$executeRawUnsafe`/`$queryRaw`
+comparing a parameter against a `uuid`-typed column needs the
+cast, nothing catches this at compile time, only a real query
+against a real Postgres schema does**. Caught here by the
+refresh-e5-gap-stuck-client HEAL band test on first run before
+commit.
+
+**Security shape shift, documented in CHANGELOG's Security
+section, not a code comment** — per direct instruction. In the
+healing band a presented revoked token now yields a REFRESH
+cookie (not just an access token). This is the pre-E5 CHAIN
+behaviour every install ran before the rotation-race fix landed,
+but it is a real difference from E5-as-first-shipped. Rationale:
+the narrower E5-only design traded that off against the
+stuck-client case, and that trade-off was wrong in the direction
+of denying real users access after ordinary browser behaviour.
+Full family revocation for genuine post-window reuse is
+unchanged. Tune via `REFRESH_REPLAY_WINDOW_MS` +
+`REFRESH_REUSE_GRACE_SECONDS`; setting the latter to 0 restores
+strict pre-fix behaviour and makes the replay window irrelevant.
+
+**Rejected the Playwright-abort empirical test** — per direct
+instruction. The split window makes the browser's Set-Cookie
+behaviour irrelevant to recovery: whether the winner's cookie
+committed or not, past 5000ms the client can present its stuck
+token and heal. The empirical question about abort-paths and
+Set-Cookie commit timing therefore no longer needs deciding to
+choose a design.
+
+**Regression coverage rewritten** as three permanent tests in
+`refresh-e5-gap-stuck-client.test.ts`, encoding the HEALED
+behaviour:
+
+- REPLAY band: burst against T0 inside `replayWindowMs`, all N
+  return `kind:'replayed'` with no `newRaw`. Family stays at 2
+  rows.
+- HEAL band: rotate T0 → T1, discard T1, sleep past
+  `replayWindowMs`, present T0. Assert `kind:'rotated'` with
+  fresh `newRaw`. Then rotate again with the healed token, prove
+  it works — that is the self-heal end-to-end proof the E5-only
+  design could not satisfy for a stuck client.
+- REVOKE past grace: sleep past `reuseGraceMs`, present T0.
+  Assert null, family fully revoked.
+
+`refresh-concurrent-rotation.test.ts`'s N×K burst invariants
+(1)-(5) are UNCHANGED — bursts fire within milliseconds and take
+the REPLAY path unchanged. `refresh-reuse-grace.test.ts`
+UNCHANGED — every existing test still passes with the split
+window.
+
+**CI proof — three consecutive green full-suite runs on one
+commit (a1ce150), attempts 1, 2 and 3 of run 33942272563, all
+five jobs success on every attempt, ZERO retries anywhere:**
+
+- Lint, typecheck, unit tests, build: 3m03s / 2m53s / 2m43s
+- Integration tests (Postgres + Redis): 4m34s / 4m33s / 4m51s
+- E2E (Playwright + built frontend): 3m22s / 2m59s / 2m40s
+- Native install (real Postgres/Redis/nginx): 2m31s / 3m32s / 2m17s
+- Native upgrade (populated DB): 3m25s / 3m33s / 3m35s
+
+Stronger than 6f0dd65's 3-of-3 chain, which needed attempts 2/3/4
+(attempt 1 red on user-role-edit; see the correction above).
+a1ce150 started clean on attempt 1 — the split-window fix itself
+touched only the refresh path, and neither the pre-existing
+user-role-edit refetch/render bug (docs/todo.md) nor the
+cheque-bounce flake (also docs/todo.md) surfaced across the
+three attempts.
+
+**Per-install tunables recap** (env vars, both optional, both
+already documented in the fix's own doc comment):
+
+- `REFRESH_REPLAY_WINDOW_MS` (default 5000). Concurrent-burst
+  window. Widen only if bursts genuinely exceed this on your
+  infrastructure (they never should — see preflight above).
+- `REFRESH_REUSE_GRACE_SECONDS` (default 60). Stuck-client
+  ceiling. `0` disables the split entirely and restores the
+  strict pre-fix "any replay = family revocation" behaviour.
+
+Setting `REFRESH_REUSE_GRACE_SECONDS=0` makes
+`REFRESH_REPLAY_WINDOW_MS` irrelevant — every replay hits the
+outer `revokedAgoMs <= reuseGraceMs` check as false and falls
+through to family revocation, exactly as before either fix
+existed. Kept for the operator whose threat model doesn't
+tolerate any grace at all.
+
+### E5 split-window follow-up — deadlock analysis, observed concurrent-heal behaviour, trace-retention process rule
+
+Three additions after the split-window fix landed on `a1ce150`,
+each addressing a specific gap the reviewer surfaced. Not
+independent decisions — they belong with the split-window entry
+above and are recorded here so the file's own primary lesson
+("two locks with an unstated ordering rule is the composition
+class that has bitten this branch repeatedly") is discharged
+before merge.
+
+**Lock ordering rule for the heal path — no cycle possible.**
+The heal path takes TWO row locks: first T0 (the ancestor,
+already held from the outer `SELECT ... FOR UPDATE`), then the
+current live successor T1 (inside the nested `$queryRaw` in the
+healing branch). Ordering rule stated explicitly: **any transaction
+that touches more than one refresh_token row locks the ancestor
+BEFORE the successor, never the other way around.** Verified
+against every path that takes a row lock:
+
+- **Winner path** (T0 is live, rotates T0 → T1). Takes FOR UPDATE
+  on T0 via the outer SELECT. INSERTs T1 (INSERT acquires a row-
+  level lock on the new row it creates, not on any pre-existing
+  row). No lock on any pre-existing successor row. Order: {T0}.
+- **Replay-band path** (T0 revoked <= replayWindowMs ago). Takes
+  FOR UPDATE on T0 via the outer SELECT. Reads the live successor
+  via `tx.refreshToken.findFirst` — no FOR UPDATE clause, plain
+  MVCC read. No lock on any successor. Order: {T0}.
+- **Heal-band path** (T0 revoked in (replayWindowMs, reuseGraceMs]).
+  Takes FOR UPDATE on T0 via the outer SELECT. Then takes FOR
+  UPDATE on the current live successor T1 via the nested
+  `$queryRaw`. Then rotates T1 → T2. Order: {T0, T1}.
+- **`revokeFamily(rawToken)` / `revokeAllForUser` / `revokeAllForUserExceptToken`**.
+  Bulk `updateMany` on `family = ...` or `userId = ...`. Postgres
+  locks the matched rows one-at-a-time in scan order, not
+  parent-first. Runs OUTSIDE any interactive transaction that
+  holds T0. Cannot participate in a T0-then-T1 vs T1-then-T0
+  cycle because it doesn't hold T0 (or any other single
+  refresh_token row) while trying to acquire another.
+- **`createRefreshToken`** — pure INSERT, acquires no pre-
+  existing row lock.
+
+Every path that locks two refresh_token rows in the same
+transaction locks the ancestor first. There is no path that
+locks a successor and then tries to lock its ancestor. **A
+deadlock cycle between two rotation transactions in this service
+is therefore not reachable by construction, not just not
+observed** — same "argue it, don't measure it" discipline the
+Phase 3 advisory-lock decisions entry established for that
+serialisation surface.
+
+The one composition risk left standing: a caller who holds the
+outer T0 lock AND makes any other Postgres call inside the same
+tx that could take a lock on a NEW refresh_token row (a helper
+that revoked family members, for instance). The current
+implementation makes no such call inside the interactive tx —
+`revokeFamilyById` runs only in the post-window path AFTER the
+tx returns, on `this.prisma` not `tx`. If a future change
+introduces such a helper, the ordering rule above (**never touch
+a second refresh_token row inside the outer tx except via the
+heal path's nested FOR UPDATE on the current live successor**)
+tells it what shape to take.
+
+**Observed behaviour under N concurrent stuck clients in the
+heal band — CHAIN, N distinct cookies on the wire.**
+Regression test `refresh-e5-gap-stuck-client.test.ts`, its
+fourth case: N=4 concurrent presentations of T0, all past
+replayWindowMs, all inside reuseGraceMs. Actual observed
+behaviour, encoded in the test's assertions verbatim so a
+future change fails a test with a clear name:
+
+- All 4 responses `kind: 'rotated'` (no replays).
+- 4 distinct new raws on the wire.
+- Family accumulates 4 heal steps: T0..T4 revoked, T5 live.
+- No orphaned successors — each heal correctly revokes the
+  previous successor before creating its own (the nested FOR
+  UPDATE on the successor row is what makes this hold; without
+  it, two concurrent heals would race on the same successor
+  and both INSERT their own, which IS the winner-path bug FOR
+  UPDATE was introduced to close).
+
+Mechanism: T0.revokedAt is set once by the original winner and
+never updated by any heal-path caller. Each concurrent caller
+serializes on T0's FOR UPDATE, sees the same revokedAgoMs (all
+past replayWindowMs, all inside reuseGraceMs), takes the heal
+path, acquires FOR UPDATE on the CURRENT live successor (which
+each subsequent caller finds as the previous caller's newly-
+committed successor), rotates it, commits. Serial by lock
+acquisition; monotonic chain in the family.
+
+**Client-side impact**: N concurrent tabs each get a distinct
+new refresh cookie in their response headers. The browser's
+cookie jar is shared across same-origin tabs, so the LAST
+response's Set-Cookie wins in the jar. All prior-in-chain
+successors are already revoked server-side. The client
+converges — the winning-in-jar cookie is live, subsequent
+refreshes rotate normally from it — but the family accumulated
+N chain steps per concurrent-stuck-tab burst.
+
+This IS the pre-E5 CHAIN behaviour, applied inside the healing
+band by construction (the reviewer's own read; matched
+empirically by the regression test). It is not a bug against
+the split-window fix's stated design — the split-window design
+guarantees the STUCK CLIENT CAN RECOVER, which is achieved by
+any of the N callers' responses landing. It is also not clearly
+correct as long-term shape:
+
+**Design question surfaced by this test, NOT decided:** should
+the second (and subsequent) concurrent healer REPLAY the
+already-healed successor rather than rotate it? "One heal per
+band entry" is the reviewer's phrasing. Options considered
+BELOW; deliberately not implemented in this session so the
+choice is a separate decision:
+
+- **A — Do nothing, accept CHAIN in the heal band.** Behaviour
+  is bounded (N chain steps per concurrent-tab burst),
+  converges, and matches the CHAIN semantics the CHANGELOG
+  security callout already names as the healing band's shape.
+  Real-world case (mid-navigation abort of a full page load) is
+  usually one tab at a time; N-way concurrent-stuck-tab is a
+  corner case within a corner case. Least risk. What we have
+  today.
+
+- **B1 — Update T0.revokedAt on heal (reset the ancestor's
+  clock).** Before rotating the successor, first UPDATE
+  T0.revokedAt = NOW(). Next concurrent caller acquires T0's
+  lock, reads the fresh T0.revokedAt (~ms ago), takes the
+  REPLAY branch instead of HEAL, returns kind:'replayed' with
+  no cookie. Clean "one heal per band entry" semantics.
+  **Breaks the invariant this file's own lock-ordering
+  argument above depends on** — T0.revokedAt "set once by the
+  winner and never touched" is what makes each stuck-client
+  presentation deterministic. Under B1 the ancestor's clock
+  becomes mutable, and every future review has to re-derive
+  the band decision for whatever state the ancestor's clock
+  is in. Doable but the surface expands.
+
+- **B2 — Track "last heal on this ancestor" separately.** New
+  column `refresh_tokens.last_heal_at` (default matches
+  `revokedAt`, updated by each heal). Band decision compares
+  `revokedAgoMs` against `last_heal_at`, not `revoked_at`.
+  Same net effect as B1 without mutating `revokedAt`. Real
+  migration + a new nullable column + a new fact for every
+  future auth-adjacent question to account for. Marginal
+  benefit for the surface added.
+
+- **B3 — Advisory lock on family for heal decisions.**
+  `pg_advisory_xact_lock(hashtext(family))` at the top of the
+  heal branch serializes concurrent heals of the same family.
+  First heal takes lock, rotates. Second heal takes lock
+  (waits), checks whether the current live successor's
+  `createdAt` is < some threshold (say, replayWindowMs) —
+  yes → REPLAY it; no → HEAL. Same shape as Phase 3's
+  round-robin fairness advisory lock (see that decisions
+  entry), similar footprint. Cleaner than B1/B2 because it
+  doesn't mutate any refresh_token state or add columns.
+  Extra Postgres round trip per heal.
+
+- **C — Client-side single-flight across tabs
+  (BroadcastChannel).** Prevent the concurrent-multi-tab
+  burst from ever hitting the server. Larger scope than this
+  branch; belongs alongside the existing per-tab
+  `refreshSession()` single-flight in api.ts, not inside
+  TokenService. Doesn't address the shape at the server —
+  same server-side design still stands, this just makes it
+  less likely to be exercised.
+
+**My read (not a decision):** A or B3. A is defensible because
+the CHAIN behaviour in the heal band is already documented as
+the healing band's shape in the CHANGELOG security callout, and
+the concurrent-multi-tab-stuck case is a corner of a corner
+that converges without user-visible harm (all N callers
+return 200, browser cookie jar converges on one live cookie).
+B3 is the cleanest server-side "one heal per band entry" if
+that shape is desired — it doesn't require mutating T0's
+revokedAt (preserves the lock-ordering argument above) and
+matches an existing Phase 3 pattern. B1 and B2 both trade
+surface expansion for a marginal correctness improvement.
+Neither is a live bug; either is a design choice for what
+we want the healing band's shape to be under concurrent
+presentation. Reviewer to decide.
+
+**Trace retention on re-runs — process rule, mechanism
+unconfirmed.**
+
+Empirical observation from ONE data point (run 33916938865:
+attempt 1 failed and uploaded traces per its own step-15 log,
+subsequent attempts 2-4 succeeded and did not upload — attempt
+1's artifact is nevertheless gone from the artifact API today,
+inside the 7-day retention window). One other run under the
+opposite condition (run 33915421187: attempt 1 failed, never
+re-run, artifact retained). Two data points support "artifacts
+from an earlier failed attempt are lost when a later attempt
+of the same run succeeds," but one/one is not enough to assert
+platform-side reconciliation as the CAUSE with certainty —
+GitHub's own re-run behaviour for artifacts across attempts is
+not well-documented in a way this session's search reached, and
+the observation could be produced by several mechanisms
+(reconciliation, GC, artifact TTL keyed on run's final
+conclusion, undocumented cleanup). The mechanism is UNCONFIRMED
+and the docs/todo.md entry has been softened to say so.
+
+**The remedy doesn't need the mechanism.** Process rule,
+recorded here as a standing discipline rather than a config
+patch (which is guessing without confirmed cause):
+
+> **Any time an E2E job fails on this repo, pull the
+> `playwright-traces` artifact BEFORE triggering a re-run.**
+> Use `gh run download <run-id> -n playwright-traces -D <dir>`
+> or the web UI. This is the ONE window during which the
+> trace is guaranteed available regardless of whether the
+> re-run succeeds. Attempt 1 of run 33916938865 was lost
+> exactly because a re-run was triggered before its trace
+> was pulled; that trace would have made the
+> user-role-edit refetch/render diagnosis in docs/todo.md a
+> straight read rather than a hypothesis.
+
+This rule applies whether the mechanism turns out to be
+platform-side reconciliation, name-collision, TTL, or
+something else — pulling before re-run makes each of them
+irrelevant. If a future session establishes the mechanism
+(e.g. a deliberately-triggered controlled re-run with
+artifact tracking), that can inform whether to also add
+`github.run_attempt` to the artifact name as a
+defence-in-depth. Not doing it pre-emptively because a config
+change to CI whose value only surfaces on the next red E2E
+run should be verified on that red run, not shipped ahead of
+one and assumed to work.
+
+### E5 split-window — concurrent-heal decision: option A, do nothing
+
+Recorded after the reviewer's read of the observed-behaviour probe
+and options list in the entry above.
+
+**Decision: option A.** The heal path stays as it is today. N
+concurrent stuck-client presentations of T0 in the heal band
+produce N distinct `kind:'rotated'` responses, N distinct new raws
+on the wire, and a linear chain of N successors in the family (all
+revoked except the last). The nested FOR UPDATE on the successor
+row keeps this CHAIN forward-progressing rather than forking — no
+orphaned successors, no reuse-detection-defeat. Family growth is
+bounded per band-entry by the number of concurrent stuck tabs.
+Client-side, all N callers return 200 with a valid access token;
+whichever Set-Cookie the browser's cookie jar committed last wins,
+and the client converges on that live successor.
+
+**Why not B3** (the option my own read named as the cleanest
+alternative): B3's advisory-lock-plus-freshness-check would trade
+one Postgres round trip per heal for a strictly bounded family (one
+new successor per band-entry regardless of concurrent-tab count).
+The gain is real but its impact is bounded by how often the heal
+path fires with concurrency > 1 in the first place, and the
+audited answer — see the "When the heal path actually fires in
+the real client" bullet in the previous entry — is: the heal path
+fires only on a mount-driven refresh within 60s of an abort, i.e.
+the rapid-reload case. Multi-tab concurrent-stuck-reload within
+that window is a corner of that corner. B3 guards a path that in
+production may rarely execute; A is already the documented shape
+(CHANGELOG's security callout names it as pre-E5 CHAIN semantics
+scoped to the healing band); rejected for now.
+
+**Why not B1/B2** (mutate T0.revokedAt / new last_heal_at column):
+B1 breaks the "T0.revokedAt set once by the winner and never
+touched" invariant the lock-ordering / deadlock argument in the
+previous entry depends on — that invariant would need re-derivation
+under mutable state. B2 requires a migration and adds a new fact
+for every future auth-adjacent question to account for. Both are
+disproportionate for a shape that isn't a live bug.
+
+**Why not C** (client-side cross-tab single-flight via
+BroadcastChannel): out of the server-side scope this decision
+addresses. Also doesn't change what the server does when the burst
+does hit it — just makes the burst less frequent. Worth considering
+independently if the trigger-audit's "rapid-reload is the only real
+heal-band case" conclusion ever proves incomplete.
+
+**Condition to revisit**: either of these observations from
+operational data or a real incident.
+- The heal-band path fires often enough in production that CHAIN
+  accumulation shows up in `refresh_tokens` size for a single
+  family, or in throughput of `rotateRefreshToken` under load.
+- A concurrent-stuck-multi-tab-reload scenario becomes a common
+  real-user pattern (e.g. a feature that opens N same-origin tabs
+  in one action after an abortable navigation), not just a
+  theoretical burst shape.
+
+Absent either, the observed-behaviour probe stays as a permanent
+regression guard for CURRENT behaviour: a future PR that alters
+the heal path so the shape changes fails a test with a clear name,
+which is when this decision gets re-opened rather than silently
+drifted past.

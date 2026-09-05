@@ -5,6 +5,83 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **`TokenService.rotateRefreshToken`'s grace window is now SPLIT into a
+  replay band (E5) and a healing band (pre-E5 CHAIN), tunable via
+  `REFRESH_REPLAY_WINDOW_MS` (default 5000).** Presenting a just-revoked
+  refresh token now yields different behaviour depending on how recently
+  it was revoked:
+    - `[0, REFRESH_REPLAY_WINDOW_MS]` — replay. Access token only, no
+      refresh cookie set. This is E5's concurrent-burst semantics.
+    - `(REFRESH_REPLAY_WINDOW_MS, REFRESH_REUSE_GRACE_SECONDS]` — heal.
+      The family's live successor is rotated for the caller and a fresh
+      refresh cookie is set. This is the pre-E5 CHAIN behaviour, applied
+      only in the healing band.
+    - `(REFRESH_REUSE_GRACE_SECONDS, ∞)` — full family revocation.
+      Unchanged.
+  **Real behavioural difference from E5-as-first-shipped, which
+  operators need to know**: a presented revoked token in the healing
+  band now yields a REFRESH token, not just an access token. This is
+  what the grace window was always designed to permit and matches the
+  pre-E5 behaviour every install ran before this rotation-race fix
+  landed, but it widens the window during which a stolen-and-replayed
+  token yields a fully-usable session (previously the healing-band
+  presentation was silently a dead end — a stuck legitimate client was
+  logged out at `REFRESH_REUSE_GRACE_SECONDS` regardless of whether the
+  presenter was the real user or an attacker). Rationale: the narrower
+  E5-only design traded that off against the stuck-client case, and
+  that trade-off was wrong in the direction of denying real users
+  access after ordinary browser behaviour (a mid-navigation abort that
+  prevented the browser committing the winner's Set-Cookie).
+  **Scope of the recovery, stated explicitly**: this fix recovers a
+  stuck client that re-presents within the heal band — in the real
+  client that means a full-page reload (F5 / new tab / browser-restore
+  tabs) within `REFRESH_REUSE_GRACE_SECONDS` of the original abort.
+  A stuck client that does NOT re-present in that window (idle tab
+  past 60s, or a session whose next refresh is driven by the
+  15-minute access-token expiry rather than a mount) is still logged
+  out at `REFRESH_REUSE_GRACE_SECONDS`, unchanged from E5-only — not
+  a regression, but not fixed either. The fix's scope is precisely
+  "recover the rapid-reload case E5-only silently killed", and
+  everything outside that scope stays exactly as it was.
+  Full family revocation for genuine post-window reuse is unchanged. Tune
+  or disable via `REFRESH_REPLAY_WINDOW_MS` and
+  `REFRESH_REUSE_GRACE_SECONDS` — setting the latter to 0 restores the
+  strict pre-fix behaviour and makes the replay window irrelevant.
+  Full account in CLAUDE.md's "E5 gap — split the grace window"
+  Decisions entry and the `refresh-e5-gap-stuck-client.test.ts`
+  regression suite.
+
+- **Reuse-detection could be defeated for one legitimate session under
+  exact-concurrency refresh presentation.** `TokenService.rotateRefreshToken`
+  did `findFirst → update → create` as three separate auto-committed
+  statements, with no interactive transaction and no row lock. Two
+  refresh requests arriving within microseconds of each other (a
+  browser restoring several tabs, or a Playwright-scale rapid burst)
+  could both read the ancestor token as live, both call `rotateRow`,
+  and both INSERT a new successor for the same family. Result: the
+  family holds TWO live tokens for one legitimate session; only one
+  reaches the client's cookie jar and the other is orphaned server-
+  side. The family-revocation reuse-detection signal was defeated for
+  the exact theft-detection scenario the family model exists to
+  catch. Window is narrow (both requests must land in the ~ms between
+  the winner's UPDATE and INSERT commits) but the trade-off is real
+  and belongs in this callout rather than in the general Fixed list.
+  Also produced the more visible symptom of losers 401ing when they
+  landed in the OTHER window (loser reads AFTER winner's UPDATE but
+  BEFORE the INSERT — sees revoked-within-grace, finds no live
+  successor, revokes family, returns 401), which is what CI's
+  rapid-reload-session spec surfaced as "parked on /login mid-test".
+  Fixed by wrapping `rotateRefreshToken` in a single interactive
+  `$transaction` with `SELECT ... FOR UPDATE` on the token row via
+  `$queryRaw` — serializes concurrent callers and makes UPDATE+INSERT
+  atomic. Grace path switched from CHAIN (rotate the successor) to
+  REPLAY (return the successor unchanged; the caller mints an access
+  token from the userId but sets no new refresh cookie). Full account
+  in CLAUDE.md's "rotateRefreshToken — FOR UPDATE + REPLAY grace path
+  (E5)" Decisions entry.
+
 ### Removed
 
 - **Docker is gone as an install path.** `deploy/docker-compose.yml`, the
@@ -40,6 +117,39 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **E2E gate was overridden three times in one session because the
+  refresh-rotation cascade under CI concurrency logged sessions out
+  mid-test.** Under aggressive back-to-back page navigations on 2-core
+  CI runners, each mount-time `/auth/refresh` got aborted mid-flight by
+  the next navigation; the cookie jar kept re-presenting the same
+  token; the server-side grace window forgave each re-presentation with
+  a new rotation until the cascade outlived the 30-second window and
+  the still-un-updated token tripped replay detection, revoking the
+  family and parking the browser on /login. Fixed by adding a 5-second
+  sessionStorage cooldown to both `apps/web` and `apps/portal`'s
+  `AuthProvider` mount effect — if a successful refresh landed within
+  that window, hydrate from a cached JWT PAYLOAD (never the raw token —
+  Phase 1's rule protects the raw bearer, not the claims) and skip
+  firing another `/auth/refresh`. The cascade never starts. `api()`'s
+  401-retry gate was also relaxed to fire without a prior in-memory
+  access token so the first API call after a cooldown-skip still works,
+  and `REFRESH_REUSE_GRACE_SECONDS` default was bumped from 30 to 60 as
+  defence in depth for slightly wider real-world races (multi-tab
+  restore, flaky-network double-refresh) — NOT to 120: if the client
+  cooldown works, the ceiling is never approached, so widening further
+  would hide a client-side regression. Cache is rendering-only, audited
+  clean; server remains the sole authorization authority. See CLAUDE.md
+  Decisions log for the full account, including why the two prior
+  mitigations (`refreshSession()` single-flight, the server grace
+  window) each correctly covered their own failure modes but did not
+  address this one.
+- **CI E2E merge gate now self-audits.** New step in
+  `e2e-playwright`: if the job fails but produced no Playwright traces
+  in `apps/e2e/test-results/`, it fails loud with a specific message
+  stating the merge check must not be overridden without a trace to
+  inspect. Traces are now uploaded as their own artifact alongside the
+  HTML report. Structural cost added to bypassing the gate, closing the
+  incentive that let three overrides land in one session.
 - **Correctness bug: construction-linked payment plans could show a
   customer overdue, and accrue delay interest, against a construction
   stage the builder had not reached.** Every payment-plan milestone

@@ -4,6 +4,189 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## `user-role-edit.spec.ts` — confirmed post-mutation refetch/render bug, not a flake
+
+Attempt 1 of run 33916938865 (E2E job 101166977274, commit 6f0dd65)
+failed on this spec, on BOTH the initial attempt AND Playwright's own
+`retry #1` within the same test invocation. This is the definition of
+a confirmed bug, not a flake — a flake would have passed on retry.
+
+Verbatim from the Playwright log for attempt 1:
+
+```
+✘ 41 tests/user-role-edit.spec.ts:21:5 (7.3s)
+✘ 42 tests/user-role-edit.spec.ts:21:5 (retry #1) (6.7s)
+
+1) tests/user-role-edit.spec.ts:21:5
+   Error: expect(locator).toBeVisible() failed
+   Timeout: 5000ms
+   Error: element(s) not found
+   > 105 |     await expect(editedRow).toBeVisible();
+     107 |     await expect(controlAfterLabel(page, 'Name')).toHaveValue(editedName);
+     108 |     await expect(controlAfterLabel(page, 'Role')).toHaveValue(secondRoleId);
+
+   Error: expect(locator).toHaveValue(expected) failed
+   Timeout:  5000ms
+   - unexpected value "32d1fc24-cf69-43c4-b8be-f38c16524188"
+     108 |     await expect(controlAfterLabel(page, 'Role')).toHaveValue(secondRoleId);
+```
+
+Initial attempt: line 105 `toBeVisible()` timed out — the edited row
+never appeared in the users table within 5s. Retry #1: line 105
+passed (row appeared), then line 108 failed with a *specific* stale
+UUID — an OLD role assigned before this test's own edit — not
+`secondRoleId`. That the retry's error names a concrete stale value
+rules out network-transient / DOM-timing-only causes: the request
+completed, the mutation committed, the list refetched, and the list
+rendered a stale row anyway.
+
+**Suspected class, NOT diagnosis** — a fresh session should pull the
+trace and read the actual sequence before treating this as decided.
+The shape is consistent with a post-mutation refetch/render race in
+the same family as `user-deactivate-reactivate.spec.ts`'s already-
+fixed variant (documented in `CLAUDE.md`'s E2E refresh-rotation
+cascade entry): the update mutation returns, `invalidateQueries`
+fires, the list refetch responds — but the resulting render either
+consumes a stale cache page or races the DOM commit, so the row
+under test displays a pre-edit value for a window long enough to
+miss Playwright's 5s toBeVisible/toHaveValue ceilings. That family
+was fixed spec-by-spec by explicitly waiting for the refetch
+`waitForResponse` before asserting on the DOM; the same technique
+may or may not apply cleanly here — a real diagnosis needs the
+trace, and the trace for this specific attempt has been lost (see
+the trace-retention entry below).
+
+**Does not block PR #31.** Pre-existing on master, not introduced by
+that branch — attempt 1's user-role-edit failure has the same
+symptom shape observed on run 33645314654 attempt 3 earlier in this
+branch's history (CLAUDE.md's post-superseded-cascade decisions
+entry lists that exact incident). PR #31's own fix (server-side E5
+FOR UPDATE + REPLAY, client-side lazy proactive refresh) is proven
+by the regression test file `refresh-concurrent-rotation.test.ts`
+and by integration-tests being GREEN on attempt 1 alongside this
+E2E failure — the two are independent.
+
+**Next work item after PR #31 merges**: pull a fresh trace when this
+recurs (the trace-retention fix logged below is a prerequisite —
+without it, a future attempt 1 red run's trace is again lost the
+moment a re-run succeeds), read the actual list refetch → render
+sequence around user-role-edit's Save click, confirm or refute the
+refetch/render-race hypothesis, and fix at the mechanism if
+confirmed. Do NOT extend `retries: 1` to hide it — same reasoning
+as the cheque-bounce entry below: a retry-that-flips-a-known-bug-
+to-green would put the merge gate back where it started.
+
+**Hand-verification step for anyone doing a full manual browser pass
+against this branch** (or against master until this is fixed): edit
+a real user's name AND role, save, reload the users list, confirm
+both the new name and the new role selection persist. If either
+reverts to the pre-edit value, this bug is live.
+
+## Trace retention — earlier failed attempt's artifact was gone after a later attempt succeeded. Mechanism UNCONFIRMED; process rule is the remedy.
+
+Observation: run 33916938865 (E2E attempt 1 failed and uploaded
+traces per its own step-15 log, attempts 2-4 succeeded and did not
+upload since `Upload Playwright traces on failure` is gated
+`if: failure()`) shows zero artifacts today via
+`gh api repos/{owner}/{repo}/actions/artifacts` filtered to that
+run's `workflow_run.id`, inside the 7-day retention window. For
+comparison, run 33915421187 (attempt 1 failed, never re-run) has
+its `playwright-traces`/`playwright-report` artifacts still present
+in the same listing, not expired.
+
+**The obvious hypothesis (upload-artifact@v4 name collision from a
+later attempt's upload) is refuted** by the fact that attempts 2-4
+of run 33916938865 succeeded and therefore did NOT upload — there
+was no second upload to collide with attempt 1's. Whatever removed
+attempt 1's artifact happened without any subsequent upload.
+
+**What actually removed it is UNCONFIRMED.** Two data points
+(one/one across the "re-run to green succeeded" / "no re-run"
+axis) is enough to notice a pattern but not enough to assert a
+specific cause. Candidate mechanisms — none of which this session
+independently verified against public GitHub docs — include
+platform-side artifact reconciliation on green re-run, GC keyed on
+run's final conclusion, or an artifact-lifetime rule tied to
+attempt-vs-run scoping this session's searches did not reach. A
+future session with a controlled re-run (upload a marker artifact
+on attempt 1, force attempt 2 red then green, observe) could pin
+this down; not attempted here because the remedy below does not
+depend on the cause.
+
+**Remedy — process rule, not a config patch** (recorded in
+CLAUDE.md's Decisions log alongside the E5 split-window follow-up):
+
+> **Any time an E2E job fails on this repo, pull the
+> `playwright-traces` artifact BEFORE triggering a re-run.**
+> `gh run download <run-id> -n playwright-traces -D <dir>` (or the
+> web UI). This is the one window during which the trace is
+> guaranteed available regardless of what a subsequent re-run
+> does. Attempt 1 of run 33916938865 was lost exactly because a
+> re-run was triggered before its trace was pulled; that trace
+> would have made this file's user-role-edit refetch/render
+> diagnosis a straight read from the trace rather than a
+> hypothesis assembled from the log excerpt.
+
+This rule is correct under any of the candidate mechanisms
+above — pulling before re-run makes each of them irrelevant to
+whether the trace is available for diagnosis. Adding
+`${{ github.run_attempt }}` to the artifact name is a possible
+defence-in-depth once the mechanism IS confirmed (if it turns out
+to be name-scoped rather than run-scoped), but shipping it
+pre-emptively is a config change whose real value only surfaces on
+the next red E2E run — verify on that run, don't guess.
+
+
+## `cheque-bounce.spec.ts` — one known E2E flake, observed once, not investigated further
+
+The `e2e-playwright` CI flakiness that used to live here (the rotating
+subset overridden three times as a documented exception, tied to the
+/login refresh-rotation cascade) is resolved in PR #31 — see CLAUDE.md's
+"E2E refresh-rotation cascade" Decisions entry for the fix, its trace
+evidence, and its three-consecutive-green proof. The cascade was
+MASKING four downstream failures; unmasking them surfaced two more
+mechanisms (a default-throttle bucket exhausted under 4-way Playwright
+parallelism on the shared runner IP, and one genuine DOM race on
+`user-deactivate-reactivate`), both fixed in the same PR.
+
+**The one remaining E2E flake observed but NOT fixed by that PR** — one
+occurrence across four consecutive full-suite runs of the same commit
+(the three-of-three green bar plus a fourth on the docs-amendment
+commit), on the ONLY attempt where any spec required a retry:
+
+- **Spec**: `tests/cheque-bounce.spec.ts:28:5` — "book a unit → record a
+  cheque receipt → bounce it → Collection Summary ends up unchanged"
+- **Assertion that failed**: `expect(locator).not.toHaveValue(expected)`
+  at `tests/cheque-bounce.spec.ts:70:72`
+- **Recovery**: Playwright's own `retries: 1` re-ran the test and it
+  passed (marked "1 flaky" in the run summary). Also observed on
+  attempt 1 of run 33916938865 (the same commit that eventually went
+  3-of-3 green) — same assertion, same retry-recovery, still no root
+  cause identified.
+- **Not touched by PR #31**: this spec has no auth mutations wrapped in
+  the fixes above; the failure mode doesn't match the throttle-exhaustion
+  or refetch-race classes either
+- **Not in the original failing subset**: appeared for the first time on
+  attempt 1 of the three-green run; absent on all three attempts of the
+  preceding red run and on attempts 2/3 and the follow-up docs run
+
+**This is logged, not diagnosed.** The purpose of the entry is to
+prevent the exact reversion the E2E gate just recovered from — a single
+observed flake absorbed into a general "E2E is sometimes flaky" belief.
+The trace for this failure was uploaded by the artifact rule PR #31 also
+added (`playwright-traces` on the failing attempt) and can be pulled via
+`gh run download 33292860530 --pattern playwright-traces`. When it
+recurs (or if a change touches `apps/web/src/pages/postsales/` and this
+starts failing again), read the trace before theorising, exactly the
+way PR #31's own diagnosis went.
+
+**Do NOT widen Playwright's `retries: 1` to hide this further.** A
+retry-that-passes-once is exactly the shape of signal that took two
+sessions to unmask above. The `1 flaky` line in the run summary is the
+correct level of visibility — see it, log if it becomes a pattern,
+diagnose from the trace if it does. That is now the sole owner of the
+E2E gate's noise, and it doesn't get to accumulate silently.
+
 ## Nightly property test now takes ~32min at 2000 runs — consider sharding across matrix jobs instead of one long job
 
 The nightly (`schedule`/`workflow_dispatch`) CI run was silently cancelling

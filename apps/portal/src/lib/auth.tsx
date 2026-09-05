@@ -8,7 +8,15 @@ import {
   type ReactNode,
 } from 'react';
 import type { JwtPayload } from '@openestate/shared';
-import { api, setAccessToken, refreshSession } from './api';
+import {
+  api,
+  setAccessToken,
+  refreshSession,
+  readAuthCache,
+  writeAuthCache,
+  clearAuthCache,
+  decodeJwt,
+} from './api';
 
 interface AuthState {
   user: JwtPayload | null;
@@ -31,23 +39,24 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function decodeJwt(token: string): JwtPayload | null {
-  try {
-    const payload = token.split('.')[1];
-    return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
-  } catch {
-    return null;
-  }
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ user: null, isLoading: true });
 
   useEffect(() => {
-    // refreshSession() — see apps/web/src/lib/auth.tsx's identical fix for
-    // the full explanation. Shares its in-flight request with api()'s own
-    // 401-retry refresh and any concurrent caller, including a second
-    // invocation of this same effect under React.StrictMode.
+    // Cooldown check — hydrate from cached JWT payload (never the raw token,
+    // Phase 1 rule intact) and skip firing another /portal/auth/refresh.
+    // Mirrors apps/web's identical fix; see api.ts's auth-cache block for
+    // the full reasoning. RENDERING ONLY — the server re-verifies every
+    // request; a tampered cache cannot grant access, only briefly mis-render.
+    const cached = readAuthCache();
+    if (cached) {
+      setState({ user: cached.payload, isLoading: false });
+      return;
+    }
+
+    // refreshSession() shares its in-flight request with api()'s own 401-retry
+    // and any concurrent caller, including a second invocation of this same
+    // effect under React.StrictMode. Seeds the cooldown cache on success.
     refreshSession().then((accessToken) => {
       setState(accessToken ? { user: decodeJwt(accessToken), isLoading: false } : { user: null, isLoading: false });
     });
@@ -69,6 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const { accessToken } = res as { accessToken: string };
       setAccessToken(accessToken);
+      writeAuthCache(accessToken);
       setState({ user: decodeJwt(accessToken), isLoading: false });
       return { ok: true as const };
     } catch (err) {
@@ -88,6 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ code }),
       });
       setAccessToken(res.accessToken);
+      writeAuthCache(res.accessToken);
       setState({ user: decodeJwt(res.accessToken), isLoading: false });
       return { ok: true as const };
     } catch (err) {
@@ -102,6 +113,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // ignore
     }
     setAccessToken(null);
+    clearAuthCache();
     setState({ user: null, isLoading: false });
   }, []);
 

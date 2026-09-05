@@ -1,3 +1,4 @@
+import type { JwtPayload } from '@openestate/shared';
 import { toast } from './toast';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
@@ -12,6 +13,83 @@ export function setAccessToken(token: string | null) {
 export function getAccessToken() {
   return accessToken;
 }
+
+// -------------------------- session cooldown cache --------------------------
+//
+// Mirrors apps/web/src/lib/api.ts's identical block — same bug, same root
+// cause, same fix, in both clients, per this project's mirrored-auth standing
+// rule. See that file for the full reasoning; the short version:
+//
+// Break the CI Playwright refresh-rotation cascade by NOT firing a fresh
+// /portal/auth/refresh on a mount that already succeeded within
+// AUTH_COOLDOWN_MS. The cache holds the DECODED JWT PAYLOAD (not the raw
+// token — that would violate Phase 1). Every actually-expired access token
+// still triggers api()'s 401-retry, which now works without a prior
+// in-memory accessToken (see the relaxed gate below).
+//
+// RENDERING ONLY. Never use this cache to decide access; the server is the
+// sole authority and re-verifies every request.
+//
+// Distinct key from apps/web's `_authCacheStaff` — in production both apps
+// share the same origin (nginx serves /admin from apps/web, /portal from
+// apps/portal), and a shared sessionStorage key would let a staff session in
+// one tab briefly mis-hydrate a portal session's user state in another (and
+// vice versa) before the first API call's 401-retry corrected it via the
+// app-specific refresh endpoint.
+
+const AUTH_CACHE_KEY = '_authCachePortal';
+export const AUTH_COOLDOWN_MS = 5000;
+
+export interface AuthCache {
+  payload: JwtPayload;
+  refreshedAt: number;
+}
+
+export function decodeJwt(token: string): JwtPayload | null {
+  try {
+    const payload = token.split('.')[1];
+    return JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/')));
+  } catch {
+    return null;
+  }
+}
+
+export function readAuthCache(): AuthCache | null {
+  try {
+    const raw = sessionStorage.getItem(AUTH_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as AuthCache;
+    if (typeof parsed.refreshedAt !== 'number' || !parsed.payload) return null;
+    if (Date.now() - parsed.refreshedAt > AUTH_COOLDOWN_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function writeAuthCache(token: string): void {
+  const payload = decodeJwt(token);
+  if (!payload) return;
+  try {
+    sessionStorage.setItem(
+      AUTH_CACHE_KEY,
+      JSON.stringify({ payload, refreshedAt: Date.now() }),
+    );
+  } catch {
+    // sessionStorage disabled (Safari private mode, quota exceeded) — best
+    // effort; a cache miss falls through to a normal refresh call.
+  }
+}
+
+export function clearAuthCache(): void {
+  try {
+    sessionStorage.removeItem(AUTH_CACHE_KEY);
+  } catch {
+    // as above
+  }
+}
+
+// ----------------------------------------------------------------------------
 
 function getCsrfToken(): string | null {
   const match = document.cookie
@@ -30,6 +108,7 @@ async function refreshAccessToken(): Promise<string | null> {
     if (!res.ok) return null;
     const data = await res.json();
     accessToken = data.accessToken;
+    if (accessToken) writeAuthCache(accessToken);
     return accessToken;
   } catch {
     return null;
@@ -58,6 +137,19 @@ export async function api<T = unknown>(
 ): Promise<T> {
   const url = `${API_BASE}/api/v1${path}`;
 
+  // Lazy proactive refresh — mirrors apps/web/src/lib/api.ts's identical
+  // block. See that file for the full reasoning; short version: cooldown-
+  // skipped mount hydrates state.user from cache but leaves accessToken
+  // null on this runtime. Rather than firing every request un-authed and
+  // doubling everything through 401 → retry, acquire the token once
+  // (single-flighted) before the first request. Fires lazily on
+  // user-initiated / useQuery-mount work, not from a mount effect —
+  // that's what keeps it out of the abort cascade the cooldown exists
+  // to break.
+  if (!accessToken && readAuthCache()) {
+    await refreshSession();
+  }
+
   const headers = new Headers(options.headers);
   if (!headers.has('Content-Type') && options.body) {
     headers.set('Content-Type', 'application/json');
@@ -76,6 +168,12 @@ export async function api<T = unknown>(
     credentials: 'include',
   });
 
+  // Reverted to the pre-cooldown `&& accessToken` gate — the proactive
+  // refresh above handles the cooldown-null-token case, so this only
+  // needs to fire on genuine mid-session expiries (accessToken was set
+  // but the JWT the server sees is stale, typically ~15 min in).
+  // Firing on every 401 would probe /auth/refresh even for genuinely
+  // logged-out requests, adding a wasted round trip.
   if (res.status === 401 && accessToken) {
     const newToken = await refreshSession();
     if (newToken) {

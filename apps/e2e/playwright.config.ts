@@ -84,6 +84,36 @@ export default defineConfig({
         PAN_ENCRYPTION_KEY: HARNESS_HEX_KEY,
         TOTP_ENCRYPTION_KEY: HARNESS_HEX_KEY,
         PLUGIN_SECRET_ENCRYPTION_KEYS: `1:${HARNESS_HEX_KEY}`,
+        // 2000 = ~2x the empirically-observed peak of 963 requests in
+        // any rolling 60s window under the full 40-spec suite (measured
+        // 2026-09-03 from the trace-capture run's own network logs
+        // across all specs, 4 parallel workers all sharing the runner
+        // IP). Production installs never set this and continue at 100.
+        //
+        // The earlier value of 10000 was ~10x more than needed because
+        // it was raised to accommodate the request-doubling bug (every
+        // cooldown-hit page load fired every request un-authed, 401,
+        // then retried) rather than fixing it. That bug is fixed in
+        // the lazy-proactive-refresh commit (74f9213 in the PR history);
+        // headroom is now sized to the actual traffic, with room for
+        // ~2x suite growth before hitting the limit. If a future spec
+        // burst blows it, tune deliberately with fresh trace evidence —
+        // don't blanket-raise. See app.module.ts's
+        // DEFAULT_THROTTLE_LIMIT block for the production default.
+        DEFAULT_THROTTLE_LIMIT: '2000',
+        // portal-auth (5 req / 5 min per IP) is exhausted by the full
+        // suite: 5 portal logins across 5 specs (media-gallery×2,
+        // rapid-reload-session×2, ticket-reply×1) hits the ceiling
+        // exactly, so any Playwright retry firing a 6th login 429s and
+        // cascades into unrelated spec failures. 50 = ~10x the observed
+        // 5-login baseline. Still tight enough that a real brute-force
+        // scenario in a portal-auth-focused test (e.g. account-lockout
+        // testing) would fire well past 50 and hit the guard. Production
+        // installs never set this and stay at 5 — the env var exists
+        // ONLY to give the harness's parallel worker pool headroom
+        // above the production per-IP ceiling. See app.module.ts's
+        // PORTAL_AUTH_THROTTLE_LIMIT block for the prod default.
+        PORTAL_AUTH_THROTTLE_LIMIT: '50',
         // NODE_ENV=production here is deliberate, not an oversight: the
         // Secure-cookie bug this harness's first scenario regression-tests
         // (CLAUDE.md "Secure cookies over plain HTTP") was NODE_ENV driving

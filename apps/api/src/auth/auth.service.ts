@@ -189,11 +189,16 @@ export class AuthService {
 
   async refreshTokens(
     rawRefreshToken: string,
-  ): Promise<{
-    accessToken: string;
-    refreshRaw: string;
-    expiresAt: Date;
-  } | null> {
+  ): Promise<
+    | {
+        kind: 'rotated';
+        accessToken: string;
+        refreshRaw: string;
+        expiresAt: Date;
+      }
+    | { kind: 'replayed'; accessToken: string }
+    | null
+  > {
     const result = await this.tokenService.rotateRefreshToken(rawRefreshToken);
     if (!result) return null;
 
@@ -223,7 +228,15 @@ export class AuthService {
       forcePasswordChange: user.forcePasswordChange,
     });
 
+    // Discriminated on result.kind — see TokenService's
+    // RotateRefreshTokenResult doc comment for why replays carry no
+    // new refresh token and the controller must not touch cookies.
+    if (result.kind === 'replayed') {
+      return { kind: 'replayed', accessToken };
+    }
+
     return {
+      kind: 'rotated',
       accessToken,
       refreshRaw: result.newRaw,
       expiresAt: result.expiresAt,

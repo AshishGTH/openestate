@@ -23,6 +23,7 @@ import {
 import type { JwtPayload } from '@openestate/shared';
 import { AuthService } from './auth.service';
 import { Public } from './guards/jwt-auth.guard';
+import { randomUUID } from 'node:crypto';
 import { STAFF_CSRF_COOKIE } from './csrf-cookie-names';
 import { PasswordChangeThrottlerGuard } from './guards/password-change-throttler.guard';
 
@@ -53,7 +54,7 @@ function setRefreshCookie(res: Response, token: string, expiresAt: Date) {
 }
 
 function setCsrfCookie(res: Response) {
-  const csrfToken = crypto.randomUUID();
+  const csrfToken = randomUUID();
   res.cookie(CSRF_COOKIE, csrfToken, {
     httpOnly: false,
     // req.secure reflects the CLIENT's real scheme via X-Forwarded-Proto
@@ -176,8 +177,18 @@ export class AuthController {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    setRefreshCookie(res, result.refreshRaw, result.expiresAt);
-    setCsrfCookie(res);
+    // E5: replays carry only an accessToken (see TokenService's
+    // RotateRefreshTokenResult doc comment). The winner's response
+    // already carries the rotated refresh + CSRF cookies to the same
+    // browser; the loser stays silent on cookies so the client's jar
+    // converges deterministically on the winner's tokens regardless
+    // of response-arrival order. Exhaustive `kind` check — omitting
+    // this branch would be a TypeScript error because
+    // result.refreshRaw doesn't exist on kind: 'replayed'.
+    if (result.kind === 'rotated') {
+      setRefreshCookie(res, result.refreshRaw, result.expiresAt);
+      setCsrfCookie(res);
+    }
     return { accessToken: result.accessToken };
   }
 
