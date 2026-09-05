@@ -6696,8 +6696,11 @@ Pre-fix (commit N=5097521, run 33915421187) failed on invariant
 2/5 on portal. Fix (commit N+1=6f0dd65) passes all five invariants
 across the full K=20 cycles on both endpoints, on every attempt
 of run 33916938865 (integration-tests green on all 4 attempts,
-including the one where E2E flaked on an unrelated user-role-edit
-toBeVisible race).
+including attempt 1 where E2E failed HARD on user-role-edit — a
+separate, pre-existing post-mutation refetch/render bug, see
+docs/todo.md's user-role-edit entry; the earlier revision of this
+paragraph misdescribed that failure as a "flake" per the
+corrected attempt-1 write-up above).
 
 **RefreshToken is NOT tenant-scoped** — no `companyId` column
 (schema.prisma:215), not in `TENANT_SCOPED_MODELS`, uses
@@ -6717,3 +6720,163 @@ sequential-re-presentation semantics are preserved: iteration 1
 rotates, iterations 2..N are REPLAYS returning the userId with no
 new raw. Both kinds yield a live session; the family stays
 intact.
+
+### E5 gap — split the grace window into REPLAY + HEAL bands
+
+The E5 fix above (kind:'replayed' with no cookie for every
+presentation of a just-revoked token inside reuseGraceMs) closed
+the loser-401 and orphaned-successor races correctly for
+concurrent bursts of N callers on one cookie. It opened a new,
+narrower failure mode: a **stuck client whose winner's response
+never landed** — aborted mid-navigation before the browser
+committed the winner's Set-Cookie header. Under E5-only, that
+client keeps re-presenting T0, gets `kind:'replayed'` with no
+cookie every time, and at reuseGraceMs the family is revoked and
+the user is logged out. Browser abort timing was known to be
+narrow but not obviously irrelevant (a page.goto() before the
+server's first byte lands is a real abort path; bfcache /
+prerender abandonment has documented Chromium bug reports where
+in-flight Set-Cookie is dropped even after headers arrived), and
+the failure mode is silent — no error, just a logout minutes
+later.
+
+**Made observable, then fixed.** `refresh-e5-gap-stuck-client.test.ts`
+started as an investigation file (per direct instruction, report
+the observed behaviour first, don't fix). Three tests probed the
+E5-only design deterministically: N re-presentations of T0 stay
+`kind:'replayed'` inside grace; grace is anchored to T0.revokedAt
+(set once by the winner) and does NOT advance on replays; past
+grace, the family is revoked and the stuck client is logged out.
+All three passed against E5-only — encoding, not questioning, the
+broken behaviour. Fix follows.
+
+**Fix: split the grace window** via a new `REFRESH_REPLAY_WINDOW_MS`
+(default 5000):
+
+- `[0, replayWindowMs]` → REPLAY (unchanged E5). Concurrent-burst
+  loser. `kind:'replayed'`, access token only, no cookie.
+- `(replayWindowMs, reuseGraceMs]` → HEAL (pre-E5 CHAIN, scoped).
+  Stuck-client recovery. Re-lock the family's live successor with
+  a nested `SELECT ... FOR UPDATE`, rotate it, hand the caller a
+  fresh cookie via `kind:'rotated'`.
+- `(reuseGraceMs, ∞)` → revoke family, return null. Unchanged.
+
+**Preflight checks, done before writing the code, not assumed:**
+
+- **Access-token TTL is 15m** (`JWT_ACCESS_EXPIRES_IN=15m`,
+  auth.module.ts:19) for both staff and portal (portal reuses the
+  same `TokenService.signAccessToken` / same `JwtService`). Replay
+  window of 5000ms is 180× smaller, so a stuck client's next
+  scheduled refresh (~15 minutes later on token expiry, or on
+  next mount) lands well outside the replay band and in the
+  healing band or past-grace territory, depending on exact
+  timing.
+- **Concurrent-burst spread from CI-measured timings**: run
+  33916938865 attempt 4 integration-tests log — staff burst 1446ms
+  / 20 = 72ms per burst, portal 1261ms / 20 = 63ms per burst,
+  including per-burst DB assertions and cookie extraction. Actual
+  Promise.all fetch-initiation spread is sub-millisecond per the
+  test's own doc comment. 5000ms is three orders of magnitude
+  above the fetch-layer spread and ~65× above per-burst wall
+  time.
+
+**Nested FOR UPDATE on the successor row inside the heal path** —
+two concurrent stuck-client presentations must serialize on the
+successor too, not just on the ancestor, or the healing path
+reintroduces the exact orphaned-successor bug FOR UPDATE was
+introduced to close for the winner path. `tx.$queryRaw` with
+`SELECT ... WHERE family = ${existing.family}::uuid AND is_revoked
+= false ... FOR UPDATE`.
+
+**Real bug caught by the first test run, not review — Phase 7
+commit 2's lesson repeating**: the `::uuid` cast on the family
+parameter is load-bearing. Prisma's tagged-template `$queryRaw`
+binds string params as TEXT by default, and `refresh_tokens.family`
+is UUID. Postgres refuses `uuid = text` at query-plan time
+(error 42883). The exact same bug this file's own Phase 7 commit
+2 decisions entry documented (`WebhookDeliveryProcessor`'s raw
+UPDATE against `webhook_deliveries.id`) — and the exact standing
+rule that entry recorded: **any new `$executeRawUnsafe`/`$queryRaw`
+comparing a parameter against a `uuid`-typed column needs the
+cast, nothing catches this at compile time, only a real query
+against a real Postgres schema does**. Caught here by the
+refresh-e5-gap-stuck-client HEAL band test on first run before
+commit.
+
+**Security shape shift, documented in CHANGELOG's Security
+section, not a code comment** — per direct instruction. In the
+healing band a presented revoked token now yields a REFRESH
+cookie (not just an access token). This is the pre-E5 CHAIN
+behaviour every install ran before the rotation-race fix landed,
+but it is a real difference from E5-as-first-shipped. Rationale:
+the narrower E5-only design traded that off against the
+stuck-client case, and that trade-off was wrong in the direction
+of denying real users access after ordinary browser behaviour.
+Full family revocation for genuine post-window reuse is
+unchanged. Tune via `REFRESH_REPLAY_WINDOW_MS` +
+`REFRESH_REUSE_GRACE_SECONDS`; setting the latter to 0 restores
+strict pre-fix behaviour and makes the replay window irrelevant.
+
+**Rejected the Playwright-abort empirical test** — per direct
+instruction. The split window makes the browser's Set-Cookie
+behaviour irrelevant to recovery: whether the winner's cookie
+committed or not, past 5000ms the client can present its stuck
+token and heal. The empirical question about abort-paths and
+Set-Cookie commit timing therefore no longer needs deciding to
+choose a design.
+
+**Regression coverage rewritten** as three permanent tests in
+`refresh-e5-gap-stuck-client.test.ts`, encoding the HEALED
+behaviour:
+
+- REPLAY band: burst against T0 inside `replayWindowMs`, all N
+  return `kind:'replayed'` with no `newRaw`. Family stays at 2
+  rows.
+- HEAL band: rotate T0 → T1, discard T1, sleep past
+  `replayWindowMs`, present T0. Assert `kind:'rotated'` with
+  fresh `newRaw`. Then rotate again with the healed token, prove
+  it works — that is the self-heal end-to-end proof the E5-only
+  design could not satisfy for a stuck client.
+- REVOKE past grace: sleep past `reuseGraceMs`, present T0.
+  Assert null, family fully revoked.
+
+`refresh-concurrent-rotation.test.ts`'s N×K burst invariants
+(1)-(5) are UNCHANGED — bursts fire within milliseconds and take
+the REPLAY path unchanged. `refresh-reuse-grace.test.ts`
+UNCHANGED — every existing test still passes with the split
+window.
+
+**CI proof — three consecutive green full-suite runs on one
+commit (a1ce150), attempts 1, 2 and 3 of run 33942272563, all
+five jobs success on every attempt, ZERO retries anywhere:**
+
+- Lint, typecheck, unit tests, build: 3m03s / 2m53s / 2m43s
+- Integration tests (Postgres + Redis): 4m34s / 4m33s / 4m51s
+- E2E (Playwright + built frontend): 3m22s / 2m59s / 2m40s
+- Native install (real Postgres/Redis/nginx): 2m31s / 3m32s / 2m17s
+- Native upgrade (populated DB): 3m25s / 3m33s / 3m35s
+
+Stronger than 6f0dd65's 3-of-3 chain, which needed attempts 2/3/4
+(attempt 1 red on user-role-edit; see the correction above).
+a1ce150 started clean on attempt 1 — the split-window fix itself
+touched only the refresh path, and neither the pre-existing
+user-role-edit refetch/render bug (docs/todo.md) nor the
+cheque-bounce flake (also docs/todo.md) surfaced across the
+three attempts.
+
+**Per-install tunables recap** (env vars, both optional, both
+already documented in the fix's own doc comment):
+
+- `REFRESH_REPLAY_WINDOW_MS` (default 5000). Concurrent-burst
+  window. Widen only if bursts genuinely exceed this on your
+  infrastructure (they never should — see preflight above).
+- `REFRESH_REUSE_GRACE_SECONDS` (default 60). Stuck-client
+  ceiling. `0` disables the split entirely and restores the
+  strict pre-fix "any replay = family revocation" behaviour.
+
+Setting `REFRESH_REUSE_GRACE_SECONDS=0` makes
+`REFRESH_REPLAY_WINDOW_MS` irrelevant — every replay hits the
+outer `revokedAgoMs <= reuseGraceMs` check as false and falls
+through to family revocation, exactly as before either fix
+existed. Kept for the operator whose threat model doesn't
+tolerate any grace at all.
