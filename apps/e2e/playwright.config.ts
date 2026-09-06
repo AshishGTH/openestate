@@ -22,12 +22,18 @@ export const PORTAL_URL = `http://localhost:${PORTAL_PORT}`;
 // at a non-default host/port without editing anything. The fallbacks are the
 // standard ports, which is what test-setup.sh provisions by default and what
 // ci.yml's own services block exposes.
+// Role names are openestate_test_app/openestate_test_system, not a real
+// install's openestate_app/openestate_system — matches
+// scripts/test-setup.sh and ci.yml's e2e-playwright job (see CHANGELOG's
+// [Unreleased] Security entry for why the rename exists at all). These
+// fallbacks are what ci.yml's job actually connects with — it never sets
+// DATABASE_URL_TEST*/REDIS_TEST_URL, unlike the integration-tests job.
 export const DATABASE_URL_SYSTEM =
   process.env.DATABASE_URL_TEST_SYSTEM ??
-  'postgresql://openestate_system:test_system_pass@localhost:5432/openestate_test';
+  'postgresql://openestate_test_system:test_system_pass@localhost:5432/openestate_test';
 const DATABASE_URL_APP =
   process.env.DATABASE_URL_TEST ??
-  'postgresql://openestate_app:test_app_pass@localhost:5432/openestate_test';
+  'postgresql://openestate_test_app:test_app_pass@localhost:5432/openestate_test';
 const REDIS_URL = process.env.REDIS_TEST_URL ?? 'redis://localhost:6379';
 
 // Not real secrets — throwaway key material for a disposable test database
