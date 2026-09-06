@@ -90,6 +90,16 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`Bank.ifscPrefix` (a real, optional Prisma column) is now exposed
+  through the master API and admin UI**, via `master.factory.ts`'s
+  existing `extraFields` mechanism — the same pattern that already
+  exposed `AreaLocation`'s columns and `ChargeType.hsnSac`/`gstRateId`.
+  Closes the last piece of docs/todo.md's "AreaLocation/Bank have real
+  optional columns the API never exposes" gap (AreaLocation's half was
+  already fixed in a prior session). Not read by any business logic —
+  reference data only, so no format is enforced beyond the column's own
+  11-character length.
+
 - **Phase A of two-shape inventory (plotted / farmhouse groundwork).**
   Schema-only step: `Project.shape` (HIGH_RISE or LAND_BASED, immutable
   after creation), a shared `AreaUnit` enum (SQFT / SQYD / SQM / ACRE

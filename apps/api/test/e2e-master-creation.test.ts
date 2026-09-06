@@ -127,7 +127,12 @@ const MASTER_CASES: MasterCase[] = [
     payload: simpleBase({ entityType: 'BOOKING_KYC' }),
     assertExtra: (b) => expect(b.entityType).toBe('BOOKING_KYC'),
   },
-  { label: 'Bank', path: 'banks', payload: simpleBase() },
+  {
+    label: 'Bank',
+    path: 'banks',
+    payload: simpleBase({ ifscPrefix: 'SBIN' }),
+    assertExtra: (b) => expect(b.ifscPrefix).toBe('SBIN'),
+  },
   { label: 'ChargeType', path: 'charge-types', payload: simpleBase() },
   {
     label: 'InterestRule',
@@ -300,6 +305,29 @@ describeIf('e2e master/admin-entity creation: real HTTP through the full guard p
       c.assertExtra?.(res.body);
     });
   }
+
+  // Explicit create-then-GET round trip for Bank.ifscPrefix, the field this
+  // gap's other half (AreaLocation) was already covered by. The POST-only
+  // assertion above already proves the create response echoes it back;
+  // this proves it's actually persisted, not just reflected from the
+  // request body — the exact distinction docs/todo.md's "schema promises a
+  // field the API silently drops" class of bug turns on.
+  it('POST /masters/banks then GET confirms ifscPrefix actually persisted', async () => {
+    const { agent, token, csrf } = await loginWithCsrf();
+    const created = await agent
+      .post('/api/v1/masters/banks')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-CSRF-Token', csrf)
+      .send({ name: `E2E Bank GET ${TAG}`, ifscPrefix: 'HDFC', isActive: true, sortOrder: 1 })
+      .expect(201);
+    expect(created.body.ifscPrefix).toBe('HDFC');
+
+    const fetched = await agent
+      .get(`/api/v1/masters/banks/${created.body.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    expect(fetched.body.ifscPrefix).toBe('HDFC');
+  });
 
   it('POST /users creates a user with the optional phone field', async () => {
     const { agent, token, csrf } = await loginWithCsrf();

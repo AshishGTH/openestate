@@ -52,7 +52,16 @@ const SIMPLE_MASTERS = [
   // not read by any business logic — confirmed by grep — so no enum to
   // validate against beyond "non-empty").
   { modelName: 'DocumentType', routePath: 'document-types', apiTag: 'Document Types', extraFields: { entityType: z.string().min(1).max(50) } },
-  { modelName: 'Bank', routePath: 'banks', apiTag: 'Banks' },
+  // ifscPrefix is a real, optional Prisma column the generic schema never
+  // exposed (docs/todo.md's "AreaLocation/Bank have real optional columns"
+  // gap — AreaLocation's half was fixed above; this closes the other half).
+  // Not read by any business logic (grepped) — pure reference data for
+  // staff entering bank-transfer details, so no format is enforced beyond
+  // the column's own VARCHAR(11) length.
+  {
+    modelName: 'Bank', routePath: 'banks', apiTag: 'Banks',
+    extraFields: { ifscPrefix: z.string().max(11).optional() },
+  },
   // gstRateId/hsnSac are real Prisma columns the generic schema never
   // exposed (docs/todo.md). GST genuinely varies by charge type (IFMS,
   // legal charges, and statutory pass-throughs don't all follow the base
