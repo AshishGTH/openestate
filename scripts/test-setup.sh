@@ -35,6 +35,18 @@ SUPER_PASSWORD="test_super_pass"
 APP_PASSWORD="test_app_pass"
 SYSTEM_PASSWORD="test_system_pass"
 
+# Deliberately DIFFERENT names from a real install's openestate_app/
+# openestate_system (deploy/native/setup-database.sh's own defaults) — not
+# just different passwords. Postgres roles are cluster-wide, and a prior
+# incident found out the hard way that provisioning tests with the SAME
+# role names as a real install on the same cluster resets that install's
+# passwords to these throwaway values, breaking it until its own
+# setup-database.sh is re-run. Different names make that collision
+# structurally impossible rather than merely guarded against — see the
+# now-removed shared-cluster guard this replaced, a few sections down.
+TEST_APP_ROLE="openestate_test_app"
+TEST_SYSTEM_ROLE="openestate_test_system"
+
 log()  { printf '\033[1;32m[test-setup]\033[0m %s\n' "$1"; }
 warn() { printf '\033[1;33m[test-setup]\033[0m %s\n' "$1" >&2; }
 die()  { printf '\033[1;31m[test-setup]\033[0m %s\n' "$1" >&2; exit 1; }
@@ -121,70 +133,35 @@ if [ "${1:-}" = "teardown" ]; then
   esac
   log "Dropping database '${DB_NAME}'..."
   psql_admin -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" postgres
-  # The openestate_app/openestate_system/openestate_super roles are
-  # cluster-wide, not per-database, and a real install on this same cluster
-  # uses the first two by the same names. Dropping them here would break
-  # that install, so they are deliberately left in place.
+  # openestate_test_app/openestate_test_system/openestate_super are
+  # cluster-wide, not per-database — dropping them here could break a
+  # DIFFERENT test database on this same cluster that still uses them, so
+  # they are deliberately left in place regardless. (They share no name
+  # with a real install's own openestate_app/openestate_system, so this is
+  # no longer about protecting a real install specifically — just about
+  # not surprising whatever else might be using this cluster.)
   log "Done. Roles left in place (they are cluster-wide — see comment in this script)."
   exit 0
 fi
 
-# openestate_app/openestate_system are cluster-global role names that a real
-# native install uses too. Provisioning tests on the same cluster as a real
-# install rewrites those roles' passwords to the throwaway ones above and
-# breaks the running app until its own setup-database.sh is re-run. Detect
-# and refuse rather than discover it later.
-if psql_admin -tAc "SELECT 1 FROM pg_database WHERE datname='openestate'" postgres | grep -q 1; then
-  if [ "${TEST_ALLOW_SHARED_CLUSTER:-}" != "1" ]; then
-    die "This cluster also has a database named 'openestate' — a real install.
-The openestate_app/openestate_system roles are cluster-wide, so provisioning
-the test database here would reset that install's role passwords to throwaway
-values and break it until you re-run deploy/native/setup-database.sh.
-Use a different cluster, or set TEST_ALLOW_SHARED_CLUSTER=1 if you know the
-'openestate' database is not one you care about."
-  fi
-  warn "Proceeding on a cluster that also hosts an 'openestate' database (TEST_ALLOW_SHARED_CLUSTER=1)."
-fi
-
-# The check above only catches a production install using the DEFAULT
-# database name ('openestate'). deploy/native/setup-database.sh's --db flag
-# accepts any name, so a production install can legitimately use a
-# different one — and openestate_app/openestate_system's passwords are
-# cluster-wide regardless of which database they were granted against, so
-# that install is exactly as reachable and exactly as breakable here. Guard
-# on the roles themselves, not the database name, since the roles are what
-# actually gets reset.
-#
-# openestate_super only ever exists on a cluster this script itself has
-# already touched (a real install's own setup-database.sh never creates
-# it — see the comment on that role below). So: if openestate_super does
-# NOT exist yet, this script has never run against this cluster before,
-# and if openestate_app/openestate_system already exist anyway, they were
-# created by something else — almost certainly a real install, whatever
-# database it uses. Captured before openestate_super gets created a few
-# lines down, since after that point its mere existence stops being a
-# useful signal.
-SUPER_ALREADY_EXISTS="$(psql_admin -tAc "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='openestate_super'" postgres)"
-if [ -z "$SUPER_ALREADY_EXISTS" ]; then
-  EXISTING_APP_ROLE="$(psql_admin -tAc "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='openestate_app'" postgres)"
-  EXISTING_SYSTEM_ROLE="$(psql_admin -tAc "SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='openestate_system'" postgres)"
-  if [ -n "$EXISTING_APP_ROLE" ] || [ -n "$EXISTING_SYSTEM_ROLE" ]; then
-    if [ "${TEST_ALLOW_SHARED_CLUSTER:-}" != "1" ]; then
-      die "openestate_app and/or openestate_system already exist on this cluster,
-and this script has never set up a test superuser here before — these roles
-look like they belong to a real install, whatever database it uses (the
-database-name check above only catches the default name 'openestate').
-Their passwords are cluster-wide; continuing would reset them and break
-that install until it re-runs deploy/native/setup-database.sh.
-Use a different cluster, or set TEST_ALLOW_SHARED_CLUSTER=1 if you know
-these roles are safe to reuse."
-    fi
-    warn "Proceeding even though openestate_app/openestate_system already exist on this cluster (TEST_ALLOW_SHARED_CLUSTER=1)."
-  fi
-fi
+# REMOVED (this used to be a two-part guard here — a check for a database
+# named 'openestate', and a check for existing openestate_app/openestate_system
+# roles — refusing to proceed on a cluster that looked like it hosted a real
+# install, because provisioning tests there reset those roles' passwords and
+# broke it). Both checks existed for exactly one reason: TEST_APP_ROLE/
+# TEST_SYSTEM_ROLE used to be the SAME names a real install uses
+# (openestate_app/openestate_system). Now that they're structurally
+# different (openestate_test_app/openestate_test_system), the harm the guard
+# existed to prevent can't happen — this script never creates, alters, or
+# reads the password of any role a real install uses, on any cluster,
+# regardless of what else that cluster hosts. Keeping the guard around
+# would mean keeping dead code whose own error messages describe a
+# collision that is no longer possible; removed rather than left
+# half-meaningful. TEST_ALLOW_SHARED_CLUSTER is gone with it — nothing left
+# to opt into.
 
 # Migrations CREATE ROLE ... BYPASSRLS, which only a superuser may do, so
-# migrate/seed cannot run as openestate_app or openestate_system. A native
+# migrate/seed cannot run as the test app/system roles. A native
 # install solves this by running them as the `postgres` OS user over the
 # Unix socket (install-native.sh's run_as_superuser). That does not work
 # from a developer checkout: Prisma stats its cwd for a config file first,
@@ -231,15 +208,17 @@ grant_roles() {
     --admin-user openestate_super \
     --db "$DB_NAME" \
     --app-password "$APP_PASSWORD" \
-    --system-password "$SYSTEM_PASSWORD"
+    --system-password "$SYSTEM_PASSWORD" \
+    --app-role-name "$TEST_APP_ROLE" \
+    --system-role-name "$TEST_SYSTEM_ROLE"
 }
 
 log "Creating application roles (via deploy/native/setup-database.sh)..."
 grant_roles
 
 export DATABASE_URL="postgresql://openestate_super:${SUPER_PASSWORD}@${CONNECT_HOST}:${PG_PORT}/${DB_NAME}"
-export DATABASE_URL_TEST="postgresql://openestate_app:${APP_PASSWORD}@${CONNECT_HOST}:${PG_PORT}/${DB_NAME}?connection_limit=10"
-export DATABASE_URL_TEST_SYSTEM="postgresql://openestate_system:${SYSTEM_PASSWORD}@${CONNECT_HOST}:${PG_PORT}/${DB_NAME}?connection_limit=5"
+export DATABASE_URL_TEST="postgresql://${TEST_APP_ROLE}:${APP_PASSWORD}@${CONNECT_HOST}:${PG_PORT}/${DB_NAME}?connection_limit=10"
+export DATABASE_URL_TEST_SYSTEM="postgresql://${TEST_SYSTEM_ROLE}:${SYSTEM_PASSWORD}@${CONNECT_HOST}:${PG_PORT}/${DB_NAME}?connection_limit=5"
 export REDIS_TEST_URL="redis://${REDIS_HOST}:${REDIS_PORT}"
 # connection_limit above is deliberate, not decorative — see CLAUDE.md's
 # Phase 7 CI-reliability decisions. Every test file gets its OWN

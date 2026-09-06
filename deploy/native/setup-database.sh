@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Creates the OpenEstate database and the two application Postgres roles
-# (openestate_app, openestate_system) against a PostgreSQL server the admin
-# already runs. Never installs, configures, or manages PostgreSQL itself —
-# only connects to it. Safe to re-run: every statement checks existence
-# first. Also invoked by scripts/test-setup.sh to provision the test
-# database, so it has to stay safe to run repeatedly against a cluster that
-# already has some of this in place.
+# (openestate_app, openestate_system by default) against a PostgreSQL server
+# the admin already runs. Never installs, configures, or manages PostgreSQL
+# itself — only connects to it. Safe to re-run: every statement checks
+# existence first. Also invoked by scripts/test-setup.sh to provision the
+# test database, so it has to stay safe to run repeatedly against a cluster
+# that already has some of this in place.
+#
+# --app-role-name/--system-role-name (default: openestate_app/openestate_system,
+# i.e. every real install's behaviour is completely unchanged) let a caller
+# use different names — scripts/test-setup.sh passes openestate_test_app/
+# openestate_test_system, so a shared test cluster can never collide with a
+# real install's same-cluster roles of the same name (the incident that
+# motivated this: running tests reset a real install's role passwords).
 set -euo pipefail
 
 log()  { printf '\033[1;32m[setup-database]\033[0m %s\n' "$1"; }
@@ -18,6 +25,8 @@ PG_ADMIN_USER="postgres"
 DB_NAME="openestate"
 APP_PASSWORD=""
 SYSTEM_PASSWORD=""
+APP_ROLE="openestate_app"
+SYSTEM_ROLE="openestate_system"
 ENV_FILE="/etc/openestate/openestate.env"
 
 while [ $# -gt 0 ]; do
@@ -28,6 +37,8 @@ while [ $# -gt 0 ]; do
     --db) DB_NAME="$2"; shift 2 ;;
     --app-password) APP_PASSWORD="$2"; shift 2 ;;
     --system-password) SYSTEM_PASSWORD="$2"; shift 2 ;;
+    --app-role-name) APP_ROLE="$2"; shift 2 ;;
+    --system-role-name) SYSTEM_ROLE="$2"; shift 2 ;;
     --env-file) ENV_FILE="$2"; shift 2 ;;
     -h|--help)
       cat <<'USAGE'
@@ -37,8 +48,12 @@ Usage: setup-database.sh [options]
   --port PORT               Postgres port (default: 5432, only used with --host)
   --admin-user USER         Superuser to connect as (default: postgres)
   --db NAME                 Database name to create (default: openestate)
-  --app-password PW         Password for the openestate_app role
-  --system-password PW      Password for the openestate_system role
+  --app-password PW         Password for the app role
+  --system-password PW      Password for the system role
+  --app-role-name NAME      App role name (default: openestate_app — a real
+                             install never needs this flag)
+  --system-role-name NAME   System role name (default: openestate_system —
+                             a real install never needs this flag)
   --env-file PATH           Fallback source for the two passwords above if
                              not given as flags (default: /etc/openestate/openestate.env)
 
@@ -90,15 +105,15 @@ else
   log "Database '${DB_NAME}' already exists — leaving it in place."
 fi
 
-log "Creating/updating openestate_app and openestate_system roles..."
+log "Creating/updating ${APP_ROLE} and ${SYSTEM_ROLE} roles..."
 psql_admin --dbname "$DB_NAME" <<-EOSQL
   -- Tenant-scoped role (RLS enforced, no BYPASSRLS)
   DO \$\$
   BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'openestate_app') THEN
-      CREATE ROLE openestate_app WITH LOGIN PASSWORD '${APP_PASSWORD}' NOINHERIT;
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${APP_ROLE}') THEN
+      CREATE ROLE ${APP_ROLE} WITH LOGIN PASSWORD '${APP_PASSWORD}' NOINHERIT;
     ELSE
-      ALTER ROLE openestate_app WITH LOGIN PASSWORD '${APP_PASSWORD}';
+      ALTER ROLE ${APP_ROLE} WITH LOGIN PASSWORD '${APP_PASSWORD}';
     END IF;
   END
   \$\$;
@@ -106,27 +121,63 @@ psql_admin --dbname "$DB_NAME" <<-EOSQL
   -- System role (BYPASSRLS for cross-tenant operations, NOT superuser)
   DO \$\$
   BEGIN
-    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'openestate_system') THEN
-      CREATE ROLE openestate_system WITH LOGIN PASSWORD '${SYSTEM_PASSWORD}' NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${SYSTEM_ROLE}') THEN
+      CREATE ROLE ${SYSTEM_ROLE} WITH LOGIN PASSWORD '${SYSTEM_PASSWORD}' NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
     ELSE
-      ALTER ROLE openestate_system WITH LOGIN PASSWORD '${SYSTEM_PASSWORD}';
+      ALTER ROLE ${SYSTEM_ROLE} WITH LOGIN PASSWORD '${SYSTEM_PASSWORD}';
     END IF;
   END
   \$\$;
 
-  GRANT USAGE ON SCHEMA public TO openestate_app;
-  GRANT USAGE ON SCHEMA public TO openestate_system;
-  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openestate_app;
-  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openestate_system;
+  GRANT USAGE ON SCHEMA public TO ${APP_ROLE};
+  GRANT USAGE ON SCHEMA public TO ${SYSTEM_ROLE};
+  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE};
+  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${SYSTEM_ROLE};
 
   ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openestate_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${APP_ROLE};
   ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openestate_system;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${SYSTEM_ROLE};
   ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO openestate_app;
+    GRANT USAGE, SELECT ON SEQUENCES TO ${APP_ROLE};
   ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO openestate_system;
+    GRANT USAGE, SELECT ON SEQUENCES TO ${SYSTEM_ROLE};
+
+  -- Portal RLS helper functions (Phase 6) are granted EXECUTE by name in
+  -- their own migration, targeting the literal 'openestate_app'/
+  -- 'openestate_system' strings only — a caller using different role names
+  -- (scripts/test-setup.sh's openestate_test_app/openestate_test_system)
+  -- would otherwise have working table grants but no permission to call
+  -- these, breaking every portal RLS policy that calls them. Re-granting
+  -- here, by the actual parameterized name, covers both: for the real
+  -- openestate_app/openestate_system names this is a harmless no-op
+  -- (already granted by the migration); for a differently-named test role
+  -- it is the only place that grant is ever issued. Existence-checked, not
+  -- unconditional: this script runs BEFORE migrations too (both
+  -- install-native.sh's own single call and scripts/test-setup.sh's first
+  -- of two), when these functions don't exist yet — an unconditional GRANT
+  -- would fail the very first real install and the very first test
+  -- provisioning run with "function does not exist".
+  DO \$\$
+  BEGIN
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'portal_applicant') THEN
+      EXECUTE format('GRANT EXECUTE ON FUNCTION portal_applicant() TO %I, %I', '${APP_ROLE}', '${SYSTEM_ROLE}');
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'portal_broker') THEN
+      EXECUTE format('GRANT EXECUTE ON FUNCTION portal_broker() TO %I, %I', '${APP_ROLE}', '${SYSTEM_ROLE}');
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'portal_can_access_booking') THEN
+      EXECUTE format('GRANT EXECUTE ON FUNCTION portal_can_access_booking(uuid) TO %I, %I', '${APP_ROLE}', '${SYSTEM_ROLE}');
+    END IF;
+    -- openestate_system (or its test equivalent) already bypasses RLS
+    -- directly; it has no need for a function whose sole purpose is
+    -- bypassing RLS on booking_co_applicants — matches the migration's own
+    -- app-role-only grant exactly.
+    IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'booking_has_co_applicant') THEN
+      EXECUTE format('GRANT EXECUTE ON FUNCTION booking_has_co_applicant(uuid, uuid) TO %I', '${APP_ROLE}');
+    END IF;
+  END
+  \$\$;
 EOSQL
 
 log "Database setup complete."

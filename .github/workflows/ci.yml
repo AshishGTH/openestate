@@ -332,6 +332,14 @@ jobs:
       - name: Build workspace
         run: pnpm build
 
+      # Role names are openestate_test_app/openestate_test_system, NOT a
+      # real install's openestate_app/openestate_system — this job's own
+      # ephemeral service-container Postgres never shares a cluster with a
+      # real install anyway, but scripts/test-setup.sh and this inline copy
+      # are meant to stay in sync in what they create, and the whole point
+      # of the rename (see CHANGELOG's [Unreleased] Security entry) is that
+      # test provisioning never uses the same names a real install does,
+      # anywhere.
       - name: Create application roles
         env:
           PGHOST: localhost
@@ -341,14 +349,14 @@ jobs:
           PGDATABASE: openestate_test
         run: |
           psql <<'EOSQL'
-            CREATE ROLE openestate_app WITH LOGIN PASSWORD 'test_app_pass' NOINHERIT;
-            CREATE ROLE openestate_system WITH LOGIN PASSWORD 'test_system_pass' NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
-            GRANT USAGE ON SCHEMA public TO openestate_app;
-            GRANT USAGE ON SCHEMA public TO openestate_system;
-            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openestate_app;
-            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openestate_system;
-            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO openestate_app;
-            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO openestate_system;
+            CREATE ROLE openestate_test_app WITH LOGIN PASSWORD 'test_app_pass' NOINHERIT;
+            CREATE ROLE openestate_test_system WITH LOGIN PASSWORD 'test_system_pass' NOSUPERUSER NOCREATEDB NOCREATEROLE BYPASSRLS;
+            GRANT USAGE ON SCHEMA public TO openestate_test_app;
+            GRANT USAGE ON SCHEMA public TO openestate_test_system;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openestate_test_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO openestate_test_system;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO openestate_test_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO openestate_test_system;
           EOSQL
 
       - name: Apply migration
@@ -359,6 +367,17 @@ jobs:
           npx prisma migrate deploy
           npx prisma migrate status
 
+      # The portal RLS helper functions (portal_applicant/portal_broker/
+      # portal_can_access_booking/booking_has_co_applicant) are granted
+      # EXECUTE by the phase6_portal migration to the literal
+      # 'openestate_app'/'openestate_system' names only — see
+      # deploy/native/setup-database.sh's own identical comment. Table
+      # grants alone would leave openestate_test_app/openestate_test_system
+      # unable to call them, breaking every portal RLS policy that does —
+      # exactly the kind of thing this job's own portal specs exercise.
+      # Unconditional here (unlike setup-database.sh's existence-checked
+      # version): this step always runs after "Apply migration" in this
+      # job's fixed order, so the functions always already exist.
       - name: Grant table-level permissions
         env:
           PGHOST: localhost
@@ -368,8 +387,12 @@ jobs:
           PGDATABASE: openestate_test
         run: |
           psql <<'EOSQL'
-            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openestate_app;
-            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openestate_system;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openestate_test_app;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO openestate_test_system;
+            GRANT EXECUTE ON FUNCTION portal_applicant() TO openestate_test_app, openestate_test_system;
+            GRANT EXECUTE ON FUNCTION portal_broker() TO openestate_test_app, openestate_test_system;
+            GRANT EXECUTE ON FUNCTION portal_can_access_booking(uuid) TO openestate_test_app, openestate_test_system;
+            GRANT EXECUTE ON FUNCTION booking_has_co_applicant(uuid, uuid) TO openestate_test_app;
           EOSQL
 
       # No seed step here, unlike integration-tests — apps/e2e's own

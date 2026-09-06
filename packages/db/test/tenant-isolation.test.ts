@@ -4,8 +4,8 @@
  * Require a live Postgres with the Phase 1 migration applied and both
  * application roles configured. Set env vars:
  *
- *   DATABASE_URL_TEST        — openestate_app connection (RLS enforced)
- *   DATABASE_URL_TEST_SYSTEM — openestate_system connection (BYPASSRLS)
+ *   DATABASE_URL_TEST        — openestate_test_app connection (RLS enforced)
+ *   DATABASE_URL_TEST_SYSTEM — openestate_test_system connection (BYPASSRLS)
  *
  * Skipped automatically when the env vars are absent.
  */
