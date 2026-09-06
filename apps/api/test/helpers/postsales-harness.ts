@@ -192,23 +192,161 @@ export async function makeUser(
 // Phone numbers double as portal login identifiers (users.phone), and
 // portal/auth/login resolves an identifier without knowing the caller's
 // company up front — a phone collision across two DIFFERENT companies'
-// applicants/brokers (e.g. from two test files that each reset their own
-// in-process counter to 0) can log a test in as the WRONG user, not just
-// fail to find one. appSeq/brokerSeq alone were never enough once enough
-// concurrently-running files each called these: vitest's forked pool
-// runs multiple test FILES in the same OS process, but `process.pid` is
-// still shared only within one such worker, not globally — mixing it in
-// shrinks the collision window to "two files disambiguating with the
-// same appSeq value AND landing in the same forked worker," rather than
-// "any two files, ever." Same root cause and same fix shape as
-// THROTTLE_TEST_KEY_PREFIX elsewhere in this suite.
+// applicants/brokers can log a test in as the WRONG user, not just fail to
+// find one (docs/todo.md's "makeApplicant's phone counter" entry; the flake
+// this caused in e2e-portal-throttle.test.ts is documented in CLAUDE.md's
+// Phase 6 commit 4 decisions).
+//
+// Vitest's forked pool re-instantiates this module fresh per test FILE
+// (each file gets its own `let appSeq = 0`), so the ORIGINAL scheme
+// (`process.pid % 100` mixed in, appSeq starting at 0) collided whenever
+// two CONCURRENT files happened to share a pid bucket: birthday paradox
+// over 4 draws (this project's maxForks) from 100 buckets ≈ 5.9% per
+// full suite run, and a shared bucket meant an EXACT collision on each
+// file's first applicant.
+//
+// This went through three designs before landing, each one falsified by
+// actually running it, not by further reasoning about it — kept here,
+// briefly, because the failure of each is what justifies the final shape:
+//
+// 1. Random per-process offset over a 99,000,000-wide range. Measured
+//    ~0.05% collision probability via simulation — much better, but still
+//    a probability, in a fix whose whole point is removing a flake.
+// 2. STRUCTURAL blocks keyed on `VITEST_POOL_ID` (tinypool's pool-slot
+//    index, confirmed via probe test files to be bounded to
+//    [1, maxForks] and reused by a NEW process once an old slot-occupant
+//    exits) — one disjoint 1,000,000-wide block per slot, so two
+//    CONCURRENT files can't collide. Correct for concurrency, but this
+//    project's Vitest config has no explicit `isolate` setting, so it
+//    runs on Vitest's own default, `isolate: true` (confirmed by reading
+//    node_modules/vitest's own default config), which — combined with
+//    the probe evidence (a later probe got a FRESH PID but the SAME
+//    VITEST_POOL_ID an earlier one had used) — means every file
+//    dispatched to a slot, not just one after a crash, restarts this
+//    module from scratch with `appSeq` back at 0. Keying the seed on
+//    VITEST_POOL_ID alone meant the SECOND file ever dispatched to a
+//    slot re-emitted the FIRST file's entire sequence — a certainty, not
+//    a probability, for any two files sharing a slot (most files, under
+//    maxForks:4 and ~88 apps/api test files).
+// 3. Added a "monotonic" sub-offset nested in the block, derived from
+//    wall-clock time quantized to a 100ms grid
+//    (`Math.floor(Date.now() / 100)`), reasoned to differ between
+//    sequential same-slot dispatches because bootstrapping a real NestJS
+//    app takes tens of milliseconds at least. EMPIRICALLY FALSIFIED: the
+//    probe methodology below (mocking systemPrisma so no real DB is
+//    needed) has no bootstrap cost at all, and 10 such probes under real
+//    `maxForks:4` measured PER-FILE DURATIONS OF 3–27ms — well under a
+//    100ms window — and a live run reproduced the exact duplicate-phone
+//    failure being fixed, on the first verification attempt. A slower
+//    window would only push the same failure further out, not remove
+//    it: nothing guarantees a minimum inter-dispatch gap, and nothing
+//    stops a future lightweight file from dispatching that fast for real.
+//
+// FINAL FIX: `VITEST_WORKER_ID` (`ctx.workerId`, set in vitest's own
+// worker.js — a DIFFERENT thing from tinypool's `workerId` despite the
+// name, confirmed by reading both) is a single counter for the ENTIRE
+// run, confirmed strictly increasing across every file regardless of
+// which pool slot handled it (probe evidence: 6 files read worker ids
+// 1..6, in dispatch order, never repeating). That single property — a
+// number that is NEVER reused by any two files in one Vitest invocation,
+// whether they run concurrently or sequentially reuse the same slot —
+// already gives every file a globally unique identity, which is a
+// STRONGER guarantee than the two-tier pool-id-block-plus-sub-offset
+// design above was reaching for, and needs no separate concurrency tier
+// at all: `VITEST_POOL_ID` is now unused. (An earlier attempt used
+// `workerId - 1` directly as a sub-offset WITHIN a pool-id block, which
+// has a real arithmetic bug caught by the same probe re-run: consecutive
+// worker ids differ by exactly 1, not by the per-file reservation width,
+// so consecutive files' 5,000-wide reserved ranges overlapped almost
+// entirely. The fix is the same insight taken one step further — since
+// `VITEST_WORKER_ID` is unique per file GLOBALLY, not just within a
+// slot, there is no need to confine it to a slot's block at all; multiply
+// it by the reservation width directly, over the FULL suffix range.)
+//
+// `PHONE_SEED = (VITEST_WORKER_ID - 1) × PER_FILE_HEADROOM`. Two files
+// can never receive the same `VITEST_WORKER_ID`, so their reserved
+// [seed, seed+PER_FILE_HEADROOM) ranges can never overlap, regardless of
+// concurrency or slot reuse — not a probability, a property of how
+// Vitest assigns that counter.
+//
+// Per-file call allowance: PER_FILE_HEADROOM = 5,000 — ~2.5x
+// postsales-property.test.ts's real worst case (exactly ONE makeApplicant
+// call per fast-check iteration, PROPERTY_NUM_RUNS up to 2000 by default;
+// re-checked directly in that file rather than assumed, since an earlier
+// draft of this comment overstated it as ~4000 from a wrong "2 calls per
+// iteration" reading). `nextPhoneSuffix` throws if a file's own sequence
+// would exceed it.
+//
+// How many files can share a run before ranges exhaust: MAX_FILES_PER_RUN
+// = PHONE_SUFFIX_MODULUS / PER_FILE_HEADROOM = 100,000,000 / 5,000 =
+// 20,000 — the total number of `VITEST_WORKER_ID` values (i.e. total test
+// files) this scheme can place without two reservations overlapping.
+// This project's apps/api/test has ~88 files today, ~227x under that
+// ceiling. AT that boundary (a single Vitest invocation running ≥20,000
+// files — not a realistic scenario for any test suite, this or
+// otherwise), `computePhoneSeed` THROWS immediately at module load naming
+// the exact `VITEST_WORKER_ID` that crossed it, rather than silently
+// wrapping into a range an earlier file in the same run already used.
+//
+// The random-offset path (Math.random(), not process.hrtime.bigint() —
+// V8 seeds Math.random() from OS entropy independently per isolate, i.e.
+// per process, so it needs no argument about scheduler jitter or clock
+// resolution the way reasoning about two forks' hrtime reads would; this
+// file's own `rnd()` helper above already leans on the same property) is
+// kept as a fallback for when VITEST_WORKER_ID is absent — a direct
+// caller (e.g. a standalone tsx script) outside any Vitest run. Nothing
+// in this codebase calls makeApplicant/makeBroker that way today
+// (grepped), so this path is currently unexercised defensive coverage,
+// not a live concurrency need. It draws from the FULL
+// PHONE_SUFFIX_MODULUS-wide range and is bound by the same
+// PER_FILE_HEADROOM ceiling, so it can't wrap into a phone that exceeds
+// the 8-digit suffix budget — but it has no structural guarantee against
+// colliding with a concurrently-running Vitest worker's reservation,
+// same limitation every earlier random-offset attempt had, acceptable
+// only because this path has no current caller to actually collide.
+const PHONE_SUFFIX_DIGITS = 8;
+const PHONE_SUFFIX_MODULUS = 10 ** PHONE_SUFFIX_DIGITS; // 100,000,000
+const PER_FILE_HEADROOM = 5_000; // per-file call ceiling — ~2.5x the observed worst case (2000)
+const MAX_FILES_PER_RUN = Math.floor(PHONE_SUFFIX_MODULUS / PER_FILE_HEADROOM); // 20,000
+
+function computePhoneSeed(): number {
+  const workerId = Number(process.env.VITEST_WORKER_ID);
+  if (Number.isInteger(workerId) && workerId >= 1) {
+    const index = workerId - 1;
+    if (index >= MAX_FILES_PER_RUN) {
+      throw new Error(
+        `VITEST_WORKER_ID=${workerId} exceeds this phone-numbering scheme's ${MAX_FILES_PER_RUN}-file ` +
+          `capacity (postsales-harness.ts: PER_FILE_HEADROOM=${PER_FILE_HEADROOM} over a ` +
+          `${PHONE_SUFFIX_MODULUS}-wide suffix space). This means over ${MAX_FILES_PER_RUN} test files ` +
+          `ran in a single Vitest invocation — widen PHONE_SUFFIX_DIGITS or shrink PER_FILE_HEADROOM to ` +
+          `add headroom rather than letting this wrap into a range an earlier file already used.`,
+      );
+    }
+    return index * PER_FILE_HEADROOM;
+  }
+  return Math.floor(Math.random() * (PHONE_SUFFIX_MODULUS - PER_FILE_HEADROOM));
+}
+const PHONE_SEED = computePhoneSeed();
+
+function nextPhoneSuffix(seq: number): string {
+  if (seq >= PER_FILE_HEADROOM) {
+    throw new Error(
+      `makeApplicant/makeBroker's phone counter exceeded its reserved headroom of ` +
+        `${PER_FILE_HEADROOM} calls in one test file. Widen PER_FILE_HEADROOM in ` +
+        `postsales-harness.ts (and re-check the collision-probability comment above it) ` +
+        `if a test genuinely needs this many.`,
+    );
+  }
+  return String(PHONE_SEED + seq).padStart(PHONE_SUFFIX_DIGITS, '0');
+}
+
 let appSeq = 0;
 export async function makeApplicant(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   systemPrisma: any,
   companyId: string,
 ): Promise<string> {
-  const phone = `98${String(process.pid % 100).padStart(2, '0')}${String(100000 + appSeq++).slice(-6)}`;
+  const phone = `98${nextPhoneSuffix(appSeq++)}`;
   const a = await systemPrisma.applicant.create({
     data: { companyId, name: `Applicant ${appSeq}`, primaryPhone: phone, primaryPhoneNormalized: phone },
   });
@@ -221,7 +359,7 @@ export async function makeBroker(
   systemPrisma: any,
   companyId: string,
 ): Promise<string> {
-  const phone = `90${String(process.pid % 100).padStart(2, '0')}${String(100000 + brokerSeq++).slice(-6)}`;
+  const phone = `90${nextPhoneSuffix(brokerSeq++)}`;
   const b = await systemPrisma.broker.create({
     data: { companyId, name: `Broker ${brokerSeq}`, phone },
   });
