@@ -31,12 +31,34 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   uses) and writing a `.test-env` you `source` before `pnpm test`.
   Test Postgres/Redis moved from 5433/6380 to the standard 5432/6379,
   since the odd ports only ever existed to avoid colliding with the
-  host's own services from inside a container. Two guards come with it:
-  the script refuses to run on a cluster that also holds a database
-  named `openestate` (the `openestate_app`/`openestate_system` roles
-  are cluster-wide and shared with a real install — override with
-  `TEST_ALLOW_SHARED_CLUSTER=1`), and `teardown` drops only a database
-  whose name ends in `_test`, never the roles.
+  host's own services from inside a container. `teardown` drops only a
+  database whose name ends in `_test`, never the roles (they're
+  cluster-wide, and a developer may have another test database on the
+  same cluster). Test provisioning's role names are now
+  `openestate_test_app`/`openestate_test_system`, not
+  `openestate_app`/`openestate_system` — see the "Security" section
+  below for why, and for the shared-cluster guard this superseded and
+  removed.
+
+### Security
+
+- **Test provisioning no longer uses the same Postgres role names as a
+  real install.** `scripts/test-setup.sh` (via
+  `deploy/native/setup-database.sh --app-role-name/--system-role-name`)
+  now creates `openestate_test_app`/`openestate_test_system`, not
+  `openestate_app`/`openestate_system`. Postgres roles are cluster-wide:
+  running tests against a cluster that also hosts a real install used to
+  reset that install's role passwords to the throwaway test values,
+  breaking it until its own `setup-database.sh` was re-run — a real
+  incident, not a hypothetical one. Different names make the collision
+  structurally impossible rather than merely guarded against, so the
+  shared-cluster existence-check guard this used to require (refuse to
+  provision on a cluster that already has an `openestate` database or
+  `openestate_app`/`openestate_system` roles, override with
+  `TEST_ALLOW_SHARED_CLUSTER=1`) is removed along with it — it no longer
+  detects anything that can happen. A real install's own
+  `openestate_app`/`openestate_system` are completely unaffected; this
+  only changes what test provisioning uses.
 
 ### Fixed
 

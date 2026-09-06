@@ -79,26 +79,6 @@ isolation (not the full suite) two or three times; if they pass every
 time, that confirms contention and this entry can be deleted; if either
 fails again in isolation, it is real and needs its own investigation.
 
-## Guard on `scripts/test-setup.sh`'s "differently-named production database" case — verified by direct SQL only, not by full reproduction
-
-The script's shared-cluster guard was strengthened to check for existing
-`openestate_app`/`openestate_system` roles (cluster-wide) in addition to a
-database literally named `openestate` — closing the gap where a
-production install using `deploy/native/setup-database.sh --db
-<other-name>` was reachable and undetected. The underlying `pg_roles`
-existence queries were verified directly against a real cluster, and the
-new check was confirmed not to interfere with the normal (super-role-
-already-exists) path via a live re-run.
-
-**What was NOT done**: an actual end-to-end reproduction of "a production
-install on a differently-named database, then run test-setup.sh with no
-override, confirm it refuses." The only VM available for this session's
-verification already uses the default `openestate` name for its real
-install, so that exact scenario couldn't be constructed without either a
-second cluster or renaming/disrupting the live one. If a second
-throwaway Postgres instance is ever available, this is the one thing
-left to prove that hasn't been.
-
 ## `ci.yml`'s `scripts/test-setup.sh` wiring — not verified by an actual GitHub Actions run
 
 `integration-tests` now calls `scripts/test-setup.sh` (with
@@ -491,27 +471,6 @@ this note once it has a real, tested effect.
   through-the-wire supertest per touched controller before merging (the
   Phase 6 commit 2 standing rule) to catch any that turn out to be
   portal-reachable after all.
-
-- **`makeApplicant()`'s phone counter (`appSeq`,
-  `apps/api/test/helpers/postsales-harness.ts`) is per-process, not
-  globally unique, and `PortalAuthService.login()`'s identifier lookup is
-  deliberately company-unscoped.** Two e2e test files that both call
-  `makeApplicant()` early can generate the identical phone number for
-  their first applicant; under `pnpm test`'s default forked parallelism,
-  a login in one file can occasionally resolve to another file's user row
-  and then 500 when that row is deleted by the other file's `afterAll`
-  cleanup mid-test. Confirmed as the cause of a flake in
-  `e2e-portal-throttle.test.ts` (Phase 6 commit 4) that only reproduced
-  running the full e2e trio together, never in isolation — see CLAUDE.md
-  Phase 6 commit 4 decisions. Worked around locally in that one file
-  (high-entropy phone numbers instead of `makeApplicant()`); the harness
-  helper itself and `PortalAuthService.login`'s cross-company lookup are
-  unchanged. Unblocked by either seeding `appSeq` from
-  `process.hrtime.bigint()`/a random offset instead of `0`, or scoping
-  test login lookups by a company-specific identifier prefix — whichever
-  is chosen should also close the identical gap
-  `e2e-portal.test.ts`'s own comment already flagged for id-based
-  assertions.
 
 ## Plugins (Phase 7)
 

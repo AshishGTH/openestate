@@ -97,14 +97,15 @@ refuses to drop anything whose name doesn't end in `_test`.
 - Connects as an admin either through `sudo -u postgres` (local peer
   auth, the default) or over TCP if you set `PGPASSWORD`.
 - Role creation is delegated to `deploy/native/setup-database.sh` — the
-  same script a real install runs — rather than a second copy of the same
-  SQL.
-- **It refuses to run on a cluster that also holds a database named
-  `openestate`.** `openestate_app` and `openestate_system` are
-  cluster-wide role names shared with a real install, so provisioning the
-  test database there would reset that install's role passwords and break
-  it. Use a separate cluster, or set `TEST_ALLOW_SHARED_CLUSTER=1` if that
-  `openestate` database is disposable.
+  same script a real install runs, parameterized to create
+  `openestate_test_app`/`openestate_test_system` here instead of a real
+  install's `openestate_app`/`openestate_system` — rather than a second
+  copy of the same SQL.
+- **Safe to run on a cluster that also hosts a real install.** Test
+  provisioning's role names are structurally different from a real
+  install's, so there is nothing left to collide — unlike an earlier
+  version of this script, which used the same role names as a real
+  install and could reset its passwords.
 
 Don't add production-install functionality to these files — that belongs
 in `deploy/native/`.
