@@ -82,6 +82,14 @@ export default defineConfig({
         // actually need the portal origin talking to this same API.
         CORS_ALLOWLIST: `${WEB_URL},${PORTAL_URL}`,
         SWAGGER_ENABLED: 'false',
+        // ~50 concurrently-forked apps/api test files (and this harness's
+        // own login-heavy specs) all share ONE IP-keyed default throttle
+        // bucket (RedisThrottlerStorage is real, shared state across every
+        // forked worker). At the production default of 100 req/60s, that
+        // bucket is exhausted by test volume alone, well before any single
+        // test's own logic does anything wrong. Unset in a real install,
+        // this stays 100 — see app.module.ts's DEFAULT_THROTTLE_LIMIT read.
+        DEFAULT_THROTTLE_LIMIT: '2000',
         JWT_ACCESS_SECRET: HARNESS_HEX_KEY,
         JWT_REFRESH_SECRET: HARNESS_HEX_KEY,
         JWT_ACCESS_EXPIRES_IN: '15m',
