@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { readFixture } from '../fixtures/state';
-import { login, controlAfterLabel } from '../fixtures/actions';
+import { login, controlAfterLabel, openMasterTable } from '../fixtures/actions';
 
 // Regression coverage for "Systematic VM admin walkthrough — issue #4"
 // (CLAUDE.md): every master edit, of any type, ever submitted 400'd
@@ -15,8 +15,11 @@ test('create a master with type-specific optional fields → edit it → deactiv
   const name = `E2E Standard Interest ${Date.now()}`;
 
   await login(page, fixture);
-  await page.goto('/admin/masters');
-  await page.getByRole('button', { name: 'Interest Rules', exact: true }).click();
+  // Interest Rules lives in the "Payments & Charges" category
+  // (feat/categorise-masters-ui), which isn't the one auto-opened on
+  // load — this test predates that grouping and used to reach it with a
+  // direct click; openMasterTable expands its category first.
+  await openMasterTable(page, 'Interest Rules');
   await page.getByRole('button', { name: 'Add Item' }).click();
 
   // Interest Rules is one of TYPE_FIELDS' entries — rateType/ratePercent/
