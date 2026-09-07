@@ -4,6 +4,18 @@ export default defineConfig({
   test: {
     include: ['src/**/*.spec.ts', 'test/**/*.test.ts'],
     environment: 'node',
+    // ~50 concurrently-forked test files (this suite plus packages/db's own)
+    // all share ONE IP-keyed default throttle bucket (RedisThrottlerStorage
+    // is real, shared state across every forked worker — see its own doc
+    // comment). At the production default of 100 req/60s, that shared
+    // bucket is exhausted by test VOLUME alone, well before any single
+    // test's own logic does anything wrong. Raising it here only affects
+    // this test run's environment (see app.module.ts's
+    // DEFAULT_THROTTLE_LIMIT read — unset still means 100, unchanged for
+    // every real install).
+    env: {
+      DEFAULT_THROTTLE_LIMIT: '2000',
+    },
     // Capped, not left at vitest's default (== CPU count, 16 on this
     // machine's dev box). Instrumentation (see CLAUDE.md's Phase 7
     // CI-reliability decisions) showed the full-suite flakiness was NOT
