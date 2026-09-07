@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePaginatedQuery, useApiMutation } from '../../lib/hooks';
 import { api } from '../../lib/api';
@@ -6,30 +6,88 @@ import DataTable, { type Column } from '../../components/DataTable';
 import Pagination from '../../components/Pagination';
 import { INTEREST_RATE_TYPE, LETTER_TEMPLATE_ENTITY_TYPES, MERGE_FIELD_REGISTRY } from '@openestate/shared';
 
-const MASTER_TABLES = [
-  { key: 'unit-types', label: 'Unit Types' },
-  { key: 'plc-types', label: 'PLC Types' },
-  { key: 'inquiry-sources', label: 'Inquiry Sources' },
-  { key: 'inquiry-types', label: 'Inquiry Types' },
-  { key: 'inquiry-temperatures', label: 'Inquiry Temperatures' },
-  { key: 'follow-up-types', label: 'Follow-Up Types' },
-  { key: 'dump-reasons', label: 'Dump Reasons' },
-  { key: 'ticket-categories', label: 'Ticket Categories' },
-  { key: 'communication-types', label: 'Communication Types' },
-  { key: 'project-types', label: 'Project Types' },
-  { key: 'receipt-types', label: 'Receipt Types' },
-  { key: 'registration-types', label: 'Registration Types' },
-  { key: 'area-locations', label: 'Area/Locations' },
-  { key: 'document-types', label: 'Document Types' },
-  { key: 'charge-types', label: 'Charge Types' },
-  { key: 'banks', label: 'Banks' },
-  { key: 'interest-rules', label: 'Interest Rules' },
-  { key: 'transfer-fee-rules', label: 'Transfer Fee Rules' },
-  { key: 'payment-plan-templates', label: 'Payment Plan Templates' },
-  { key: 'gst-rates', label: 'GST Rates' },
-  { key: 'tds-rules', label: 'TDS Rules' },
-  { key: 'letter-templates', label: 'Letter Templates' },
+interface MasterTableEntry {
+  key: string;
+  label: string;
+  // Not set anywhere today — every master type shares the same
+  // ADMIN_MASTER_READ permission that already gates this whole page (see
+  // master.factory.ts). Present only so the empty-category guard below has
+  // something real to filter on if a future master type ever gets its own,
+  // narrower permission — without this field, that guard would be dead code
+  // no one remembered to wire up.
+  perm?: string;
+}
+
+interface MasterCategory {
+  category: string;
+  tables: MasterTableEntry[];
+}
+
+/**
+ * Single declarative source of truth for both the category grouping and the
+ * flat per-table config below (MASTER_TABLES is derived from this, not
+ * hand-duplicated) — category logic stays in this one config, not scattered
+ * through JSX. Order and grouping match the product decision on how staff
+ * think about these tables (what they're doing), not the backend module
+ * that happens to own the endpoint — same reasoning as AppShell.tsx's own
+ * nav SECTIONS.
+ */
+const MASTER_CATEGORIES: MasterCategory[] = [
+  {
+    category: 'Leads & Follow-ups',
+    tables: [
+      { key: 'inquiry-sources', label: 'Inquiry Sources' },
+      { key: 'inquiry-types', label: 'Inquiry Types' },
+      { key: 'inquiry-temperatures', label: 'Inquiry Temperatures' },
+      { key: 'follow-up-types', label: 'Follow-Up Types' },
+      { key: 'dump-reasons', label: 'Dump Reasons' },
+      { key: 'communication-types', label: 'Communication Types' },
+    ],
+  },
+  {
+    category: 'Projects & Inventory',
+    tables: [
+      { key: 'project-types', label: 'Project Types' },
+      { key: 'unit-types', label: 'Unit Types' },
+      { key: 'plc-types', label: 'PLC Types' },
+      { key: 'area-locations', label: 'Area/Locations' },
+    ],
+  },
+  {
+    category: 'Payments & Charges',
+    tables: [
+      { key: 'receipt-types', label: 'Receipt Types' },
+      { key: 'charge-types', label: 'Charge Types' },
+      { key: 'payment-plan-templates', label: 'Payment Plan Templates' },
+      { key: 'interest-rules', label: 'Interest Rules' },
+      { key: 'banks', label: 'Banks' },
+    ],
+  },
+  {
+    category: 'Tax & Compliance',
+    tables: [
+      { key: 'gst-rates', label: 'GST Rates' },
+      { key: 'tds-rules', label: 'TDS Rules' },
+    ],
+  },
+  {
+    category: 'Bookings & Documents',
+    tables: [
+      { key: 'registration-types', label: 'Registration Types' },
+      { key: 'transfer-fee-rules', label: 'Transfer Fee Rules' },
+      { key: 'document-types', label: 'Document Types' },
+      { key: 'letter-templates', label: 'Letter Templates' },
+    ],
+  },
+  {
+    category: 'Support',
+    tables: [{ key: 'ticket-categories', label: 'Ticket Categories' }],
+  },
 ];
+
+const MASTER_TABLES: MasterTableEntry[] = MASTER_CATEGORIES.flatMap((c) => c.tables);
+
+export { MASTER_CATEGORIES };
 
 interface MasterItem {
   id: string;
@@ -157,6 +215,24 @@ function fieldsFor(table: string): FieldDef[] {
   ];
 }
 
+// Distinct from AppShell.tsx's SECTION_STATE_KEY ('openestate.nav.sections')
+// — these are two independent sets of collapsible sections (sidebar nav vs.
+// this page's category groups) and must not read/overwrite each other's
+// stored open/closed state.
+const CATEGORY_STATE_KEY = 'openestate.masters.categories';
+
+function readStoredCategoryState(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(CATEGORY_STATE_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+  } catch {
+    // A corrupt/unavailable localStorage must never break the page —
+    // fall back to defaults rather than throwing during render (mirrors
+    // AppShell.tsx's readStoredSectionState).
+    return {};
+  }
+}
+
 export default function MastersPage() {
   const qc = useQueryClient();
   const [selectedTable, setSelectedTable] = useState(MASTER_TABLES[0].key);
@@ -166,6 +242,40 @@ export default function MastersPage() {
   const [formName, setFormName] = useState('');
   const [formValues, setFormValues] = useState<Record<string, string | boolean>>({});
   const [formError, setFormError] = useState('');
+  const [categoryOverrides, setCategoryOverrides] = useState<Record<string, boolean>>(
+    readStoredCategoryState,
+  );
+
+  const toggleCategory = useCallback((label: string, currentlyOpen: boolean) => {
+    setCategoryOverrides((prev) => {
+      const next = { ...prev, [label]: !currentlyOpen };
+      try {
+        localStorage.setItem(CATEGORY_STATE_KEY, JSON.stringify(next));
+      } catch {
+        // Non-fatal: the toggle still works for this session.
+      }
+      return next;
+    });
+  }, []);
+
+  // Currently a no-op filter (no MasterTableEntry sets `perm` — every
+  // master type shares the page-level ADMIN_MASTER_READ gate) but written
+  // the same shape as AppShell.tsx's visibleItems() so a future per-master
+  // permission plugs in here without restructuring this function or its
+  // callers.
+  const visibleTables = (tables: MasterTableEntry[]) => tables;
+
+  /**
+   * Open when: the user has explicitly toggled it (their choice always
+   * wins, so switching tabs never springs a deliberately-collapsed category
+   * back open), otherwise open iff it contains the currently selected
+   * table. Mirrors AppShell.tsx's isSectionOpen exactly.
+   */
+  const isCategoryOpen = (category: MasterCategory, tables: MasterTableEntry[]) => {
+    const override = categoryOverrides[category.category];
+    if (override !== undefined) return override;
+    return tables.some((t) => t.key === selectedTable);
+  };
 
   const { data, isLoading } = usePaginatedQuery<MasterItem>(
     ['masters', selectedTable],
@@ -308,24 +418,60 @@ export default function MastersPage() {
     <div>
       <h1 className="text-2xl font-semibold text-slate-900">Masters</h1>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        {MASTER_TABLES.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => {
-              setSelectedTable(t.key);
-              setPage(1);
-              setShowForm(false);
-            }}
-            className={`rounded-md px-3 py-1.5 text-sm ${
-              selectedTable === t.key
-                ? 'bg-blue-600 text-white'
-                : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
-            }`}
-          >
-            {t.label}
-          </button>
-        ))}
+      <div className="mt-4 space-y-3">
+        {MASTER_CATEGORIES.map((category) => {
+          const tables = visibleTables(category.tables);
+          // A category the user can see nothing inside must not render at
+          // all — not an empty header, not a collapsed shell that opens
+          // onto nothing (mirrors AppShell.tsx's identical rule; unreachable
+          // today since visibleTables is a no-op, but kept so a future
+          // per-master permission doesn't silently produce one).
+          if (tables.length === 0) return null;
+          const open = isCategoryOpen(category, tables);
+
+          return (
+            <div key={category.category}>
+              <button
+                type="button"
+                aria-expanded={open}
+                onClick={() => toggleCategory(category.category, open)}
+                className="flex w-full items-center gap-2 rounded-md px-1 py-1 text-xs font-semibold uppercase tracking-wider text-slate-400 hover:text-slate-600"
+              >
+                <svg
+                  className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-90' : ''}`}
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  aria-hidden="true"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+                <span>{category.category}</span>
+              </button>
+              {open && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {tables.map((t) => (
+                    <button
+                      key={t.key}
+                      onClick={() => {
+                        setSelectedTable(t.key);
+                        setPage(1);
+                        setShowForm(false);
+                      }}
+                      className={`rounded-md px-3 py-1.5 text-sm ${
+                        selectedTable === t.key
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <div className="mt-4 flex items-center justify-between">

@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { readFixture } from '../fixtures/state';
-import { login, controlAfterLabel } from '../fixtures/actions';
+import { login, controlAfterLabel, openMasterTable } from '../fixtures/actions';
 
 // Follow-Up Page spec gap #2 (docs/plans/followup-spec-gap-analysis.md,
 // SOP rule 5): Dump used to be a single-click status button with no
@@ -23,8 +23,11 @@ test('Dump Reasons master is manageable from Admin → Masters, and dumping a le
   // The master itself — this is the gap that would have shipped silently:
   // the backend route worked, but nothing on this page's own type list
   // knew "dump-reasons" existed.
-  await page.goto('/admin/masters');
-  await page.getByRole('button', { name: 'Dump Reasons', exact: true }).click();
+  // Dump Reasons happens to live in the category that auto-opens on load
+  // (feat/categorise-masters-ui), so a direct click here passed only by
+  // coincidence of where that table was placed in the grouping —
+  // openMasterTable removes the dependency on that coincidence.
+  await openMasterTable(page, 'Dump Reasons');
   await page.getByRole('button', { name: 'Add Item' }).click();
   await controlAfterLabel(page, 'Name').fill(reasonName);
   const [createReasonResponse] = await Promise.all([
