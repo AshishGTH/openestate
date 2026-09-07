@@ -55,6 +55,12 @@ test('login → forced password change → 2FA enrollment → logout → login w
   ]);
   const { secret } = (await setupResponse.json()) as { secret: string };
 
+  // Server-rendered QR (CLAUDE.md, "TOTP enrolment gets a real QR
+  // code") — the manual-entry secret below it must still be shown too,
+  // as a fallback, not replaced by the image.
+  await expect(page.locator('img[src^="data:image/svg+xml"]')).toBeVisible();
+  await expect(page.getByText(secret)).toBeVisible();
+
   await page.locator('input[inputmode="numeric"]').fill(currentTotpCode(secret));
   await page.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByText('Save these recovery codes — shown once')).toBeVisible();

@@ -3015,6 +3015,8 @@ Implemented staff and portal together, per the standing rule above.
   `{ secret, otpauthUrl }`); the manual-entry secret is enough since
   every authenticator app accepts it, and adding a QR renderer for
   this was judged not worth a new dependency.
+  **Superseded by the "TOTP enrolment gets a real QR code" entry
+  below** — this reverses that decision.
 - Bug this surfaced, unrelated to the feature itself: `cleanupCompany`
   (the shared e2e test-fixture teardown) was missing six tables —
   `webhook_endpoints`, `webhook_deliveries`, `webhook_delivery_attempts`,
@@ -6267,3 +6269,80 @@ wrong-turns-ruled-out account and the candidate fix directions for the
 underlying race, which needs its own real-browser click-through per
 this file's mirrored-auth standing rule before it's touched — a
 materially larger, separate undertaking correctly left out of this PR.
+
+### TOTP enrolment gets a real QR code — reverses the "no QR-code image" decision above
+
+- **`qrcode-generator@2.0.4` added to `apps/api` — zero direct
+  dependencies, ships its own current `.d.ts`, CommonJS.** Rejected
+  `qrcode`/`node-qrcode` (the more commonly reached-for package): it
+  drags `yargs@15` and ~30 transitive packages to ship a CLI this
+  project never invokes — the wrong trade for a self-hosted product
+  whose own principles call for minimal runtime dependencies. No
+  `@types/qrcode-generator` — that package exists but is a stale major;
+  the library's own shipped types are current and used directly.
+- **Why the original "not worth a new dependency" judgment was wrong,
+  not just outdated:** it weighed a QR renderer against `node-qrcode`'s
+  ~30-package `yargs` tree specifically — `qrcode-generator` (zero
+  deps, one package, its own types) was never evaluated at the time.
+  The cost that got rejected wasn't the cost that was actually
+  available. Separately, manual-entry-only is a real usability defect
+  specifically on the portal, whose users are on phones, where typing a
+  32-character base32 string correctly on a touch keyboard is
+  genuinely error-prone. And `totpSetupResponse.qrDataUrl` was already
+  declared in the shared response contract (`packages/shared/src/auth.dto.ts`)
+  and returned by both `TotpService.generateSecret()` callers to both
+  clients, unused — the codebase already carried the intent, this
+  finishes it rather than introducing something new.
+- **Server renders the QR (SVG, not the library's own `createDataURL()`,
+  which emits a GIF that pixelates when scaled)**, returned as
+  `qrDataUrl` — a `data:image/svg+xml;base64,...` URI — in the same
+  setup response that already carries `secret`/`otpauthUrl`. `secret`
+  stays in the response and rendered as a manual-entry fallback below
+  the QR image (`"Can't scan? Enter this key manually."`) — every
+  authenticator app still accepts typed entry, and
+  `apps/e2e/tests/auth-2fa.spec.ts`/`apps/api/test/e2e-totp.test.ts`
+  both read it to compute codes.
+- **`TotpService.generateSecret()` now takes a `label: string` argument**
+  instead of hardcoding `'OpenEstate CRM'` — both `AuthService.setupTotp`
+  and `PortalAuthService.setupTotp` resolve it as
+  `user.email ?? user.phone ?? user.name` (identical expression, not a
+  portal special case) via one `findUniqueOrThrow` before generation.
+  `User.name` is `NOT NULL` in `schema.prisma`, so the chain always
+  terminates — no sentinel, no non-null assertion. The label is passed
+  as the raw string; `OTPAuth.TOTP`'s own `toString()` URL-encodes it —
+  pre-encoding here would double-encode (an email's `@` becoming
+  `%2540` instead of `%40`), the classic bug in this exact spot, guarded
+  against directly in `totp.service.spec.ts`.
+- **Issuer stays the hardcoded literal `'OpenEstate'`.** Per-tenant
+  issuer from `Company.name` was considered and deliberately held back
+  as a separate, later change — this commit is scoped to the label and
+  the QR rendering only.
+- **`verify()` never took a label and still doesn't — confirmed, not
+  assumed, that no existing enrolment is invalidated by this change and
+  nobody needs to re-enrol.** `TotpService.verify(secret, code)`
+  computes purely from the stored secret; the label only ever appears
+  inside the otpauthUrl string shown to an authenticator app at
+  enrolment time, never persisted, never read back. Pinned by
+  `totp.service.spec.ts`'s "the label is display-only" test: two
+  independently generated secrets, under two different labels, each
+  independently verify correctly. This is the first thing a reviewer of
+  an auth change should worry about per this file's own standing rules —
+  answered here directly rather than left to be re-derived.
+- **176px QR image, no media query** — confirmed to fit the portal's
+  375px mobile viewport (this codebase's narrowest supported width, per
+  the Phase 6 customer-portal click-through notes) without layout
+  changes. Neither `apps/web/src/pages/Settings.tsx` nor
+  `apps/portal/src/pages/Security.tsx` was retokenised to the
+  post-e27b68f design system in this change — both stay on their
+  existing raw `slate-*`/`blue-600` styling; that conversion is a
+  separate, unrelated item and would have buried this diff.
+  `img alt` deliberately does NOT contain the secret (a screen reader
+  announces alt text, and a broken image shows it in place of the
+  picture) — `"QR code for authenticator app setup"` instead.
+- Both frontends' inline `{ secret; otpauthUrl }` response-shape
+  declarations were replaced with `import type { TotpSetupResponse }
+  from '@openestate/shared'` — the exact, already-declared
+  `totpSetupResponseSchema` this commit makes true, so the contract
+  can no longer silently drift the way it did the first time (declared
+  in the shared package, imported by nothing, since Phase "password-
+  change, admin force-reset, and CLI break-glass recovery").

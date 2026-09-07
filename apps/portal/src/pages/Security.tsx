@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import type { TotpSetupResponse } from '@openestate/shared';
 
 interface Me {
   id: string;
@@ -99,13 +100,13 @@ function TwoFactorCard() {
     queryFn: () => api('/portal/auth/me'),
   });
 
-  const [setup, setSetup] = useState<{ secret: string; otpauthUrl: string } | null>(null);
+  const [setup, setSetup] = useState<TotpSetupResponse | null>(null);
   const [code, setCode] = useState('');
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
   const [error, setError] = useState('');
 
   const setupMutation = useMutation({
-    mutationFn: () => api<{ secret: string; otpauthUrl: string }>('/portal/auth/totp/setup', { method: 'POST' }),
+    mutationFn: () => api<TotpSetupResponse>('/portal/auth/totp/setup', { method: 'POST' }),
   });
   const confirmMutation = useMutation({
     mutationFn: (body: { code: string }) =>
@@ -201,8 +202,15 @@ function TwoFactorCard() {
       {!recoveryCodes && setup && (
         <form onSubmit={confirm} className="mt-3 space-y-3">
           <p className="text-sm text-slate-600">
-            Add this key to your authenticator app, then enter the 6-digit code it shows.
+            Scan this with your authenticator app, then enter the 6-digit code it shows.
           </p>
+          <img
+            src={setup.qrDataUrl}
+            alt="QR code for authenticator app setup"
+            width={176}
+            height={176}
+          />
+          <p className="text-sm text-slate-600">Can&apos;t scan? Enter this key manually.</p>
           <div className="rounded-md bg-slate-50 border border-slate-200 p-2.5 font-mono text-xs break-all">
             {setup.secret}
           </div>
