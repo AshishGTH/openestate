@@ -7,7 +7,7 @@ export interface Branding {
   primaryColorHex: string | null;
 }
 
-const DEFAULT_ACCENT = '#2563eb'; // Tailwind blue-600, matches the pre-branding hardcoded shell color.
+const DEFAULT_ACCENT = '#3462EE'; // theme's blue-600 (tailwind.config.js), matches the shell's default accent.
 
 /** Fetched once per session (auth.tsx already caches the access token for
  * the whole app lifetime) — company branding doesn't change mid-session. */

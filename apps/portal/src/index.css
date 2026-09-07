@@ -1,3 +1,23 @@
+@font-face {
+  font-family: 'Outfit';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/outfit/outfit-latin-wght-normal.woff2') format('woff2');
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html, body {
+    min-height: 100vh;
+  }
+  body {
+    font-family: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+    background: linear-gradient(180deg, #EAF0DC 0%, #F7F8F2 420px);
+    background-attachment: fixed;
+    color: #121721;
+  }
+}
