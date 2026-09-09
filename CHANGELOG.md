@@ -90,6 +90,21 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`PORTAL_AUTH_THROTTLE_LIMIT` makes the portal-auth rate-limit bucket
+  configurable** (`app.module.ts`), alongside the already-configurable
+  `DEFAULT_THROTTLE_LIMIT` — both are now documented in
+  `apps/api/.env.example` and `deploy/native/openestate.env.example`,
+  where neither had been before. **Unset, the limit stays 5 requests per
+  5 minutes per IP, exactly as before** — this changes no behaviour on
+  any existing install. The bucket guards portal login, invite-consume
+  and password-reset, so it should stay tight; the one legitimate reason
+  to raise it is many portal users sharing a single public IP, where the
+  5-per-5-minutes budget is shared across all of them rather than being
+  per person. The immediate motivation is CI: Playwright's harness runs
+  one API process for the whole suite, so every spec's portal login
+  draws on one IP-keyed budget, which had been causing intermittent 429s
+  in unrelated specs.
+
 - **TOTP 2FA enrolment now shows a scannable QR code**, on both the
   staff Settings page (`/settings`) and the customer/broker portal's
   Security page (`/security`), instead of only a 32-character base32

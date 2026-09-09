@@ -66,6 +66,16 @@ const CUSTOMER_PASSWORD = 'CustomerPass123';
 // own doc comment).
 process.env.THROTTLE_TEST_KEY_PREFIX = `e2e-portal-throttle-${process.pid}-${Date.now()}-`;
 
+// Pin the limit this file's own assertion is written against, rather than
+// inheriting whatever the production default happens to be. The bucket's
+// limit became env-configurable (PORTAL_AUTH_THROTTLE_LIMIT, app.module.ts)
+// so the Playwright harness can raise it; this file is the one place that
+// drives the bucket to an exact boundary, so it declares its own contract
+// instead of silently tracking a default someone else may tune. Must be set
+// before bootstrapApp() — ThrottlerModule.forRootAsync's useFactory reads
+// this once, at NestFactory.create() time, and the value is frozen after.
+process.env.PORTAL_AUTH_THROTTLE_LIMIT = '5';
+
 async function bootstrapApp(): Promise<INestApplication> {
   process.env.DATABASE_URL = APP_URL;
   process.env.DATABASE_URL_SYSTEM = SYSTEM_URL;

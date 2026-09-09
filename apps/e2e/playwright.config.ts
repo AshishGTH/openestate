@@ -90,6 +90,16 @@ export default defineConfig({
         // test's own logic does anything wrong. Unset in a real install,
         // this stays 100 — see app.module.ts's DEFAULT_THROTTLE_LIMIT read.
         DEFAULT_THROTTLE_LIMIT: '2000',
+        // The portal-auth bucket is IP-keyed and 5-per-5-minutes in
+        // production. Playwright's webServer runs ONE API process for the
+        // whole suite, so every portal login in every spec shares that one
+        // budget — and the suite finishes well inside the 5-minute window,
+        // so the ceiling is the suite's TOTAL portal login count, not any
+        // one spec's. apps/e2e/fixtures/seed.ts records real, intermittent
+        // 429s on unrelated specs from exactly this. Raising it here only
+        // affects this harness; unset in a real install it stays 5 — see
+        // app.module.ts's PORTAL_AUTH_THROTTLE_LIMIT read.
+        PORTAL_AUTH_THROTTLE_LIMIT: '100',
         JWT_ACCESS_SECRET: HARNESS_HEX_KEY,
         JWT_REFRESH_SECRET: HARNESS_HEX_KEY,
         JWT_ACCESS_EXPIRES_IN: '15m',
