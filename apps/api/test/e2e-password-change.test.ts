@@ -177,11 +177,11 @@ describeIf('e2e password-change + admin force-password-reset', () => {
         .post('/api/v1/auth/change-password')
         .set('Authorization', `Bearer ${token}`)
         .set('X-CSRF-Token', csrf)
-        .send({ currentPassword: 'OldPass111', newPassword: 'NewPass222' })
+        .send({ currentPassword: 'OldPass111', newPassword: 'NewPassword2222' })
         .expect(204);
 
       // New password now works; old one doesn't.
-      await request(app.getHttpServer()).post('/api/v1/auth/login').send({ email, password: 'NewPass222' }).expect(200);
+      await request(app.getHttpServer()).post('/api/v1/auth/login').send({ email, password: 'NewPassword2222' }).expect(200);
       await request(app.getHttpServer()).post('/api/v1/auth/login').send({ email, password: 'OldPass111' }).expect(401);
     });
 
@@ -192,7 +192,7 @@ describeIf('e2e password-change + admin force-password-reset', () => {
         .post('/api/v1/auth/change-password')
         .set('Authorization', `Bearer ${token}`)
         .set('X-CSRF-Token', csrf)
-        .send({ currentPassword: 'WrongPassword', newPassword: 'NewPass222' })
+        .send({ currentPassword: 'WrongPassword', newPassword: 'NewPassword2222' })
         .expect(401);
     });
 
@@ -205,7 +205,7 @@ describeIf('e2e password-change + admin force-password-reset', () => {
         .post('/api/v1/auth/change-password')
         .set('Authorization', `Bearer ${sessionA.token}`)
         .set('X-CSRF-Token', sessionA.csrf)
-        .send({ currentPassword: 'OldPass111', newPassword: 'NewPass222' })
+        .send({ currentPassword: 'OldPass111', newPassword: 'NewPassword2222' })
         .expect(204);
 
       // Session A's own refresh token (the one that made the request) is
@@ -224,14 +224,14 @@ describeIf('e2e password-change + admin force-password-reset', () => {
           .post('/api/v1/auth/change-password')
           .set('Authorization', `Bearer ${token}`)
           .set('X-CSRF-Token', csrf)
-          .send({ currentPassword: 'WrongOnPurpose', newPassword: 'NewPass222' })
+          .send({ currentPassword: 'WrongOnPurpose', newPassword: 'NewPassword2222' })
           .expect(401);
       }
       await agent
         .post('/api/v1/auth/change-password')
         .set('Authorization', `Bearer ${token}`)
         .set('X-CSRF-Token', csrf)
-        .send({ currentPassword: 'WrongOnPurpose', newPassword: 'NewPass222' })
+        .send({ currentPassword: 'WrongOnPurpose', newPassword: 'NewPassword2222' })
         .expect(429);
     });
   });
@@ -244,7 +244,7 @@ describeIf('e2e password-change + admin force-password-reset', () => {
         .post('/api/v1/portal/auth/change-password')
         .set('Authorization', `Bearer ${token}`)
         .set('X-CSRF-Token', csrf)
-        .send({ currentPassword: 'OldPortal111', newPassword: 'NewPortal222' })
+        .send({ currentPassword: 'OldPortal111', newPassword: 'NewPortalPass222' })
         .expect(204);
 
       // Verified directly (not via another real portal login) — this
@@ -254,7 +254,7 @@ describeIf('e2e password-change + admin force-password-reset', () => {
       // testing) so this file doesn't trip on its own setup traffic; see
       // the login-count accounting in this describe block's other tests.
       const updated = await systemPrisma.user.findFirst({ where: { phone } });
-      expect(await argon2.verify(updated.passwordHash, 'NewPortal222')).toBe(true);
+      expect(await argon2.verify(updated.passwordHash, 'NewPortalPass222')).toBe(true);
     });
 
     it('fails with the wrong current password', async () => {
@@ -264,7 +264,7 @@ describeIf('e2e password-change + admin force-password-reset', () => {
         .post('/api/v1/portal/auth/change-password')
         .set('Authorization', `Bearer ${token}`)
         .set('X-CSRF-Token', csrf)
-        .send({ currentPassword: 'WrongPassword', newPassword: 'NewPortal222' })
+        .send({ currentPassword: 'WrongPassword', newPassword: 'NewPortalPass222' })
         .expect(401);
     });
 
@@ -277,7 +277,7 @@ describeIf('e2e password-change + admin force-password-reset', () => {
         .post('/api/v1/portal/auth/change-password')
         .set('Authorization', `Bearer ${sessionA.token}`)
         .set('X-CSRF-Token', sessionA.csrf)
-        .send({ currentPassword: 'OldPortal111', newPassword: 'NewPortal222' })
+        .send({ currentPassword: 'OldPortal111', newPassword: 'NewPortalPass222' })
         .expect(204);
 
       await sessionA.agent.post('/api/v1/portal/auth/refresh').expect(200);
@@ -293,14 +293,14 @@ describeIf('e2e password-change + admin force-password-reset', () => {
           .post('/api/v1/portal/auth/change-password')
           .set('Authorization', `Bearer ${token}`)
           .set('X-CSRF-Token', csrf)
-          .send({ currentPassword: 'WrongOnPurpose', newPassword: 'NewPortal222' })
+          .send({ currentPassword: 'WrongOnPurpose', newPassword: 'NewPortalPass222' })
           .expect(401);
       }
       await agent
         .post('/api/v1/portal/auth/change-password')
         .set('Authorization', `Bearer ${token}`)
         .set('X-CSRF-Token', csrf)
-        .send({ currentPassword: 'WrongOnPurpose', newPassword: 'NewPortal222' })
+        .send({ currentPassword: 'WrongOnPurpose', newPassword: 'NewPortalPass222' })
         .expect(429);
     });
   });
