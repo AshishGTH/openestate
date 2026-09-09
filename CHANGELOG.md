@@ -42,6 +42,22 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Deactivating a user (`POST /users/:id/deactivate`) now revokes their
+  refresh tokens immediately.** Previously it only set `isActive: false`;
+  `refreshTokens()` already checked that flag and correctly refused to
+  renew, but nothing cut off an already-issued access token, so a
+  deactivated user kept full API access until it expired on its own (up
+  to `JWT_ACCESS_EXPIRES_IN`, 15 minutes by default). `UsersService
+  .deactivate` now calls `TokenService.revokeAllForUser` right after the
+  database write, the same pattern `AuthService.forceChangePassword`
+  already uses. Portal-linked users (customer/broker accounts) are rows
+  in the same `User` table and go through this identical endpoint — not
+  a separate, mirrored implementation — so they're covered by the same
+  fix, not a second one. No migration; already-deactivated users are not
+  retroactively affected — deactivate them again (or reactivate then
+  deactivate) if you need an existing deactivated account's old sessions
+  cut off immediately.
+
 - **Test provisioning no longer uses the same Postgres role names as a
   real install.** `scripts/test-setup.sh` (via
   `deploy/native/setup-database.sh --app-role-name/--system-role-name`)
