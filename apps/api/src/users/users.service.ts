@@ -9,6 +9,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import { COMMUNICATION_PROVIDER, type CommunicationProvider } from '../queues/communication-provider';
+import { TokenService } from '../auth/token.service';
 import type {
   CreateUserDto,
   UpdateUserDto,
@@ -38,6 +39,7 @@ export class UsersService {
     private readonly systemPrisma: PrismaClient,
     @Inject(COMMUNICATION_PROVIDER)
     private readonly provider: CommunicationProvider,
+    private readonly tokenService: TokenService,
   ) {}
 
   async findAll(companyId: string, query: PaginationQuery) {
@@ -304,7 +306,7 @@ export class UsersService {
   async deactivate(companyId: string, userId: string) {
     await this.findOne(companyId, userId);
 
-    return runWithTenant({ companyId }, () =>
+    const result = await runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>
         tx.user.update({
           where: { id: userId },
@@ -313,6 +315,15 @@ export class UsersService {
         }),
       ),
     );
+
+    // A deactivated user's existing access token stays valid until it
+    // expires (JwtStrategy does no DB lookup) — but their refresh tokens
+    // must die here so they can't renew. Same pattern as
+    // AuthService.forceChangePassword: DB write first, revoke after,
+    // outside the tenant transaction (TokenService uses SYSTEM_PRISMA).
+    await this.tokenService.revokeAllForUser(userId);
+
+    return result;
   }
 
   async reactivate(companyId: string, userId: string) {
