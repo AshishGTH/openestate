@@ -26,6 +26,17 @@ export default async function globalSetup() {
     chequeBounce: await seedE2eFixture(DATABASE_URL_SYSTEM),
     plcBooking: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPricingMasters: true }),
     ticketReply: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
+    // Its own isolated portal user, same reasoning as authTwoFactor above
+    // (that comment's "four" is now five, this is the sixth reason): this
+    // spec enables 2FA on the account it logs into, which would break
+    // ticket-reply/media-gallery/rapid-reload-session's own portal logins
+    // if they ran afterward against the SAME account and got a
+    // requiresTwoFactor response instead of a session. withPortalTicketSetup
+    // is reused as-is (not a new leaner opt) — every fixture call already
+    // pays for a full company+inventory seed regardless of which opts are
+    // set, so the marginal cost of the ticket/land-booking rows this spec
+    // doesn't use is small next to a second seed.ts code path to maintain.
+    portalTwoFactor: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
   };
   writeFileSync(path.join(__dirname, '.fixture-state.json'), JSON.stringify(fixtures, null, 2));
 }
