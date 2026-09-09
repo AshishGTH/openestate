@@ -90,6 +90,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **TOTP 2FA enrolment now shows a scannable QR code**, on both the
+  staff Settings page (`/settings`) and the customer/broker portal's
+  Security page (`/security`), instead of only a 32-character base32
+  secret to type by hand. The manual-entry secret is still shown below
+  the QR image as a fallback for a device that can't scan.
+
 - **`Bank.ifscPrefix` (a real, optional Prisma column) is now exposed
   through the master API and admin UI**, via `master.factory.ts`'s
   existing `extraFields` mechanism — the same pattern that already
@@ -344,6 +350,14 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   subtree.
 
 ### Changed
+
+- **TOTP enrolment's QR code (and otpauth URL) is now labelled with
+  your email, phone, or name** (in that preference order) instead of
+  the fixed literal "OpenEstate CRM" — makes it possible to tell
+  accounts apart in an authenticator app that holds more than one.
+  **No re-enrolment needed**: verification only ever checks the stored
+  secret, never the label, so every existing 2FA enrolment keeps
+  working exactly as before.
 
 - **The dashboard's conversion figure no longer drifts.** It counted
   inquiries whose status was SUCCESSFUL and whose `updatedAt` fell in

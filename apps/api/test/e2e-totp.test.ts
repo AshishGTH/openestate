@@ -149,6 +149,9 @@ describeIf('e2e TOTP 2FA: real HTTP through the full guard pipeline', () => {
       .set('X-CSRF-Token', csrf)
       .expect(200);
     expect(setup.body.secret).toBeTruthy();
+    expect(setup.body.qrDataUrl).toMatch(/^data:image\/svg\+xml;base64,/);
+    const decodedSvg = Buffer.from(setup.body.qrDataUrl.split(',')[1], 'base64').toString('utf8');
+    expect(decodedSvg).toContain('<svg');
 
     const confirm = await agent
       .post('/api/v1/auth/totp/confirm')
