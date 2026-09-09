@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import * as OTPAuth from 'otpauth';
+import qrcode from 'qrcode-generator';
 
 const ALGORITHM = 'aes-256-gcm';
 const IV_LENGTH = 12;
@@ -19,17 +20,26 @@ export class TotpService {
     }
   }
 
-  generateSecret(): { secret: string; otpauthUrl: string } {
+  generateSecret(label: string): { secret: string; otpauthUrl: string; qrDataUrl: string } {
     const totp = new OTPAuth.TOTP({
       issuer: 'OpenEstate',
-      label: 'OpenEstate CRM',
+      label,
       algorithm: 'SHA1',
       digits: 6,
       period: 30,
     });
+    const otpauthUrl = totp.toString();
+
+    const qr = qrcode(0, 'M');
+    qr.addData(otpauthUrl);
+    qr.make();
+    const svg = qr.createSvgTag({ scalable: true });
+    const qrDataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
+
     return {
       secret: totp.secret.base32,
-      otpauthUrl: totp.toString(),
+      otpauthUrl,
+      qrDataUrl,
     };
   }
 

@@ -139,10 +139,16 @@ export class PortalAuthService {
   }
 
   async setupTotp(userId: string) {
-    const { secret, otpauthUrl } = this.totpService.generateSecret();
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { email: true, phone: true, name: true },
+    });
+    const label = user.email ?? user.phone ?? user.name;
+
+    const { secret, otpauthUrl, qrDataUrl } = this.totpService.generateSecret(label);
     const encrypted = this.totpService.encrypt(secret);
     await this.prisma.user.update({ where: { id: userId }, data: { totpSecret: encrypted, totpEnabled: false } });
-    return { secret, otpauthUrl };
+    return { secret, otpauthUrl, qrDataUrl };
   }
 
   async confirmTotp(userId: string, code: string) {
