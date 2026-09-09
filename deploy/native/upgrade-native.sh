@@ -12,11 +12,14 @@ SRC_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # shellcheck source=lib.sh
 source "${SCRIPT_DIR}/lib.sh"
 
-# See install-native.sh's identical line for why: a root-owned checkout
-# (from the README's own `sudo git clone`) makes every `git` command a
-# non-root admin runs here (including the `git pull` this script's own
-# docs assume happens right before it) fail with "dubious ownership"
-# without this.
+# Belt-and-braces for a MIXED-ownership checkout: this script no longer
+# runs git as root (see src_owner() in lib.sh — git now runs as whoever
+# owns the checkout), so the common "dubious ownership" case is gone at
+# the source. What remains is a checkout whose .git and working tree have
+# different owners, which an earlier root-mode upgrade could have left
+# behind; git still refuses that for the owning user, and this keeps it
+# working. It also stays for the benefit of the admin's own `git` commands
+# in a README-style `sudo git clone` checkout.
 git config --system --add safe.directory "$SRC_DIR" 2>/dev/null || true
 
 APP_USER="openestate"
@@ -37,10 +40,15 @@ while [ $# -gt 0 ]; do
     -h|--help)
       cat <<'USAGE'
 Usage: sudo ./upgrade-native.sh [--ref TAG_OR_BRANCH] [--no-backup] [--db-host HOST]
-  --ref REF        git ref to check out in the source checkout before
-                    building (default: whatever is currently checked out —
-                    run `git fetch --tags` and `git checkout vX.Y.Z`
-                    yourself first if you'd rather control this directly).
+  --ref REF        git ref to build. Resolved against the REMOTE after a
+                    fetch: a tag as itself, a branch as origin/BRANCH (so
+                    a branch ref actually advances instead of building a
+                    stale local branch), or a raw commit sha. The checkout
+                    is left detached at that commit.
+                    Without --ref, the checkout must already be up to date
+                    with its upstream — this script refuses to build a
+                    checkout that is behind, rather than "upgrading" to
+                    the commit you are already running.
   --no-backup      Skip the automatic pre-upgrade backup (for scripted
                     upgrades that already snapshot elsewhere).
   --db-host HOST   Same meaning as install-native.sh — only needed for a
@@ -56,6 +64,100 @@ done
 [ -L "$CURRENT_LINK" ] || die "${CURRENT_LINK} is not a symlink — is OpenEstate installed via install-native.sh?"
 PREVIOUS_RELEASE="$(readlink -f "$CURRENT_LINK")"
 
+# Everything that touches the source checkout — git here, pnpm and the
+# build inside build_release() — runs as the checkout's OWNER, not as
+# root. See src_owner() in lib.sh for why it is derived this way.
+SRC_OWNER="$(src_owner "$SRC_DIR")"
+log "Source checkout ${SRC_DIR} is owned by '${SRC_OWNER}' — git and build steps run as that user."
+
+# ---------------------------------------------------------------------
+# Decide WHAT to build, and refuse rather than guess. All of this runs
+# before the backup and before any build, so a refusal costs nothing and
+# leaves the running install completely untouched.
+# ---------------------------------------------------------------------
+
+# A release is only meaningful if we can name the commit it came from, so
+# a dirty tree stops the upgrade. This is also the cheapest probe for a
+# checkout that an earlier root-mode upgrade already damaged.
+#
+# Verified, not assumed: this does NOT misfire on the root-owned build
+# artifacts a pre-fix upgrade left behind. node_modules/, dist/, .turbo/
+# and *.tsbuildinfo are all in the repo's own .gitignore, so `git status
+# --porcelain` never lists them, and nothing in build_release() writes a
+# TRACKED file. Only real, tracked, uncommitted edits land here.
+if ! DIRTY="$(git_as_owner "$SRC_DIR" status --porcelain 2>&1)"; then
+  die "Cannot read git state in ${SRC_DIR} as '${SRC_OWNER}':
+${DIRTY}
+
+This usually means an earlier upgrade ran git as root and left root-owned
+files in .git. Repair the ownership, then re-run this script:
+  sudo chown -R ${SRC_OWNER}: ${SRC_DIR}"
+fi
+[ -z "$DIRTY" ] || die "Source checkout has uncommitted changes — refusing to build, because the resulting release would not correspond to any commit. Commit, stash or discard them first:
+${DIRTY}"
+
+log "Fetching from origin..."
+git_as_owner "$SRC_DIR" fetch --tags --prune origin \
+  || die "git fetch failed in ${SRC_DIR} (as '${SRC_OWNER}'). Fix that first — this script will not build a checkout it could not verify."
+
+if [ -n "$REF" ]; then
+  # Resolution order matters, and a BRANCH must resolve through
+  # origin/<branch>: `git checkout <branch>` moves to the LOCAL branch,
+  # which `git fetch` does not fast-forward, so `--ref main` on a checkout
+  # whose local main was behind used to build stale code and report
+  # success. Tags are immutable and were already correct, so they are
+  # tried first and behave exactly as before.
+  if TARGET_SHA="$(git_as_owner "$SRC_DIR" rev-parse --verify -q "refs/tags/${REF}^{commit}")"; then
+    log "Resolved --ref ${REF} to tag ${REF} (${TARGET_SHA})."
+  elif TARGET_SHA="$(git_as_owner "$SRC_DIR" rev-parse --verify -q "refs/remotes/origin/${REF}^{commit}")"; then
+    log "Resolved --ref ${REF} to origin/${REF} (${TARGET_SHA}) — the REMOTE branch tip, not the local branch."
+  elif TARGET_SHA="$(git_as_owner "$SRC_DIR" rev-parse --verify -q "${REF}^{commit}")"; then
+    log "Resolved --ref ${REF} to commit ${TARGET_SHA}."
+  else
+    die "Could not resolve --ref ${REF} to a tag, an origin/ branch, or a commit in ${SRC_DIR}. Check the spelling, or that the ref exists on the remote."
+  fi
+
+  CURRENT_SHA="$(git_as_owner "$SRC_DIR" rev-parse HEAD)"
+  if [ "$CURRENT_SHA" = "$TARGET_SHA" ]; then
+    log "Checkout is already at ${TARGET_SHA}."
+  else
+    # Detached deliberately: a deploy checkout parked ON a local branch is
+    # exactly what silently drifts behind its upstream, which is the
+    # failure this whole block exists to prevent. Detaching at the
+    # resolved commit makes the checkout state say precisely what is
+    # deployed. The documented `--ref vX.Y.Z` tag flow already detached
+    # before this change, so this is not new behaviour there.
+    log "Checking out ${TARGET_SHA} (detached, from ${CURRENT_SHA})..."
+    git_as_owner "$SRC_DIR" checkout --detach --quiet "$TARGET_SHA" \
+      || die "git checkout ${TARGET_SHA} failed in ${SRC_DIR}. Nothing has been changed on the running install."
+  fi
+else
+  # No --ref. This is the case that caused the incident: the script used
+  # to build whatever HEAD happened to be, with no fetch and no check, so
+  # an operator who forgot to update the checkout "upgraded" to the commit
+  # already running and was told it succeeded. A hard failure, not a
+  # warning — a warning in a long build log is exactly what got missed.
+  TARGET_SHA="$(git_as_owner "$SRC_DIR" rev-parse HEAD)"
+  if ! UPSTREAM="$(git_as_owner "$SRC_DIR" rev-parse --abbrev-ref --symbolic-full-name "@{u}" 2>/dev/null)"; then
+    die "No --ref given, and HEAD is detached or its branch has no upstream — so there is nothing to check 'up to date' against, and this script will not silently rebuild whatever happens to be checked out.
+
+Name the version you intend to deploy:
+  sudo ./upgrade-native.sh --ref vX.Y.Z"
+  fi
+  BEHIND="$(git_as_owner "$SRC_DIR" rev-list --count "HEAD..@{u}")"
+  if [ "$BEHIND" -gt 0 ]; then
+    die "Refusing to upgrade: the source checkout is ${BEHIND} commit(s) behind ${UPSTREAM}.
+
+Building now would 'upgrade' to the code you are ALREADY running and report success — the exact failure this check exists to stop.
+
+Either name the version explicitly:
+  sudo ./upgrade-native.sh --ref vX.Y.Z
+or fast-forward the checkout yourself first, as ${SRC_OWNER} and NOT as root:
+  git -C ${SRC_DIR} merge --ff-only ${UPSTREAM}"
+  fi
+  log "No --ref given; HEAD (${TARGET_SHA}) is up to date with ${UPSTREAM}."
+fi
+
 if [ "$NO_BACKUP" -eq 1 ]; then
   warn "Skipping pre-upgrade backup (--no-backup)."
 else
@@ -63,13 +165,21 @@ else
   "${SCRIPT_DIR}/backup-native.sh" --env-file "$ENV_FILE"
 fi
 
-if [ -n "$REF" ]; then
-  log "Checking out ${REF}..."
-  (cd "$SRC_DIR" && git fetch --tags && git checkout "$REF")
-fi
-
 log "Building new release..."
 RELEASE_DIR="$(build_release "$SRC_DIR" "$RELEASES_DIR")" || die "Build failed — see output above. Previous release (${PREVIOUS_RELEASE}) is untouched and still running."
+
+# Outcome assertion, deliberately BEFORE any migration or cutover: the
+# release just built must be the commit that was resolved above.
+# build_release() names the release <timestamp>-<short sha of HEAD at
+# build time>, so this compares what was ACTUALLY built against what was
+# asked for. A mismatch means the checkout moved underneath the build, or
+# the resolution above was wrong — either way, stop here, while the
+# database is still untouched and the previous release is still serving.
+TARGET_SHORT="$(git_as_owner "$SRC_DIR" rev-parse --short "$TARGET_SHA")"
+BUILT_SHORT="${RELEASE_DIR##*-}"
+[ "$BUILT_SHORT" = "$TARGET_SHORT" ] || die "Built release ${RELEASE_DIR} is at commit ${BUILT_SHORT}, but the requested target is ${TARGET_SHORT}. No migration has run and no cutover has happened; the previous release (${PREVIOUS_RELEASE}) is untouched and still running."
+log "Verified: built release is at ${BUILT_SHORT}, matching the requested target."
+
 chown -R "${APP_USER}:${APP_GROUP}" "$RELEASE_DIR"
 chmod -R o+rX "$RELEASE_DIR"
 
@@ -205,6 +315,14 @@ fi
 log "Cutting over to the new release..."
 ln -sfn "$RELEASE_DIR" "$CURRENT_LINK"
 chown -h "${APP_USER}:${APP_GROUP}" "$CURRENT_LINK"
+
+# Outcome assertion, before the restart rather than after: if the symlink
+# did not actually move, restarting would simply bring the OLD release
+# back up, the healthcheck below would pass against it, and this script
+# would print "Upgrade complete" over a cutover that never happened.
+LINKED="$(readlink -f "$CURRENT_LINK")"
+[ "$LINKED" = "$(readlink -f "$RELEASE_DIR")" ] || die "Cutover did not take: ${CURRENT_LINK} points at ${LINKED}, expected ${RELEASE_DIR}. The service has NOT been restarted and is still running the previous release."
+
 systemctl restart openestate-api
 
 log "Waiting for the API to become healthy..."

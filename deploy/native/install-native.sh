@@ -66,6 +66,15 @@ done
 
 [ "$(id -u)" -eq 0 ] || die "Must be run as root (sudo ./install-native.sh)."
 
+# Everything that touches the source checkout — the corepack cache below
+# and every step of build_release() — runs as the checkout's OWNER, not
+# as root. See src_owner() in lib.sh for why it is derived rather than
+# configured. Root keeps only what genuinely needs it: the system user,
+# directories outside the checkout, the systemd unit, the nginx site, and
+# the database work.
+SRC_OWNER="$(src_owner "$SRC_DIR")"
+log "Source checkout ${SRC_DIR} is owned by '${SRC_OWNER}' — build steps run as that user."
+
 log "Checking prerequisites..."
 
 # Collect EVERY missing prerequisite and report them together, once.
@@ -168,9 +177,25 @@ fi
 redis-cli ping >/dev/null 2>&1 || warn "Could not reach a local Redis via 'redis-cli ping' — if Redis runs elsewhere, that's expected; otherwise start it: sudo systemctl enable --now redis-server"
 
 log "Enabling corepack/pnpm..."
+# `corepack enable` installs the pnpm/yarn shims into the global Node bin
+# directory (/usr/bin on the NodeSource path), so it stays root — that is
+# file placement outside the checkout, like the systemd unit and the nginx
+# site below.
 corepack enable
 PNPM_VERSION="$(node -e "console.log(require('${SRC_DIR}/package.json').packageManager.split('@')[1])")"
-corepack prepare "pnpm@${PNPM_VERSION}" --activate
+# `corepack prepare`, by contrast, populates a PER-USER cache
+# ($COREPACK_HOME, which defaults to a path under that user's $HOME) —
+# and the only thing that consumes it is the build, which now runs as the
+# checkout's owner rather than as root. Preparing as root would warm a
+# cache nothing ever reads, and leave the build to fetch pnpm again
+# implicitly, part-way through, where the failure is far less legible.
+# So prepare as the user that will actually use it.
+#
+# This creates no new path and no shared cache to manage: corepack writes
+# inside that user's own home, never into the source checkout, so it
+# cannot reintroduce a root-owned path there.
+run_as_src_owner "$SRC_DIR" corepack prepare "pnpm@${PNPM_VERSION}" --activate \
+  || die "corepack prepare failed as '${SRC_OWNER}'. That user needs a writable home directory for the corepack cache (\$COREPACK_HOME, default ~/.cache/node/corepack) — a checkout owned by a homeless system account will fail here with EACCES."
 
 log "Creating system user '${APP_USER}'..."
 if ! id "$APP_USER" >/dev/null 2>&1; then
