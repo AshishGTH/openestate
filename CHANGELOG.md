@@ -42,6 +42,30 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **Minimum password length raised from 8 to 12 characters, everywhere a
+  password is set.** All 7 password-setting schemas
+  (`packages/shared/src/user.dto.ts`'s `createUserSchema`,
+  `auth.dto.ts`'s `changePasswordSchema`/`forceChangePasswordSchema`/
+  `passwordResetConfirmSchema`, and `portal-auth.dto.ts`'s
+  `portalInviteConsumeSchema`/`portalPasswordResetConfirmSchema`/
+  `portalChangePasswordSchema`) move from `.min(8)` to `.min(12)`, with
+  no composition rule, denylist, or strength library added — length
+  only, per NIST 800-63B guidance that composition rules push users
+  toward predictable patterns without meaningfully raising entropy.
+  Login itself (`loginSchema`/`portalLoginSchema`) and the
+  "confirm your current password" fields keep their existing `.min(1)`
+  — those verify a password, they don't set one, so this is
+  **prospective only**: an existing account's current password, of any
+  length, keeps working for login indefinitely. The 12-character floor
+  applies only the next time a password is set (self-service change,
+  forced first-login change, admin-triggered reset, portal invite
+  consume) — nobody is locked out by this release. The five frontend
+  submit-button gates that mirrored the old `8` (`Settings.tsx`,
+  both apps' `ResetPassword.tsx`, `Security.tsx`, `InviteConsume.tsx`)
+  and `deploy/native/reset-admin-password.sh`'s own length check and
+  help text move to 12 in the same commit, so the UI and the
+  break-glass CLI can't accept what the API now rejects.
+
 - **Deactivating a user (`POST /users/:id/deactivate`) now revokes their
   refresh tokens immediately.** Previously it only set `isActive: false`;
   `refreshTokens()` already checked that flag and correctly refused to

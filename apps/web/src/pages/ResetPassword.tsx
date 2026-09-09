@@ -60,7 +60,7 @@ export default function ResetPassword() {
             </div>
             <button
               type="submit"
-              disabled={submitting || !token || newPassword.length < 8}
+              disabled={submitting || !token || newPassword.length < 12}
               className="w-full rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm disabled:opacity-50"
             >
               {submitting ? 'Please wait…' : 'Reset password'}

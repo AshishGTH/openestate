@@ -34,7 +34,7 @@ describe('pickForSchema', () => {
     const createShaped = createUserSchema.parse({
       email: 'new@test.com',
       name: 'New User',
-      password: 'password123',
+      password: 'password123456',
       roleId: '00000000-0000-0000-0000-000000000000',
     });
     const picked = pickForSchema(updateUserSchema, createShaped);

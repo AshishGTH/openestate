@@ -95,7 +95,7 @@ export default function InviteConsume() {
             </div>
             <button
               type="submit"
-              disabled={submitting || !token || password.length < 8}
+              disabled={submitting || !token || password.length < 12}
               className="w-full rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm disabled:opacity-50"
             >
               {submitting ? 'Please wait…' : 'Set password and continue'}
