@@ -94,7 +94,18 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
         storage: new RedisThrottlerStorage(),
         throttlers: [
           { ttl: 60_000, limit: Number(process.env.DEFAULT_THROTTLE_LIMIT ?? 100) },
-          { name: 'portal-auth', ttl: 300_000, limit: 5 },
+          // Env-configurable for the same reason DEFAULT_THROTTLE_LIMIT
+          // above is: this bucket is IP-keyed, and the whole Playwright
+          // harness shares ONE API process and therefore ONE budget for
+          // its entire run — apps/e2e/fixtures/seed.ts's own comment
+          // records real, intermittent 429s on unrelated spec files once
+          // the suite's total portal login count crossed 5. Unset in a
+          // real install this stays 5, unchanged.
+          {
+            name: 'portal-auth',
+            ttl: 300_000,
+            limit: Number(process.env.PORTAL_AUTH_THROTTLE_LIMIT ?? 5),
+          },
           { name: 'portal-read', ttl: 60_000, limit: 60 },
           // Password-change/reset-confirm across staff and portal — see
           // PasswordChangeThrottlerGuard's doc comment for why one bucket
