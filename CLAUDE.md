@@ -6346,3 +6346,56 @@ materially larger, separate undertaking correctly left out of this PR.
   can no longer silently drift the way it did the first time (declared
   in the shared package, imported by nothing, since Phase "password-
   change, admin force-reset, and CLI break-glass recovery").
+
+### Session lifetime — no absolute cap, recorded here because it had never been written down
+
+This is a factual description of standing behavior, not a change made this
+session — recorded because a user asked where the policy was documented
+and it wasn't, anywhere.
+
+- **Access tokens live in memory only, in both apps, never in a cookie or
+  browser storage.** `apps/web/src/lib/api.ts`/`apps/portal/src/lib/api.ts`
+  hold it as a module-scoped `let accessToken`, explicitly `by design —
+  CLAUDE.md keeps it out of cookies/localStorage` (the comment already on
+  `downloadFile()` in both files). Default TTL is 15 minutes
+  (`JWT_ACCESS_EXPIRES_IN`, `auth.module.ts`) — a page reload always starts
+  from nothing and re-derives a session via `/auth/refresh`.
+- **Refresh tokens are httpOnly cookies, single-use with rotation, 7 days
+  for staff and 24 hours for portal.** `TokenService.createRefreshToken`/
+  `rotateRefreshToken` (`apps/api/src/auth/token.service.ts`) default to
+  `JWT_REFRESH_EXPIRES_IN ?? '7d'`; `PortalAuthService` passes an
+  `expiresInOverride` of `PORTAL_JWT_REFRESH_EXPIRES_IN ?? '24h'` through
+  the same code. Every successful refresh revokes the presented row and
+  inserts a new one in the same `family` (`rotateRow`) — the old raw token
+  can never be replayed once its successor exists.
+- **There is no absolute session lifetime.** `rotateRow` computes the new
+  row's `expiresAt` as `now + refreshExpiresIn` every time, with no
+  reference anywhere to the family's original `createdAt` — confirmed by
+  reading the full rotation path, not inferred. A user who refreshes at
+  least once every 7 days (staff) or 24 hours (portal) keeps a family
+  alive indefinitely. This is a sliding window with no cap, not an
+  oversight of one.
+- **Deliberate for a self-hosted product where the operator controls their
+  own deployment** — not a default inherited from a template and never
+  revisited. Reviewed and accepted as the tradeoff for this deployment
+  model, not something that was never considered.
+- **Known consequences, all downstream of the same fact: revoking a
+  refresh token cannot revoke an access token already issued from it.**
+  `JwtStrategy.validate()` does no DB lookup — it trusts the signature and
+  expiry alone. So every action that revokes refresh tokens
+  (`TokenService.revokeAllForUser`, used by `AuthController.logoutAll`/
+  `PortalAuthController.logoutAll`, `AuthService.changePassword`,
+  `forceChangePassword`, `confirmPasswordReset`, and `UsersService
+  .deactivate` as of PR #41/`d54c5ac`) cuts off renewal immediately but
+  leaves up to 15 minutes of the old access token still valid. For
+  deactivation specifically: the user cannot get a new access token
+  (`refreshTokens()` checks `isActive`), but any access token issued
+  before the deactivation keeps working until it expires on its own.
+- **If an absolute cap is ever wanted, two shapes were considered here,
+  neither built:** derive it from `MIN(RefreshToken.createdAt)` across a
+  `family` (the column already exists, so no migration — but any family
+  older than the new cap is over-age the instant it ships, so deploying
+  it mass-logs-out every existing session at once); or add a new nullable
+  column recording an absolute expiry per family (needs a migration, but
+  existing rows come in `NULL` and can be read as exempt, so deploying it
+  grandfathers every session already open rather than killing them).
