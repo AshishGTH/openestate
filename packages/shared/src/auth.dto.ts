@@ -27,7 +27,7 @@ export type TotpVerifyDto = z.infer<typeof totpVerifySchema>;
 export const changePasswordSchema = z
   .object({
     currentPassword: z.string().min(1).max(128),
-    newPassword: z.string().min(8).max(128),
+    newPassword: z.string().min(12).max(128),
   })
   .strict();
 
@@ -35,7 +35,7 @@ export type ChangePasswordDto = z.infer<typeof changePasswordSchema>;
 
 export const forceChangePasswordSchema = z
   .object({
-    newPassword: z.string().min(8).max(128),
+    newPassword: z.string().min(12).max(128),
   })
   .strict();
 
@@ -44,7 +44,7 @@ export type ForceChangePasswordDto = z.infer<typeof forceChangePasswordSchema>;
 export const passwordResetConfirmSchema = z
   .object({
     token: z.string().min(1),
-    newPassword: z.string().min(8).max(128),
+    newPassword: z.string().min(12).max(128),
   })
   .strict();
 

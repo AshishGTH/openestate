@@ -83,7 +83,7 @@ function ChangePasswordCard() {
         </div>
         <button
           type="submit"
-          disabled={mutation.isPending || !currentPassword || newPassword.length < 8}
+          disabled={mutation.isPending || !currentPassword || newPassword.length < 12}
           className="rounded-md bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm disabled:opacity-50"
         >
           {mutation.isPending ? 'Saving…' : 'Change password'}

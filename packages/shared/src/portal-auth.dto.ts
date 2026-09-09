@@ -19,7 +19,7 @@ export type PortalLoginDto = z.infer<typeof portalLoginSchema>;
 export const portalInviteConsumeSchema = z
   .object({
     token: z.string().min(1),
-    password: z.string().min(8).max(128),
+    password: z.string().min(12).max(128),
   })
   .strict();
 export type PortalInviteConsumeDto = z.infer<typeof portalInviteConsumeSchema>;
@@ -34,7 +34,7 @@ export type PortalPasswordResetRequestDto = z.infer<typeof portalPasswordResetRe
 export const portalPasswordResetConfirmSchema = z
   .object({
     token: z.string().min(1),
-    newPassword: z.string().min(8).max(128),
+    newPassword: z.string().min(12).max(128),
   })
   .strict();
 export type PortalPasswordResetConfirmDto = z.infer<typeof portalPasswordResetConfirmSchema>;
@@ -42,7 +42,7 @@ export type PortalPasswordResetConfirmDto = z.infer<typeof portalPasswordResetCo
 export const portalChangePasswordSchema = z
   .object({
     currentPassword: z.string().min(1).max(128),
-    newPassword: z.string().min(8).max(128),
+    newPassword: z.string().min(12).max(128),
   })
   .strict();
 export type PortalChangePasswordDto = z.infer<typeof portalChangePasswordSchema>;

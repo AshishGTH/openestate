@@ -34,7 +34,7 @@ Resets a STAFF user's password directly in the database, bypassing login
 and 2FA entirely. For recovering a locked-out super admin only.
 
   --email EMAIL      Staff user's email (required)
-  --password PW      New password (min 8 chars). If omitted, a random
+  --password PW      New password (min 12 chars). If omitted, a random
                       password is generated and printed once.
   --env-file PATH    Default: /etc/openestate/openestate.env
 USAGE
@@ -58,7 +58,7 @@ if [ -z "$NEW_PASSWORD" ]; then
   NEW_PASSWORD="$(node -e "process.stdout.write(require('node:crypto').randomBytes(18).toString('base64url'))")"
   GENERATED=1
 fi
-[ "${#NEW_PASSWORD}" -ge 8 ] || die "Password must be at least 8 characters."
+[ "${#NEW_PASSWORD}" -ge 12 ] || die "Password must be at least 12 characters."
 
 log "Hashing new password..."
 NEW_HASH="$(cd "${RELEASE_DIR}/api" && node -e "
