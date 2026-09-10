@@ -714,6 +714,32 @@ jobs:
       - name: Check out the current release
         run: git checkout "${{ github.sha }}"
 
+      # The baseline install above ran the PRE-FIX install-native.sh, which
+      # built as root and left root-owned node_modules/ and dist/ in the
+      # checkout. The build now correctly runs as the checkout's owner, who
+      # cannot replace those files — so upgrade-native.sh refuses that state
+      # up front rather than dying part-way through the build with a raw
+      # "EACCES: permission denied, unlink ...".
+      #
+      # This step is the operator doing exactly what that refusal instructs.
+      # It reuses the script's own _build_artifact_paths(), so CI can never
+      # repair a different set of paths than the check inspects — if the two
+      # ever drift, this step stops fixing the thing that blocks the upgrade
+      # and the job fails, which is the correct outcome.
+      #
+      # Every real install done with the older scripts needs this same
+      # one-time repair; that is the transition this job reproduces.
+      - name: Repair the baseline install's root-owned build artifacts
+        run: |
+          set -euo pipefail
+          . deploy/native/lib.sh
+          mapfile -t artifact_paths < <(_build_artifact_paths "$GITHUB_WORKSPACE")
+          echo "Repairing ${#artifact_paths[@]} artifact path(s) to 'runner':"
+          printf '  %s\n' "${artifact_paths[@]}"
+          if [ "${#artifact_paths[@]}" -gt 0 ]; then
+            sudo chown -R runner: "${artifact_paths[@]}"
+          fi
+
       - name: Run upgrade-native.sh
         working-directory: deploy/native
         run: |
@@ -959,7 +985,7 @@ jobs:
           [ "$differs" -eq 0 ] || exit 1
           echo "All $(ls "$GITHUB_WORKSPACE"/deploy/native/*.sh | wc -l) deploy/native scripts are byte-identical to the workspace."
 
-      - name: Drive upgrade-native.sh's ref decision (5 cases)
+      - name: Drive upgrade-native.sh's ref decision (6 cases)
         run: |
           set -euo pipefail
 
@@ -1011,7 +1037,7 @@ jobs:
           head_sha() { git -C "$REFSPEC_WORK" rev-parse HEAD; }
 
           # ---------------------------------------------------------------
-          CASE="1/5 — no --ref, detached HEAD"
+          CASE="1/6 — no --ref, detached HEAD"
           EXPECTED="checkout detached at ${REFSPEC_BASE_SHA} (no branch, so no upstream to compare against); the script must REFUSE rather than rebuild whatever is checked out"
           git -C "$REFSPEC_WORK" checkout --quiet --detach "$REFSPEC_BASE_SHA"
           run_upgrade
@@ -1022,7 +1048,7 @@ jobs:
           echo "PASS ${CASE}"
 
           # ---------------------------------------------------------------
-          CASE="2/5 — no --ref, branch behind upstream"
+          CASE="2/6 — no --ref, branch behind upstream"
           EXPECTED="local branch main at ${REFSPEC_BASE_SHA}, one commit behind origin/main (${REFSPEC_UPSTREAM_TIP}); the script must REFUSE — this is the state that caused the original incident"
           git -C "$REFSPEC_WORK" checkout --quiet main
           git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_BASE_SHA"
@@ -1034,7 +1060,7 @@ jobs:
           echo "PASS ${CASE}"
 
           # ---------------------------------------------------------------
-          CASE="3/5 — --ref with a tag"
+          CASE="3/6 — --ref with a tag"
           EXPECTED="checkout moved ahead to ${REFSPEC_UPSTREAM_TIP} first, then --ref v-refspec-test (a tag at ${REFSPEC_BASE_SHA}); the script must resolve the tag and check it out, i.e. move HEAD BACKWARD to the tag"
           git -C "$REFSPEC_WORK" checkout --quiet main
           git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_UPSTREAM_TIP"
@@ -1050,7 +1076,7 @@ jobs:
           echo "PASS ${CASE}"
 
           # ---------------------------------------------------------------
-          CASE="4/5 — --ref with a branch that is behind its upstream"
+          CASE="4/6 — --ref with a branch that is behind its upstream"
           EXPECTED="local branch main at ${REFSPEC_BASE_SHA}, behind origin/main (${REFSPEC_UPSTREAM_TIP}); --ref main must resolve through origin/main to the REMOTE tip, not build the stale local branch"
           git -C "$REFSPEC_WORK" checkout --quiet main
           git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_BASE_SHA"
@@ -1064,7 +1090,7 @@ jobs:
           echo "PASS ${CASE}"
 
           # ---------------------------------------------------------------
-          CASE="5/5 — dirty working tree"
+          CASE="5/6 — dirty working tree"
           EXPECTED="local branch main up to date with origin/main, but with an uncommitted change to a TRACKED file; the script must REFUSE, because a release built from it would not correspond to any commit"
           git -C "$REFSPEC_WORK" checkout --quiet main
           git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_UPSTREAM_TIP"
@@ -1077,5 +1103,27 @@ jobs:
           git -C "$REFSPEC_WORK" checkout --quiet -- README.md
           echo "PASS ${CASE}"
 
+          # ---------------------------------------------------------------
+          # Not a ref case — an ownership one, covered here because it is the
+          # other refusal that must fire before anything is built, and this
+          # is the only job that can construct it without a real install.
+          CASE="6/6 — inherited root-owned build artifacts"
+          EXPECTED="clean, up-to-date checkout owned by 'runner', but containing a ROOT-owned node_modules/ — the state an install performed with the older root-building scripts leaves behind; the script must REFUSE up front rather than fail part-way through the build with a raw EACCES"
+          git -C "$REFSPEC_WORK" checkout --quiet main
+          git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_UPSTREAM_TIP"
+          sudo mkdir -p "$REFSPEC_WORK/node_modules"
+          sudo chown -R root:root "$REFSPEC_WORK/node_modules"
+          run_upgrade
+          assert_script_under_test_ran
+          [ "$RC" -ne 0 ] || fail "expected a non-zero exit (a refusal), got 0. Building against artifacts the build user cannot replace fails later with a bare EACCES from inside pnpm, which is what this refusal exists to prevent."
+          grep -q "build artifacts owned by another user" "$OUT" || fail \
+            "exited ${RC}, but not with the artifact-ownership refusal. Expected output matching \"build artifacts owned by another user\". (The other early refusals are the ref ones covered by cases 1-5, and the git-metadata one, which reports \"Cannot read git state\" — seeing either of those here means the setup built the wrong state.)"
+          grep -q "sudo chown -R runner:" "$OUT" || fail \
+            "the refusal fired but did not print a copy-pasteable fix command naming the build user. An operator must not have to construct the chown themselves."
+          grep -q "node_modules" "$OUT" || fail \
+            "the refusal did not name the offending path. Every offending path must be listed, not just counted."
+          if [ -n "${REFSPEC_WORK:-}" ]; then sudo rm -rf "${REFSPEC_WORK}/node_modules"; fi
+          echo "PASS ${CASE}"
+
           echo ""
-          echo "All 5 ref-decision cases passed against the real upgrade-native.sh."
+          echo "All 6 cases passed against the real upgrade-native.sh."
