@@ -2981,6 +2981,8 @@ Implemented staff and portal together, per the standing rule above.
   — one bucket/guard reused across staff change-password, portal
   change-password, and the new staff reset-confirm endpoint below,
   rather than three near-identical guards.
+  **Corrected by the "Admin-generated password-reset links" entry
+  below** — one limit setting, but a separate counter per route handler.
 - Admin "force password reset for another user"
   (`POST /users/:id/force-password-reset`, `ADMIN_USER_UPDATE`) issues
   a reset link, never sets or reveals a password. Branches on the
@@ -2994,6 +2996,9 @@ Implemented staff and portal together, per the standing rule above.
   queue — unlike self-service `requestPasswordReset`, there's no
   identifier-guessing/timing concern here, the admin already knows
   this is a real user by id.
+  **Partly superseded by the "Admin-generated password-reset links"
+  entry below** — the token is now returned to the admin, and portal
+  targets are refused here rather than branched on.
 - `deploy/native/reset-admin-password.sh`: break-glass CLI for a
   locked-out super admin, run as root directly on the VM. Bypasses the
   API/login/2FA entirely — hashes a new (generated or `--password`)
@@ -6580,6 +6585,73 @@ nothing in it is actually wrong the way the lockout line was. Everything
 else in the section (input validation, parameterized queries, Redis-backed
 rate limiting, security headers/CORS/CSRF, upload validation, audit log
 fields including IP) checked out against the code as written.
+
+### Admin-generated password-reset links — the token goes back to the admin (partly supersedes the force-reset bullet above)
+
+- **`POST /users/:id/force-password-reset` now answers `200 { token,
+  expiresAt }` and hands the raw token to the calling admin, once — not
+  `204` with the token only "sent".** This install has no mailer by
+  design: the only `CommunicationProvider` is
+  `ConsoleCommunicationProvider`, which logs, so the old flow issued a
+  live token that reached nobody. Delivery is now the admin's job, out
+  of band (WhatsApp, phone, in person). Only the SHA-256 hash is stored,
+  so the response is the one place the raw token exists. The best-effort
+  `provider.send()` stays, but a missing address or a provider error is
+  logged and swallowed — it can never stop the token reaching the admin.
+- **URL assembly is client-side, from `window.location.origin`**
+  (`<origin>/reset-password?token=<token>`), matching the portal-invite
+  precedent (`Applicant360.tsx`/`BrokerDetail.tsx` build
+  `/portal/invite/...` the same way). Deliberately no
+  `FRONTEND_URL`/`APP_URL` env var: the staff SPA is served at `/` on the
+  same origin as the API (`deploy/native/nginx`), so the browser already
+  knows the right base, and a configured one is one more per-install
+  value to get wrong.
+- **Portal targets are refused with 400; deactivated targets with 409.**
+  The old portal branch (a `PortalPasswordReset` row created from this
+  same function) is removed — portal users get a dedicated endpoint, not
+  yet built. The 409 matches `PortalPasswordResetProcessor`, which
+  already refuses deactivated users: an admin path should not be more
+  permissive than the unauthenticated one. Both checks run before any
+  token exists, so neither can leave a partial write.
+- **A new token supersedes any live one for that user.** One interactive
+  transaction: `SELECT … FOR UPDATE` on the user row (serialises
+  concurrent issuance, so two clicks cannot leave two live links), then
+  unconsumed, unexpired `PasswordReset` rows for that user and company
+  get `consumedAt = now()`, then the new row is created. Known cost,
+  logged in `docs/todo.md`: `consumedAt` now means "used" or
+  "superseded", and the table cannot tell which without a
+  `supersededAt` column.
+- **A `RESET_LINK_ISSUED` audit row is written explicitly, inside the same
+  transaction.** `forcePasswordReset` runs on `SYSTEM_PRISMA`, which
+  carries no audit extension (only `createTenantPrismaClient` gets
+  `auditExtension()`), so nothing beyond `PasswordReset.createdById`
+  would otherwise record which admin issued a link. Same direct
+  `auditLog.create` shape as `CustomFieldsService`'s purge: actor = the
+  admin, entity = the target user, IP from the request context, `after`
+  = the reset row's id and expiry. Neither the token nor its hash ever
+  appears in it, and sharing the transaction means no token can exist
+  without its audit row.
+- **Permission deliberately stays `ADMIN_USER_UPDATE`.** A dedicated
+  permission was considered and rejected: new `PERMISSIONS` keys
+  auto-sync only to `super_admin` on upgrade (see the pre-pilot
+  super_admin entry), so moving force-reset behind a new key would
+  silently remove it from every existing `company_admin` role until an
+  admin re-granted it by hand.
+- **Correction to the password-change entry: `PasswordChangeThrottlerGuard`
+  is not "one bucket" across its three routes.** `@nestjs/throttler`
+  6.5.0 keys every counter as `sha256(controller-handler-throttler-
+  tracker)`, so the 5-per-300s limit is one setting but each route
+  handler keeps its own counter, per user id when authenticated or per
+  IP for the public confirm endpoint. The guard's own comment now says
+  so. Test budgets are therefore per handler: no more than 5
+  unauthenticated calls to one handler per test run.
+- **Verified locally against CI's exact service images** —
+  `postgres:16-alpine` and `redis:7-alpine` as throwaway local test
+  infrastructure only (nothing added to the repo), provisioned by an
+  unmodified `scripts/test-setup.sh`: `apps/api` 604/604 and
+  `packages/db` 65/65 with zero skipped, and the changed test file
+  (19 tests) green on five separate runs. Not yet exercised in a browser
+  — the staff UI that displays the link is the next step.
 
 ### Uploaded documents plan: owner decisions (2026-09-14)
 

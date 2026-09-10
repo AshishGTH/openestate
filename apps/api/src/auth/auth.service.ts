@@ -282,9 +282,9 @@ export class AuthService {
   }
 
   /**
-   * Confirms an admin-triggered reset link (see UsersService.forcePasswordReset
-   * — staff-target branch only; portal targets reuse PortalAuthService's own
-   * confirmPasswordReset against PortalPasswordReset instead). Public route,
+   * Confirms a staff reset link issued by UsersService.forcePasswordReset,
+   * which serves staff users only — it refuses portal users, whose passwords
+   * reset through the portal's own PortalPasswordReset flow. Public route,
    * no auth — the token itself is the credential.
    */
   async confirmPasswordReset(dto: PasswordResetConfirmDto): Promise<void> {

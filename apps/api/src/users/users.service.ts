@@ -1,12 +1,14 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import * as argon2 from '@node-rs/argon2';
 import { randomUUID, createHash } from 'node:crypto';
-import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
+import { PrismaClient, withTenantTx, runWithTenant, getCurrentIpAddress } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import { COMMUNICATION_PROVIDER, type CommunicationProvider } from '../queues/communication-provider';
 import { TokenService } from '../auth/token.service';
@@ -31,6 +33,8 @@ export interface HierarchyNode {
 
 @Injectable()
 export class UsersService {
+  private readonly logger = new Logger(UsersService.name);
+
   constructor(
     @Inject(TENANT_PRISMA)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -341,42 +345,83 @@ export class UsersService {
   }
 
   /**
-   * Admin-triggered — issues a reset link, never sets or reveals a
-   * password directly. Portal-linked targets (applicantId/brokerId set)
-   * reuse the existing self-service PortalPasswordReset model and its
-   * existing confirm endpoint unchanged; staff targets use the new
-   * PasswordReset model + AuthController's confirm endpoint (staff had no
-   * reset-link mechanism at all before this). Sent synchronously, not via
-   * the queue — unlike self-service requestPasswordReset, there's no
-   * identifier-guessing/timing concern here: the admin already knows this
-   * is a real user by id.
+   * Admin-triggered reset for a STAFF user. Returns a one-time token for the
+   * admin to deliver out-of-band (WhatsApp, phone, in person); never sets or
+   * reveals a password. Only the SHA-256 hash is stored, so this return value
+   * is the one place the raw token ever exists. Issuing a token consumes any
+   * still-live one — links are handed around manually now, so at most one may
+   * be in circulation per user. Portal users are refused: they reset through
+   * the portal path. Provider delivery is best-effort only (this install has no
+   * mailer by design) and can never stop the token reaching the admin.
    */
-  async forcePasswordReset(companyId: string, userId: string, adminUserId: string): Promise<void> {
+  async forcePasswordReset(
+    companyId: string,
+    userId: string,
+    adminUserId: string,
+  ): Promise<{ token: string; expiresAt: Date }> {
     const user = await this.systemPrisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException('User not found');
-
-    const raw = randomUUID();
-    const tokenHash = createHash('sha256').update(raw).digest('hex');
-    const expiresAt = new Date(Date.now() + RESET_EXPIRY_MS);
-
+    if (!user.isActive) {
+      throw new ConflictException(
+        'Cannot reset the password of a deactivated user. Reactivate the account first.',
+      );
+    }
     if (user.applicantId || user.brokerId) {
-      await this.systemPrisma.portalPasswordReset.create({
-        data: { companyId, userId, tokenHash, expiresAt },
-      });
-    } else {
-      await this.systemPrisma.passwordReset.create({
-        data: { companyId, userId, tokenHash, expiresAt, createdById: adminUserId },
-      });
+      throw new BadRequestException(
+        'This is a portal user — portal passwords are reset through the portal, not here.',
+      );
     }
 
-    const toAddress = user.email ?? user.phone;
-    if (!toAddress) return;
+    const token = randomUUID();
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const expiresAt = new Date(Date.now() + RESET_EXPIRY_MS);
+    const ipAddress = getCurrentIpAddress();
 
-    await this.provider.send({
-      channel: user.email ? 'EMAIL' : 'SMS',
-      toAddress,
-      subject: 'Your OpenEstate password has been reset by an administrator',
-      body: `Use this code to set a new password: ${raw} (valid for 30 minutes). If you didn't expect this, contact your administrator.`,
+    await this.systemPrisma.$transaction(async (tx) => {
+      // Raw SQL because Prisma has no SELECT ... FOR UPDATE. Locking the user
+      // row serializes concurrent issuances for one user, so the supersede
+      // below cannot miss a token another request is creating at that moment.
+      await tx.$queryRaw`SELECT 1 FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
+      const now = new Date();
+      await tx.passwordReset.updateMany({
+        where: { companyId, userId, consumedAt: null, expiresAt: { gt: now } },
+        data: { consumedAt: now },
+      });
+      const reset = await tx.passwordReset.create({
+        data: { companyId, userId, tokenHash, expiresAt, createdById: adminUserId },
+      });
+      // SYSTEM_PRISMA carries no audit extension, so this auth event is written
+      // explicitly — same direct insert as CustomFieldsService's purge. The
+      // token itself is never recorded.
+      await tx.auditLog.create({
+        data: {
+          companyId,
+          userId: adminUserId,
+          entityType: 'User',
+          entityId: userId,
+          action: 'RESET_LINK_ISSUED',
+          after: { passwordResetId: reset.id, expiresAt: expiresAt.toISOString() },
+          ipAddress,
+        },
+      });
     });
+
+    const toAddress = user.email ?? user.phone;
+    if (!toAddress) {
+      this.logger.log(`Reset link for user ${userId} issued with no email or phone on file; manual delivery only`);
+    } else {
+      try {
+        await this.provider.send({
+          channel: user.email ? 'EMAIL' : 'SMS',
+          toAddress,
+          subject: 'Your OpenEstate password has been reset by an administrator',
+          body: `Use this code to set a new password: ${token} (valid for 30 minutes). If you didn't expect this, contact your administrator.`,
+        });
+      } catch (err) {
+        this.logger.warn(`Reset link for user ${userId}: best-effort delivery failed — ${(err as Error).message}`);
+      }
+    }
+
+    return { token, expiresAt };
   }
 }

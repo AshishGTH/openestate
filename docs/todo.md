@@ -476,6 +476,16 @@ this note once it has a real, tested effect.
   per-user 5-per-5-minutes limit allows 10 across the two. The stated
   budget only holds end to end because the TOTP lockout counter lives on
   the user row. Remove the lockout and the effective limit doubles.
+- **`ConsoleCommunicationProvider` logs full message bodies, so password-reset
+  tokens (admin force-reset and portal self-service) reach server logs in
+  plaintext.** Not a simple redaction: on an install with no SMS/email
+  provider, that log line is today the only delivery path for portal
+  self-service reset — decide alongside the portal reset design.
+- **Deactivating a user doesn't consume their outstanding password-reset
+  tokens.** Limited impact: login separately refuses inactive accounts.
+- **`PasswordReset.consumedAt` now means either "used" or "superseded by a
+  newer link"** — the table can't tell them apart; needs a `supersededAt` column.
+- **`AuthService.confirmPasswordReset` doesn't check `User.isActive`.**
 
 ## Portal (Phase 6)
 
