@@ -6613,6 +6613,8 @@ fields including IP) checked out against the code as written.
   already refuses deactivated users: an admin path should not be more
   permissive than the unauthenticated one. Both checks run before any
   token exists, so neither can leave a partial write.
+  **Built by the "Admin-generated portal password-reset links" entry
+  below** — that dedicated portal endpoint now exists.
 - **A new token supersedes any live one for that user.** One interactive
   transaction: `SELECT … FOR UPDATE` on the user row (serialises
   concurrent issuance, so two clicks cannot leave two live links), then
@@ -6652,6 +6654,69 @@ fields including IP) checked out against the code as written.
   `packages/db` 65/65 with zero skipped, and the changed test file
   (19 tests) green on five separate runs. Not yet exercised in a browser
   — the staff UI that displays the link is the next step.
+
+### Admin-generated portal password-reset links — the portal counterpart (builds the endpoint the entry above deferred)
+
+- **New `POST /admin/portal-password-resets`, mirroring
+  `POST /admin/portal-invites` in shape and permission
+  (`ADMIN_PORTAL_INVITE_SEND`).** The body is exactly one of
+  `applicantId`/`brokerId`; it answers `200 { token, expiresAt }` and
+  hands the raw token to the calling admin once, like the staff endpoint.
+  No new permission, for the same upgrade-sync reason as the staff entry
+  above: a new key would reach only `super_admin`, silently taking the
+  action away from every existing `company_admin`. Its own controller
+  (`PortalPasswordResetAdminController`) because Nest binds the path
+  prefix per class; same module, service, and permission as invites.
+- **A separate endpoint, not a relabelled invite action, because a
+  `PortalInvite` row and a `PortalPasswordReset` row are different facts.**
+  Re-sending an invite would also have reset the password (consuming an
+  invite re-issues credentials for an existing portal `User`), but if a
+  customer later disputes activity on their account, "was granted access"
+  and "had their password reset" must stay distinguishable in the audit
+  trail — a distinction that cannot be recovered later if collapsed now.
+- **`PortalPasswordReset.createdById` added — nullable, DB-level FK to
+  `users` (`ON DELETE SET NULL`, same shape as
+  `portal_invites.created_by_id`), no backfill.** NULL means self-service:
+  the portal user requested it and no admin was involved. Existing rows
+  have no known creator, and inventing one would falsify the trail. No RLS
+  change: the table's only policy is the `company_id` tenant isolation
+  policy.
+- **Portal reset URL template: `${origin}/portal/reset-password?token=...`.**
+  The portal SPA is built with base `/portal/`, served by nginx at
+  `/portal/`, and its `BrowserRouter` has `basename="/portal"`, so the
+  route path is `/reset-password`. Same shape as the existing invite
+  links (`/portal/invite/:id?token=`), and built client-side from
+  `window.location.origin` for the same reason as the staff link.
+- **`409` with a machine-readable `code: NO_PORTAL_ACCOUNT` when the
+  applicant or broker has no `User` row — they were never invited.** It is
+  the common case and has a specific remedy (send an invite), so the UI
+  must be able to tell it apart from the deactivated-account `409`, which
+  carries no code. `NO_PORTAL_ACCOUNT_ERROR` is exported from
+  `packages/shared` and used by both the API and the frontend, so the UI
+  never matches on message text. An applicant or broker outside the
+  caller's company is `404`.
+- **The service re-checks exactly-one-of `applicantId`/`brokerId`** rather
+  than relying on the zod boundary alone: called with neither, the lookup
+  would pass `{ id: undefined }`, which Prisma treats as no filter — it
+  would match an arbitrary broker in the company.
+- **Audit action `PORTAL_RESET_ISSUED`** — shortened because `action` is
+  `VarChar(20)` and `PORTAL_RESET_LINK_ISSUED` is 24 characters. Written
+  explicitly inside the same transaction as the token (SYSTEM_PRISMA has no
+  audit extension), never containing the token or its hash. Superseding,
+  the row lock, and the 30-minute expiry work exactly as on the staff path;
+  an admin-issued link also supersedes a pending self-service one (the
+  reverse doesn't happen yet — logged in `docs/todo.md`).
+- **This endpoint deliberately does NOT call `CommunicationProvider.send`.**
+  There is no mailer, and `ConsoleCommunicationProvider` logs message
+  bodies in plaintext (`docs/todo.md`); adding a new plaintext-token log
+  line for a customer account would be a regression. The staff path keeps
+  its best-effort send only because it already had one.
+- **Verified locally against the same `postgres:16-alpine`/`redis:7-alpine`
+  test containers as the staff entry:** `apps/api` 614/614 and
+  `packages/db` 65/65 with zero skipped, and the new test file (10 tests)
+  green on three separate runs. Neither the staff nor the portal path has
+  been exercised in a real browser yet — the admin UI that shows and
+  copies the link is the next step.
 
 ### Uploaded documents plan: owner decisions (2026-09-14)
 

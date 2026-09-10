@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { BullModule } from '@nestjs/bullmq';
 import { PortalAuthController } from './portal-auth.controller';
 import { PortalInviteAdminController } from './portal-invite-admin.controller';
+import { PortalPasswordResetAdminController } from './portal-password-reset-admin.controller';
 import { PortalBrandingController } from './portal-branding.controller';
 import { PortalAuthService } from './portal-auth.service';
 import { PortalPasswordResetProcessor } from './portal-password-reset.processor';
@@ -23,7 +24,12 @@ import { AuthModule } from '../auth/auth.module';
  */
 @Module({
   imports: [AuthModule, BullModule.registerQueue({ name: PORTAL_QUEUE })],
-  controllers: [PortalAuthController, PortalInviteAdminController, PortalBrandingController],
+  controllers: [
+    PortalAuthController,
+    PortalInviteAdminController,
+    PortalPasswordResetAdminController,
+    PortalBrandingController,
+  ],
   providers: [
     PortalAuthService,
     PortalPasswordResetProcessor,

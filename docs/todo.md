@@ -486,6 +486,14 @@ this note once it has a real, tested effect.
 - **`PasswordReset.consumedAt` now means either "used" or "superseded by a
   newer link"** — the table can't tell them apart; needs a `supersededAt` column.
 - **`AuthService.confirmPasswordReset` doesn't check `User.isActive`.**
+- **`password_resets.created_by_id` has no foreign key to `users`**, while
+  `portal_password_resets.created_by_id` (added for admin-issued portal
+  resets) does. Give the staff table a matching FK when a migration touches
+  it for another reason — not worth a migration of its own.
+- **The portal self-service reset processor doesn't supersede admin-issued
+  reset links**, though an admin-issued link does supersede pending
+  self-service ones. Asymmetric by omission, not design: the processor was
+  deliberately left unmodified when admin-issued portal links were added.
 
 ## Portal (Phase 6)
 
