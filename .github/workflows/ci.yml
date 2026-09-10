@@ -948,9 +948,31 @@ jobs:
           # Installed at /usr/local/bin, not a bespoke directory: `sudo`
           # replaces PATH with sudoers' secure_path, so a stub anywhere
           # else would simply not be found by the script.
-          printf '#!/bin/sh\necho "stub pnpm: failing deliberately (native-upgrade-refspec)" >&2\nexit 1\n' \
+          # `pnpm store path` is the ONE subcommand that must SUCCEED.
+          # assert_modules_store_matches() asks pnpm which store the build
+          # user would use and compares it against the store recorded in
+          # node_modules/.modules.yaml. A stub that fails everything makes
+          # that check report "could not determine which pnpm store" — a
+          # real refusal, but the wrong one, leaving case 7 asserting
+          # nothing about a store MISMATCH. Everything else still fails, so
+          # cases 3 and 4 keep dying in milliseconds.
+          #
+          # The path is hardcoded rather than derived from $HOME so the
+          # answer cannot depend on how runuser sets the environment; it
+          # only has to differ from the /root/... store case 7 records.
+          #
+          # Written with printf, not a heredoc: a heredoc body would have to
+          # start at column 0, which terminates this YAML block scalar.
+          printf '#!/bin/sh\ncase " $* " in\n  *" store path "*)\n    echo "/home/runner/.local/share/pnpm/store/v3"\n    exit 0\n    ;;\nesac\necho "stub pnpm: failing deliberately (native-upgrade-refspec)" >&2\nexit 1\n' \
             | sudo tee /usr/local/bin/pnpm > /dev/null
           sudo chmod +x /usr/local/bin/pnpm
+          # Prove the stub does BOTH halves before any case depends on it.
+          [ "$(pnpm -C / store path)" = "/home/runner/.local/share/pnpm/store/v3" ] \
+            || { echo "::error::pnpm stub does not answer 'store path' — case 7 would assert the wrong refusal"; exit 1; }
+          if pnpm install --frozen-lockfile >/dev/null 2>&1; then
+            echo "::error::pnpm stub succeeded for 'install' — cases 3 and 4 rely on it failing fast"
+            exit 1
+          fi
 
       - name: Build a scratch origin and working clone
         run: |
