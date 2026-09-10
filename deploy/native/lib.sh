@@ -160,6 +160,126 @@ state\" and concerns .git rather than build output. If you hit that one
 too, its own message names the command for it.)"
 }
 
+# _modules_recorded_store MODULES_YAML -> prints the store path pnpm recorded
+#
+# pnpm has written this file as JSON (v9) and as YAML (older versions), so
+# both shapes are tried rather than depending on either. On Linux — the
+# only platform these scripts support — a store path contains no character
+# JSON escapes, so the extracted value needs no unescaping.
+_modules_recorded_store() {
+  local f="$1"
+  {
+    sed -n 's/.*"storeDir"[[:space:]]*:[[:space:]]*"\(.*\)".*/\1/p' "$f"
+    sed -n 's/^[[:space:]]*storeDir:[[:space:]]*\(.*\)$/\1/p' "$f"
+  } 2>/dev/null | head -1
+}
+
+# assert_modules_store_matches SRC_DIR OWNER
+#
+# Refuses when node_modules was created against a DIFFERENT pnpm store than
+# the one the build user will use.
+#
+# This is a genuinely separate condition from assert_build_artifacts_owned,
+# not a stricter version of it, and the difference is not theoretical — it
+# is what CI hit. `node_modules/.modules.yaml` records the store the
+# creating user's pnpm used. A build performed as root records root's
+# store; the build now runs as the checkout's owner, whose store is a
+# different path entirely. pnpm treats that as a modules directory it did
+# not create and wants to remove and reinstall it from scratch.
+#
+# Crucially, repairing OWNERSHIP does not repair this. An operator who
+# follows the ownership refusal and runs the chown ends up with a tree they
+# own, that pnpm still considers foreign — every file readable and writable,
+# and still wrong. So the two checks cannot be merged: one asks "can the
+# build user write these files", the other asks "will pnpm accept this tree
+# at all", and either can hold without the other. This also covers the case
+# the shallow ownership check documents as its blind spot (a root build into
+# an already-owner-owned node_modules), because .modules.yaml records the
+# store regardless of who owns which directory.
+#
+# Why refuse instead of letting pnpm decide: measured directly against
+# pnpm 9.15.0 with a foreign storeDir and no terminal — plain `pnpm install
+# --frozen-lockfile` prints its confirmation prompt, installs NOTHING, and
+# exits 0, so the run fails several steps later as a misleading
+# "Cannot find module ..." instead of at the real cause. Both `CI=true` and
+# `--config.confirmModulesPurge=false` avoid that by silently WIPING the
+# modules directory and reinstalling — an unattended destructive action, a
+# different bad outcome rather than a fix. pnpm offers no "refuse if the
+# tree is foreign" mode, so the loud failure has to be this check, before
+# pnpm is invoked at all.
+assert_modules_store_matches() {
+  local src_dir="$1" owner="$2"
+  local modules_yaml="${src_dir}/node_modules/.modules.yaml"
+
+  # No modules tree yet (a fresh clone) — nothing to be foreign.
+  [ -f "$modules_yaml" ] || return 0
+
+  local recorded expected
+  recorded="$(_modules_recorded_store "$modules_yaml")"
+  # Unreadable or an unrecognised shape: say so rather than assuming it is
+  # fine. A skip that looks like a pass is the failure mode this whole
+  # check exists to remove.
+  [ -n "$recorded" ] || die "Refusing to build: ${modules_yaml} exists but no pnpm store path could be read from it.
+
+That file records which pnpm store the existing node_modules was built
+against. Without it there is no way to tell whether the build user's pnpm
+will accept this tree or silently decline to install into it.
+
+Remove the modules directories and let the build recreate them:
+  $(_modules_removal_command "$src_dir" )"
+
+  if ! expected="$(run_as_src_owner "$src_dir" pnpm -C "$src_dir" store path 2>/dev/null | tr -d '\r' | tail -1)"; then
+    expected=""
+  fi
+  [ -n "$expected" ] || die "Refusing to build: could not determine which pnpm store '${owner}' would use ('pnpm store path' failed).
+
+The existing node_modules was built against:
+  ${recorded}
+
+Without the build user's own store path there is no way to tell whether
+pnpm will accept that tree. Fix pnpm for '${owner}' (corepack must be able
+to provide the pinned version), then re-run this script."
+
+  [ "$recorded" = "$expected" ] && return 0
+
+  die "Refusing to build: the existing node_modules belongs to a different pnpm store.
+
+  recorded in ${modules_yaml}:
+    ${recorded}
+  store that '${owner}' will use:
+    ${expected}
+
+Almost always this means the install was done with an older version of
+these scripts, which built as root and therefore recorded root's store.
+The build now runs as '${owner}'.
+
+Changing ownership does NOT fix this — a chown makes the files writable
+but leaves the tree one pnpm still considers foreign. Left alone, pnpm
+would either wipe the directory unattended or install nothing at all and
+let the build fail later with a misleading \"Cannot find module ...\".
+
+Remove the modules directories and re-run this script; the build recreates
+them against the correct store:
+  $(_modules_removal_command "$src_dir")
+
+(This is NOT the artifact-ownership refusal, which reports \"build
+artifacts owned by another user\" and is fixed with chown, nor the
+git-metadata one, which reports \"Cannot read git state\".)"
+}
+
+# _modules_removal_command SRC_DIR -> the one command that clears every
+# modules directory this build would use. Printed, never run: this script
+# refuses and instructs, it does not delete an operator's files.
+_modules_removal_command() {
+  local src_dir="$1"
+  local -a mod_dirs=()
+  while IFS= read -r p; do
+    case "$p" in */node_modules) mod_dirs+=("$p") ;; esac
+  done < <(_build_artifact_paths "$src_dir")
+  [ "${#mod_dirs[@]}" -eq 0 ] && { printf 'sudo rm -rf %s/node_modules' "$src_dir"; return 0; }
+  printf 'sudo rm -rf %s' "${mod_dirs[*]}"
+}
+
 # git_as_owner SRC_DIR GIT_ARGS...
 #
 # Every git command these scripts run against the checkout goes through
@@ -224,6 +344,10 @@ build_release() {
   # earlier, so that its operator gets the refusal before a backup is
   # taken rather than from inside a command substitution here.
   assert_build_artifacts_owned "$src_dir" "$owner"
+  # Separate condition, separate message — see assert_modules_store_matches.
+  # Runs before pnpm is invoked, because pnpm's own behaviour on a foreign
+  # tree is either a silent no-op or an unattended wipe, never a useful error.
+  assert_modules_store_matches "$src_dir" "$owner"
 
   release_id="$(date -u +%Y%m%d%H%M%S)-$(git_as_owner "$src_dir" rev-parse --short HEAD 2>/dev/null || echo nogit)"
   local release_dir="${releases_dir}/${release_id}"
@@ -306,7 +430,13 @@ _build_in_checkout() (
     # service, never on the build that produces it.
     unset NODE_ENV
     log "Installing workspace dependencies..."
-    pnpm install --frozen-lockfile
+    # stdin closed deliberately, as belt-and-braces rather than as the fix:
+    # assert_modules_store_matches() above already refuses the state that
+    # makes pnpm prompt. If pnpm ever prompts for some other reason, a
+    # closed stdin turns it into an immediate failure instead of a build
+    # that hangs forever on a real operator's terminal waiting for a
+    # keystroke nobody is there to press.
+    pnpm install --frozen-lockfile < /dev/null
 
     log "Building packages in dependency order..."
     pnpm --filter @openestate/db generate
