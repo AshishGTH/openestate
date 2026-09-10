@@ -722,7 +722,21 @@ jobs:
           # --no-backup: backup-native.sh needs no external creds (it dumps
           # locally), but this job is testing the upgrade sequence itself,
           # not the backup step — skip it to keep the job focused and fast.
-          sudo ./upgrade-native.sh --no-backup 2>&1 | tee /tmp/upgrade.log
+          #
+          # --ref is passed explicitly, and the "Check out the current
+          # release" step above deliberately STAYS. This job's scope is
+          # "given a correct checkout, does the upgrade deliver" — real
+          # coverage, but NOT coverage of ref handling, since the harness
+          # positions the checkout itself. Ref handling is covered by the
+          # native-upgrade-refspec job instead, which drives the script's
+          # own resolution logic against a scratch repository.
+          #
+          # Dropping the pre-positioning step was tried and reverted: with
+          # the checkout left at the baseline, `./upgrade-native.sh` resolves
+          # to the BASELINE's copy of the script (the script ships inside the
+          # tree being upgraded), so the job silently tested an old script.
+          # Do not remove that step again.
+          sudo ./upgrade-native.sh --no-backup --ref "${{ github.sha }}" 2>&1 | tee /tmp/upgrade.log
           END=$(date +%s)
           DURATION=$((END - START))
           echo "upgrade-native.sh ran for ${DURATION}s"
@@ -817,3 +831,251 @@ jobs:
           (sudo journalctl -u openestate-api -n 8 --no-pager 2>/dev/null || echo "(unit not found / never started)") | while IFS= read -r line; do
             echo "::error::${line}"
           done
+
+
+  native-upgrade-refspec:
+    # upgrade-native.sh decides WHAT to build before it builds anything:
+    # it refuses a checkout it cannot verify, and resolves --ref against
+    # the remote. native-upgrade-from-populated cannot test any of that —
+    # it positions the checkout itself, on purpose (see its own comment),
+    # so the script's decision never runs there.
+    #
+    # This job tests only that decision, and needs nothing to do it: no
+    # install, no PostgreSQL, no Redis, no systemd, no nginx, no Node or
+    # pnpm. That is a property of the script, not a shortcut — the whole
+    # ref-decision block runs before the first backup, build, migration,
+    # systemctl call or healthcheck. If this job ever needs one of those
+    # services, the decision has stopped being reachable before the build,
+    # which is itself the bug.
+    name: Upgrade ref handling (no install, no services)
+    runs-on: ubuntu-latest
+    # Deliberately no `needs:` — this job builds and installs nothing, so
+    # gating it behind lint-typecheck-build would only delay the fastest
+    # signal in the workflow.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # a scratch origin is built from this history
+
+      - name: Create the fake install target and the pnpm stub
+        run: |
+          set -euo pipefail
+          # upgrade-native.sh has exactly two preconditions before its ref
+          # decision: it must run as root, and /opt/openestate/current must
+          # be a symlink. Nothing here installs OpenEstate — the script
+          # never reads THROUGH this symlink before the point under test,
+          # it only checks that it is one and resolves it for its "previous
+          # release" message.
+          sudo mkdir -p /opt/openestate/releases/fake-previous
+          sudo ln -sfn /opt/openestate/releases/fake-previous /opt/openestate/current
+
+          # The ONE stub in this job. build_release() is the first thing
+          # after the ref decision, so a `pnpm` that always fails makes it
+          # die in milliseconds instead of running a real multi-minute
+          # build. Everything asserted below happens BEFORE this point.
+          #
+          # What stubbing this means the job CANNOT prove: that the build
+          # produces a working release, that migrations apply, that cutover
+          # or the healthcheck work. native-upgrade-from-populated proves
+          # those against a real install; this job proves none of them.
+          #
+          # Installed at /usr/local/bin, not a bespoke directory: `sudo`
+          # replaces PATH with sudoers' secure_path, so a stub anywhere
+          # else would simply not be found by the script.
+          printf '#!/bin/sh\necho "stub pnpm: failing deliberately (native-upgrade-refspec)" >&2\nexit 1\n' \
+            | sudo tee /usr/local/bin/pnpm > /dev/null
+          sudo chmod +x /usr/local/bin/pnpm
+
+      - name: Build a scratch origin and working clone
+        run: |
+          set -euo pipefail
+          SCRATCH="${RUNNER_TEMP}/refspec"
+          rm -rf "$SCRATCH"
+          mkdir -p "$SCRATCH"
+
+          # ANTI-STALE MECHANISM 1 of 3: the script under test is obtained
+          # by cloning this checkout, never by copying files. It is
+          # byte-identical to the workspace's by construction. (2 is the
+          # cmp gate in the next step; 3 is the per-invocation log-line
+          # assertion in the case runner.)
+          # `-b main` is load-bearing: without it the bare repo's HEAD points at
+          # whatever init.defaultBranch is (usually `master`), the push below
+          # creates `main` instead, and the clone then has an UNBORN HEAD with
+          # no local branch at all — every later case fails on a bare
+          # `rev-parse HEAD`. Caught by simulating this setup before shipping.
+          git init --quiet --bare -b main "$SCRATCH/origin.git"
+          git -C "$GITHUB_WORKSPACE" push --quiet "$SCRATCH/origin.git" "HEAD:refs/heads/main"
+          git clone --quiet "$SCRATCH/origin.git" "$SCRATCH/work"
+
+          cd "$SCRATCH/work"
+          git config user.email ci@example.invalid
+          git config user.name "CI"
+
+          BASE_SHA="$(git rev-parse HEAD)"
+
+          # A tag at the current commit, pushed to the scratch origin, so
+          # --ref can resolve a real tag through a real fetch.
+          git tag v-refspec-test
+          git push --quiet origin v-refspec-test
+
+          # Advance origin/main by one EMPTY commit, then rewind the local
+          # branch. The local branch is now genuinely behind its upstream —
+          # the exact state that produced the incident this guard exists
+          # for. Empty matters: the tree is identical at both commits, so
+          # checking out either one leaves the script under test unchanged.
+          git commit --quiet --allow-empty -m "refspec: advance origin/main"
+          git push --quiet origin main
+          UPSTREAM_TIP="$(git rev-parse HEAD)"
+          git reset --hard --quiet HEAD~1
+
+          {
+            echo "REFSPEC_SCRATCH=${SCRATCH}"
+            echo "REFSPEC_WORK=${SCRATCH}/work"
+            echo "REFSPEC_BASE_SHA=${BASE_SHA}"
+            echo "REFSPEC_UPSTREAM_TIP=${UPSTREAM_TIP}"
+          } >> "$GITHUB_ENV"
+
+          echo "base commit (local main, and the tag): ${BASE_SHA}"
+          echo "origin/main tip (one empty commit ahead): ${UPSTREAM_TIP}"
+
+      - name: Assert the scratch clone's scripts match the workspace exactly
+        run: |
+          set -euo pipefail
+          # ANTI-STALE MECHANISM 2 of 3. Covers EVERY script in
+          # deploy/native, not just the two upgrade-native.sh sources at
+          # runtime (lib.sh always; backup-native.sh when --no-backup is
+          # absent). Comparing all of them is by construction rather than
+          # by my tracing the call graph correctly — a script added to the
+          # graph later is covered without anyone remembering to add it.
+          differs=0
+          for f in "$GITHUB_WORKSPACE"/deploy/native/*.sh; do
+            base="$(basename "$f")"
+            if ! cmp -s "$f" "${REFSPEC_WORK}/deploy/native/${base}"; then
+              echo "::error::deploy/native/${base} in the scratch clone differs from the workspace copy. This job would be testing a script that is not the one under review — refusing to run."
+              differs=1
+            fi
+          done
+          [ "$differs" -eq 0 ] || exit 1
+          echo "All $(ls "$GITHUB_WORKSPACE"/deploy/native/*.sh | wc -l) deploy/native scripts are byte-identical to the workspace."
+
+      - name: Drive upgrade-native.sh's ref decision (5 cases)
+        run: |
+          set -euo pipefail
+
+          OUT="${RUNNER_TEMP}/refspec-case.log"
+          CASE="(none)"
+          EXPECTED="(none)"
+
+          dump() {
+            echo "::group::Full script output — ${CASE}"
+            sed 's/\x1b\[[0-9;]*m//g' "$OUT" 2>/dev/null || echo "(no output captured)"
+            echo "::endgroup::"
+          }
+
+          # Every failure names the case, the state that was built for it,
+          # and what was expected — so a red run six months from now does
+          # not need the setup reconstructed from the YAML.
+          fail() {
+            dump
+            echo "::error::[CASE ${CASE}] ${1}"
+            echo "::error::[CASE ${CASE}] State under test: ${EXPECTED}"
+            exit 1
+          }
+
+          # ANTI-STALE MECHANISM 3 of 3, run on EVERY invocation. This line
+          # is emitted only by the version of upgrade-native.sh under test.
+          # Its absence means an older script executed — which is exactly
+          # how a previous attempt at this coverage silently tested the
+          # baseline's copy instead of the new one. Checking it positively,
+          # per invocation, turns that into an immediate, named failure.
+          assert_script_under_test_ran() {
+            grep -q 'Source checkout .* is owned by' "$OUT" || fail \
+              "the script under test did not run. Expected the line \"Source checkout ... is owned by\", which ONLY the version under review emits; its absence means an older upgrade-native.sh executed instead."
+          }
+
+          # Invoked by absolute path, still as an executable (never `sudo
+          # bash <script>`), so a missing +x bit fails here the same way it
+          # would for a real admin — the property native-install's own
+          # comment protects.
+          #
+          # `|| RC=$?` is safe across this boundary specifically because
+          # sudo starts a SEPARATE process: the errexit suppression that
+          # applies to a command whose status is tested cannot cross into
+          # it, so the script's own `set -euo pipefail` stays armed.
+          run_upgrade() {
+            RC=0
+            sudo "${REFSPEC_WORK}/deploy/native/upgrade-native.sh" --no-backup "$@" > "$OUT" 2>&1 || RC=$?
+          }
+
+          head_sha() { git -C "$REFSPEC_WORK" rev-parse HEAD; }
+
+          # ---------------------------------------------------------------
+          CASE="1/5 — no --ref, detached HEAD"
+          EXPECTED="checkout detached at ${REFSPEC_BASE_SHA} (no branch, so no upstream to compare against); the script must REFUSE rather than rebuild whatever is checked out"
+          git -C "$REFSPEC_WORK" checkout --quiet --detach "$REFSPEC_BASE_SHA"
+          run_upgrade
+          assert_script_under_test_ran
+          [ "$RC" -ne 0 ] || fail "expected a non-zero exit (a refusal), got 0. Building here would 'upgrade' to the commit already checked out and report success."
+          grep -q "No --ref given, and HEAD is detached" "$OUT" || fail \
+            "exited ${RC}, but not with the detached/no-upstream refusal. Expected output matching \"No --ref given, and HEAD is detached\"."
+          echo "PASS ${CASE}"
+
+          # ---------------------------------------------------------------
+          CASE="2/5 — no --ref, branch behind upstream"
+          EXPECTED="local branch main at ${REFSPEC_BASE_SHA}, one commit behind origin/main (${REFSPEC_UPSTREAM_TIP}); the script must REFUSE — this is the state that caused the original incident"
+          git -C "$REFSPEC_WORK" checkout --quiet main
+          git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_BASE_SHA"
+          run_upgrade
+          assert_script_under_test_ran
+          [ "$RC" -ne 0 ] || fail "expected a non-zero exit (a refusal), got 0. A checkout behind its upstream must not be built — that is a stale-commit upgrade reporting success."
+          grep -q "commit(s) behind" "$OUT" || fail \
+            "exited ${RC}, but not with the behind-upstream refusal. Expected output matching \"commit(s) behind\". (The other refusal branch is detached/no-upstream, which case 1 covers — seeing that one here means the setup did not build a tracking branch.)"
+          echo "PASS ${CASE}"
+
+          # ---------------------------------------------------------------
+          CASE="3/5 — --ref with a tag"
+          EXPECTED="checkout moved ahead to ${REFSPEC_UPSTREAM_TIP} first, then --ref v-refspec-test (a tag at ${REFSPEC_BASE_SHA}); the script must resolve the tag and check it out, i.e. move HEAD BACKWARD to the tag"
+          git -C "$REFSPEC_WORK" checkout --quiet main
+          git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_UPSTREAM_TIP"
+          run_upgrade --ref v-refspec-test
+          assert_script_under_test_ran
+          grep -q "Resolved --ref v-refspec-test to tag" "$OUT" || fail \
+            "the tag was not resolved as a tag. Expected output matching \"Resolved --ref v-refspec-test to tag\"."
+          ACTUAL="$(head_sha)"
+          [ "$ACTUAL" = "$REFSPEC_BASE_SHA" ] || fail \
+            "after the run, HEAD is ${ACTUAL} but the tag points at ${REFSPEC_BASE_SHA}. The script resolved the ref but did not check it out."
+          grep -q "Build failed" "$OUT" || fail \
+            "expected the run to reach the build step and fail there on the stubbed pnpm (output matching \"Build failed\"). Not reaching it means the script stopped earlier than the ref decision, so this case proved nothing about resolution."
+          echo "PASS ${CASE}"
+
+          # ---------------------------------------------------------------
+          CASE="4/5 — --ref with a branch that is behind its upstream"
+          EXPECTED="local branch main at ${REFSPEC_BASE_SHA}, behind origin/main (${REFSPEC_UPSTREAM_TIP}); --ref main must resolve through origin/main to the REMOTE tip, not build the stale local branch"
+          git -C "$REFSPEC_WORK" checkout --quiet main
+          git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_BASE_SHA"
+          run_upgrade --ref main
+          assert_script_under_test_ran
+          grep -q "Resolved --ref main to origin/main" "$OUT" || fail \
+            "the branch was not resolved through origin/. Expected output matching \"Resolved --ref main to origin/main\". Resolving a branch to the LOCAL ref is the bug this case exists for: git fetch does not fast-forward a local branch, so it would build stale code and report success."
+          ACTUAL="$(head_sha)"
+          [ "$ACTUAL" = "$REFSPEC_UPSTREAM_TIP" ] || fail \
+            "after the run, HEAD is ${ACTUAL}; expected the upstream tip ${REFSPEC_UPSTREAM_TIP}. HEAD at ${REFSPEC_BASE_SHA} would mean it built the stale local branch."
+          echo "PASS ${CASE}"
+
+          # ---------------------------------------------------------------
+          CASE="5/5 — dirty working tree"
+          EXPECTED="local branch main up to date with origin/main, but with an uncommitted change to a TRACKED file; the script must REFUSE, because a release built from it would not correspond to any commit"
+          git -C "$REFSPEC_WORK" checkout --quiet main
+          git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_UPSTREAM_TIP"
+          echo "# native-upgrade-refspec dirty-tree case" >> "$REFSPEC_WORK/README.md"
+          run_upgrade
+          assert_script_under_test_ran
+          [ "$RC" -ne 0 ] || fail "expected a non-zero exit (a refusal), got 0. A dirty tree must not be built."
+          grep -q "uncommitted changes" "$OUT" || fail \
+            "exited ${RC}, but not with the dirty-tree refusal. Expected output matching \"uncommitted changes\"."
+          git -C "$REFSPEC_WORK" checkout --quiet -- README.md
+          echo "PASS ${CASE}"
+
+          echo ""
+          echo "All 5 ref-decision cases passed against the real upgrade-native.sh."
