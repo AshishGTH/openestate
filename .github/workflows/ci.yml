@@ -463,13 +463,19 @@ jobs:
       # itself (bug #2/#5, stdout-capture and errexit-propagation
       # footguns) — this one was in the CI YAML wrapping it, not the
       # script.
-      # TEMPORARY DIAGNOSTIC — carries no assertion and must not fail the
-      # job. Investigating why pnpm's _linkBins does
+      # TEMPORARY DIAGNOSTIC - asserts nothing, cannot fail the job.
+      # Investigating why pnpm's _linkBins does
       #   mkdir '$HOME/opt/openestate/releases/<id>'
       # i.e. $HOME prefixed onto an absolute path with its ../ prefix
       # stripped. native-install runs the identical build_release as the
-      # same user and succeeds, so the same block runs in BOTH jobs and the
-      # two outputs are meant to be diffed. Remove once the cause is known.
+      # same user and succeeds, so this block is IDENTICAL in both jobs and
+      # the two outputs are meant to be diffed. Remove once the cause is
+      # known.
+      #
+      # Every privileged probe goes through `sudo runuser`, matching how the
+      # real scripts invoke it: runuser may only be used by root, so a
+      # previous version of this step (running as the unprivileged job user)
+      # silently measured nothing at all.
       - name: DIAGNOSTIC - environment immediately before the script runs
         continue-on-error: true
         run: |
@@ -477,49 +483,59 @@ jobs:
           . deploy/native/lib.sh
           SRC_DIR="$GITHUB_WORKSPACE"
           OWNER="$(src_owner "$SRC_DIR")"
+          {
+            echo "== [1] ownership/mode of /opt/openestate and every parent =="
+            for d in / /opt /opt/openestate /opt/openestate/releases; do
+              if [ -e "$d" ]; then
+                stat -c '%n  owner=%U  group=%G  mode=%A  type=%F' "$d"
+              else
+                echo "$d  (does not exist)"
+              fi
+            done
 
-          echo "::group::ownership and mode: /opt/openestate and every parent up to /"
-          for d in / /opt /opt/openestate /opt/openestate/releases; do
-            if [ -e "$d" ]; then
-              stat -c '%n  owner=%U  group=%G  mode=%A  type=%F' "$d"
-              rl="$(readlink -f "$d")"; [ "$rl" = "$d" ] || echo "    ^ resolves to: $rl  (NOT itself - symlink in the path)"
+            echo "== [2] contents of /opt/openestate/releases =="
+            ls -la /opt/openestate/releases 2>&1 || echo "(cannot list)"
+
+            echo "== [3] getfacl =="
+            BASELINE="$(ls -d /opt/openestate/releases/*/ 2>/dev/null | head -1)"
+            if command -v getfacl >/dev/null 2>&1; then
+              for d in /opt /opt/openestate /opt/openestate/releases "$BASELINE"; do
+                [ -n "$d" ] || continue
+                if [ -e "$d" ]; then
+                  echo "-- getfacl $d --"
+                  getfacl -p "$d" 2>&1
+                else
+                  echo "-- $d (does not exist) --"
+                fi
+              done
             else
-              echo "$d  (does not exist)"
+              echo "(getfacl not installed)"
             fi
-          done
-          echo "::endgroup::"
 
-          echo "::group::what already exists in /opt/openestate/releases"
-          ls -la /opt/openestate/releases 2>&1 || echo "(cannot list)"
-          echo "::endgroup::"
-
-          echo "::group::build user, and a REAL write test (not inferred from mode bits)"
-          echo "src_owner($SRC_DIR) = $OWNER"
-          echo "this step runs as    = $(id -un) uid=$(id -u)"
-          echo "id of build user     : $(id "$OWNER" 2>&1)"
-          if [ -d /opt/openestate/releases ]; then
-            probe="/opt/openestate/releases/.diag-probe-$$"
-            if runuser -u "$OWNER" -- mkdir "$probe" 2>&1; then
-              echo "WRITE TEST: '$OWNER' CAN create entries in /opt/openestate/releases"
-              runuser -u "$OWNER" -- rmdir "$probe" 2>&1 || true
+            echo "== [4] build user, and a REAL write test via sudo runuser =="
+            echo "src_owner($SRC_DIR) = $OWNER"
+            echo "this step runs as   = $(id -un) uid=$(id -u)"
+            if [ -d /opt/openestate/releases ]; then
+              probe="/opt/openestate/releases/.diag-probe-$$"
+              if sudo runuser -u "$OWNER" -- mkdir "$probe" 2>&1; then
+                echo "WRITE TEST: '$OWNER' CAN create entries in /opt/openestate/releases"
+                sudo runuser -u "$OWNER" -- rmdir "$probe" 2>&1 || true
+              else
+                echo "WRITE TEST: '$OWNER' CANNOT create entries in /opt/openestate/releases"
+              fi
             else
-              echo "WRITE TEST: '$OWNER' CANNOT create entries in /opt/openestate/releases"
+              echo "WRITE TEST: skipped - /opt/openestate/releases does not exist yet"
             fi
-          else
-            echo "WRITE TEST: skipped - /opt/openestate/releases does not exist yet"
-          fi
-          echo "::endgroup::"
 
-          echo "::group::the build user's environment INSIDE runuser (what build_release sees)"
-          echo "-- plain 'runuser -u OWNER --', the exact form run_as_src_owner uses --"
-          runuser -u "$OWNER" -- sh -c 'echo "HOME=$HOME"; echo "PWD=$PWD"; echo "USER=${USER:-<unset>}"; echo "LOGNAME=${LOGNAME:-<unset>}"; echo "XDG_DATA_HOME=${XDG_DATA_HOME:-<unset>}"; echo "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-<unset>}"; echo "npm_config_prefix=${npm_config_prefix:-<unset>}"; echo "PATH=$PATH"' 2>&1
-          echo "-- same, but cwd set to the checkout the way _build_in_checkout does --"
-          ( cd "$SRC_DIR" && runuser -u "$OWNER" -- sh -c 'echo "HOME=$HOME"; echo "PWD=$PWD"; echo "pwd -P=$(pwd -P)"' ) 2>&1
-          echo "::endgroup::"
+            echo "== [5] build user env inside runuser (exact run_as_src_owner form) =="
+            sudo runuser -u "$OWNER" -- sh -c 'echo "HOME=$HOME"; echo "PWD=$PWD"; echo "USER=${USER:-<unset>}"; echo "LOGNAME=${LOGNAME:-<unset>}"; echo "XDG_DATA_HOME=${XDG_DATA_HOME:-<unset>}"; echo "npm_config_prefix=${npm_config_prefix:-<unset>}"' 2>&1 || echo "(runuser failed)"
 
-          echo "::group::pnpm's own view, as the build user, from the checkout"
-          ( cd "$SRC_DIR" && runuser -u "$OWNER" -- sh -c 'echo "store path : $(pnpm store path 2>&1)"; echo "store-dir  : $(pnpm config get store-dir 2>&1)"; echo "global-dir : $(pnpm config get global-dir 2>&1)"; echo "pnpm ver   : $(pnpm --version 2>&1)"' ) 2>&1
-          echo "::endgroup::"
+            echo "== [6] same, cwd = the checkout (as _build_in_checkout does) =="
+            ( cd "$SRC_DIR" && sudo runuser -u "$OWNER" -- sh -c 'echo "HOME=$HOME"; echo "PWD=$PWD"; echo "pwd -P=$(pwd -P)"; echo "USER=${USER:-<unset>}"; echo "LOGNAME=${LOGNAME:-<unset>}"' ) 2>&1 || echo "(runuser failed)"
+
+            echo "== [7] pnpm's own view, as the build user, from the checkout =="
+            ( cd "$SRC_DIR" && sudo runuser -u "$OWNER" -- sh -c 'echo "pnpm ver  : $(pnpm --version 2>&1)"; echo "store path: $(pnpm store path 2>&1)"; echo "store-dir : $(pnpm config get store-dir 2>&1)"' ) 2>&1 || echo "(pnpm unavailable)"
+          } 2>&1 | sed 's/^/DIAG> /'
 
       - name: Run install-native.sh (builds the app, runs setup-database.sh, installs systemd + nginx)
         working-directory: deploy/native
@@ -837,13 +853,19 @@ jobs:
             sudo chown -R runner: "${rest[@]}"
           fi
 
-      # TEMPORARY DIAGNOSTIC — carries no assertion and must not fail the
-      # job. Investigating why pnpm's _linkBins does
+      # TEMPORARY DIAGNOSTIC - asserts nothing, cannot fail the job.
+      # Investigating why pnpm's _linkBins does
       #   mkdir '$HOME/opt/openestate/releases/<id>'
       # i.e. $HOME prefixed onto an absolute path with its ../ prefix
       # stripped. native-install runs the identical build_release as the
-      # same user and succeeds, so the same block runs in BOTH jobs and the
-      # two outputs are meant to be diffed. Remove once the cause is known.
+      # same user and succeeds, so this block is IDENTICAL in both jobs and
+      # the two outputs are meant to be diffed. Remove once the cause is
+      # known.
+      #
+      # Every privileged probe goes through `sudo runuser`, matching how the
+      # real scripts invoke it: runuser may only be used by root, so a
+      # previous version of this step (running as the unprivileged job user)
+      # silently measured nothing at all.
       - name: DIAGNOSTIC - environment immediately before the script runs
         continue-on-error: true
         run: |
@@ -851,49 +873,59 @@ jobs:
           . deploy/native/lib.sh
           SRC_DIR="$GITHUB_WORKSPACE"
           OWNER="$(src_owner "$SRC_DIR")"
+          {
+            echo "== [1] ownership/mode of /opt/openestate and every parent =="
+            for d in / /opt /opt/openestate /opt/openestate/releases; do
+              if [ -e "$d" ]; then
+                stat -c '%n  owner=%U  group=%G  mode=%A  type=%F' "$d"
+              else
+                echo "$d  (does not exist)"
+              fi
+            done
 
-          echo "::group::ownership and mode: /opt/openestate and every parent up to /"
-          for d in / /opt /opt/openestate /opt/openestate/releases; do
-            if [ -e "$d" ]; then
-              stat -c '%n  owner=%U  group=%G  mode=%A  type=%F' "$d"
-              rl="$(readlink -f "$d")"; [ "$rl" = "$d" ] || echo "    ^ resolves to: $rl  (NOT itself - symlink in the path)"
+            echo "== [2] contents of /opt/openestate/releases =="
+            ls -la /opt/openestate/releases 2>&1 || echo "(cannot list)"
+
+            echo "== [3] getfacl =="
+            BASELINE="$(ls -d /opt/openestate/releases/*/ 2>/dev/null | head -1)"
+            if command -v getfacl >/dev/null 2>&1; then
+              for d in /opt /opt/openestate /opt/openestate/releases "$BASELINE"; do
+                [ -n "$d" ] || continue
+                if [ -e "$d" ]; then
+                  echo "-- getfacl $d --"
+                  getfacl -p "$d" 2>&1
+                else
+                  echo "-- $d (does not exist) --"
+                fi
+              done
             else
-              echo "$d  (does not exist)"
+              echo "(getfacl not installed)"
             fi
-          done
-          echo "::endgroup::"
 
-          echo "::group::what already exists in /opt/openestate/releases"
-          ls -la /opt/openestate/releases 2>&1 || echo "(cannot list)"
-          echo "::endgroup::"
-
-          echo "::group::build user, and a REAL write test (not inferred from mode bits)"
-          echo "src_owner($SRC_DIR) = $OWNER"
-          echo "this step runs as    = $(id -un) uid=$(id -u)"
-          echo "id of build user     : $(id "$OWNER" 2>&1)"
-          if [ -d /opt/openestate/releases ]; then
-            probe="/opt/openestate/releases/.diag-probe-$$"
-            if runuser -u "$OWNER" -- mkdir "$probe" 2>&1; then
-              echo "WRITE TEST: '$OWNER' CAN create entries in /opt/openestate/releases"
-              runuser -u "$OWNER" -- rmdir "$probe" 2>&1 || true
+            echo "== [4] build user, and a REAL write test via sudo runuser =="
+            echo "src_owner($SRC_DIR) = $OWNER"
+            echo "this step runs as   = $(id -un) uid=$(id -u)"
+            if [ -d /opt/openestate/releases ]; then
+              probe="/opt/openestate/releases/.diag-probe-$$"
+              if sudo runuser -u "$OWNER" -- mkdir "$probe" 2>&1; then
+                echo "WRITE TEST: '$OWNER' CAN create entries in /opt/openestate/releases"
+                sudo runuser -u "$OWNER" -- rmdir "$probe" 2>&1 || true
+              else
+                echo "WRITE TEST: '$OWNER' CANNOT create entries in /opt/openestate/releases"
+              fi
             else
-              echo "WRITE TEST: '$OWNER' CANNOT create entries in /opt/openestate/releases"
+              echo "WRITE TEST: skipped - /opt/openestate/releases does not exist yet"
             fi
-          else
-            echo "WRITE TEST: skipped - /opt/openestate/releases does not exist yet"
-          fi
-          echo "::endgroup::"
 
-          echo "::group::the build user's environment INSIDE runuser (what build_release sees)"
-          echo "-- plain 'runuser -u OWNER --', the exact form run_as_src_owner uses --"
-          runuser -u "$OWNER" -- sh -c 'echo "HOME=$HOME"; echo "PWD=$PWD"; echo "USER=${USER:-<unset>}"; echo "LOGNAME=${LOGNAME:-<unset>}"; echo "XDG_DATA_HOME=${XDG_DATA_HOME:-<unset>}"; echo "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-<unset>}"; echo "npm_config_prefix=${npm_config_prefix:-<unset>}"; echo "PATH=$PATH"' 2>&1
-          echo "-- same, but cwd set to the checkout the way _build_in_checkout does --"
-          ( cd "$SRC_DIR" && runuser -u "$OWNER" -- sh -c 'echo "HOME=$HOME"; echo "PWD=$PWD"; echo "pwd -P=$(pwd -P)"' ) 2>&1
-          echo "::endgroup::"
+            echo "== [5] build user env inside runuser (exact run_as_src_owner form) =="
+            sudo runuser -u "$OWNER" -- sh -c 'echo "HOME=$HOME"; echo "PWD=$PWD"; echo "USER=${USER:-<unset>}"; echo "LOGNAME=${LOGNAME:-<unset>}"; echo "XDG_DATA_HOME=${XDG_DATA_HOME:-<unset>}"; echo "npm_config_prefix=${npm_config_prefix:-<unset>}"' 2>&1 || echo "(runuser failed)"
 
-          echo "::group::pnpm's own view, as the build user, from the checkout"
-          ( cd "$SRC_DIR" && runuser -u "$OWNER" -- sh -c 'echo "store path : $(pnpm store path 2>&1)"; echo "store-dir  : $(pnpm config get store-dir 2>&1)"; echo "global-dir : $(pnpm config get global-dir 2>&1)"; echo "pnpm ver   : $(pnpm --version 2>&1)"' ) 2>&1
-          echo "::endgroup::"
+            echo "== [6] same, cwd = the checkout (as _build_in_checkout does) =="
+            ( cd "$SRC_DIR" && sudo runuser -u "$OWNER" -- sh -c 'echo "HOME=$HOME"; echo "PWD=$PWD"; echo "pwd -P=$(pwd -P)"; echo "USER=${USER:-<unset>}"; echo "LOGNAME=${LOGNAME:-<unset>}"' ) 2>&1 || echo "(runuser failed)"
+
+            echo "== [7] pnpm's own view, as the build user, from the checkout =="
+            ( cd "$SRC_DIR" && sudo runuser -u "$OWNER" -- sh -c 'echo "pnpm ver  : $(pnpm --version 2>&1)"; echo "store path: $(pnpm store path 2>&1)"; echo "store-dir : $(pnpm config get store-dir 2>&1)"' ) 2>&1 || echo "(pnpm unavailable)"
+          } 2>&1 | sed 's/^/DIAG> /'
 
       - name: Run upgrade-native.sh
         working-directory: deploy/native
