@@ -463,6 +463,64 @@ jobs:
       # itself (bug #2/#5, stdout-capture and errexit-propagation
       # footguns) — this one was in the CI YAML wrapping it, not the
       # script.
+      # TEMPORARY DIAGNOSTIC — carries no assertion and must not fail the
+      # job. Investigating why pnpm's _linkBins does
+      #   mkdir '$HOME/opt/openestate/releases/<id>'
+      # i.e. $HOME prefixed onto an absolute path with its ../ prefix
+      # stripped. native-install runs the identical build_release as the
+      # same user and succeeds, so the same block runs in BOTH jobs and the
+      # two outputs are meant to be diffed. Remove once the cause is known.
+      - name: DIAGNOSTIC - environment immediately before the script runs
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          . deploy/native/lib.sh
+          SRC_DIR="$GITHUB_WORKSPACE"
+          OWNER="$(src_owner "$SRC_DIR")"
+
+          echo "::group::ownership and mode: /opt/openestate and every parent up to /"
+          for d in / /opt /opt/openestate /opt/openestate/releases; do
+            if [ -e "$d" ]; then
+              stat -c '%n  owner=%U  group=%G  mode=%A  type=%F' "$d"
+              rl="$(readlink -f "$d")"; [ "$rl" = "$d" ] || echo "    ^ resolves to: $rl  (NOT itself - symlink in the path)"
+            else
+              echo "$d  (does not exist)"
+            fi
+          done
+          echo "::endgroup::"
+
+          echo "::group::what already exists in /opt/openestate/releases"
+          ls -la /opt/openestate/releases 2>&1 || echo "(cannot list)"
+          echo "::endgroup::"
+
+          echo "::group::build user, and a REAL write test (not inferred from mode bits)"
+          echo "src_owner($SRC_DIR) = $OWNER"
+          echo "this step runs as    = $(id -un) uid=$(id -u)"
+          echo "id of build user     : $(id "$OWNER" 2>&1)"
+          if [ -d /opt/openestate/releases ]; then
+            probe="/opt/openestate/releases/.diag-probe-$$"
+            if runuser -u "$OWNER" -- mkdir "$probe" 2>&1; then
+              echo "WRITE TEST: '$OWNER' CAN create entries in /opt/openestate/releases"
+              runuser -u "$OWNER" -- rmdir "$probe" 2>&1 || true
+            else
+              echo "WRITE TEST: '$OWNER' CANNOT create entries in /opt/openestate/releases"
+            fi
+          else
+            echo "WRITE TEST: skipped - /opt/openestate/releases does not exist yet"
+          fi
+          echo "::endgroup::"
+
+          echo "::group::the build user's environment INSIDE runuser (what build_release sees)"
+          echo "-- plain 'runuser -u OWNER --', the exact form run_as_src_owner uses --"
+          runuser -u "$OWNER" -- sh -c 'echo "HOME=$HOME"; echo "PWD=$PWD"; echo "USER=${USER:-<unset>}"; echo "LOGNAME=${LOGNAME:-<unset>}"; echo "XDG_DATA_HOME=${XDG_DATA_HOME:-<unset>}"; echo "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-<unset>}"; echo "npm_config_prefix=${npm_config_prefix:-<unset>}"; echo "PATH=$PATH"' 2>&1
+          echo "-- same, but cwd set to the checkout the way _build_in_checkout does --"
+          ( cd "$SRC_DIR" && runuser -u "$OWNER" -- sh -c 'echo "HOME=$HOME"; echo "PWD=$PWD"; echo "pwd -P=$(pwd -P)"' ) 2>&1
+          echo "::endgroup::"
+
+          echo "::group::pnpm's own view, as the build user, from the checkout"
+          ( cd "$SRC_DIR" && runuser -u "$OWNER" -- sh -c 'echo "store path : $(pnpm store path 2>&1)"; echo "store-dir  : $(pnpm config get store-dir 2>&1)"; echo "global-dir : $(pnpm config get global-dir 2>&1)"; echo "pnpm ver   : $(pnpm --version 2>&1)"' ) 2>&1
+          echo "::endgroup::"
+
       - name: Run install-native.sh (builds the app, runs setup-database.sh, installs systemd + nginx)
         working-directory: deploy/native
         run: |
@@ -778,6 +836,64 @@ jobs:
             echo "Chowning ${#rest[@]} remaining artifact path(s) to 'runner'"
             sudo chown -R runner: "${rest[@]}"
           fi
+
+      # TEMPORARY DIAGNOSTIC — carries no assertion and must not fail the
+      # job. Investigating why pnpm's _linkBins does
+      #   mkdir '$HOME/opt/openestate/releases/<id>'
+      # i.e. $HOME prefixed onto an absolute path with its ../ prefix
+      # stripped. native-install runs the identical build_release as the
+      # same user and succeeds, so the same block runs in BOTH jobs and the
+      # two outputs are meant to be diffed. Remove once the cause is known.
+      - name: DIAGNOSTIC - environment immediately before the script runs
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          . deploy/native/lib.sh
+          SRC_DIR="$GITHUB_WORKSPACE"
+          OWNER="$(src_owner "$SRC_DIR")"
+
+          echo "::group::ownership and mode: /opt/openestate and every parent up to /"
+          for d in / /opt /opt/openestate /opt/openestate/releases; do
+            if [ -e "$d" ]; then
+              stat -c '%n  owner=%U  group=%G  mode=%A  type=%F' "$d"
+              rl="$(readlink -f "$d")"; [ "$rl" = "$d" ] || echo "    ^ resolves to: $rl  (NOT itself - symlink in the path)"
+            else
+              echo "$d  (does not exist)"
+            fi
+          done
+          echo "::endgroup::"
+
+          echo "::group::what already exists in /opt/openestate/releases"
+          ls -la /opt/openestate/releases 2>&1 || echo "(cannot list)"
+          echo "::endgroup::"
+
+          echo "::group::build user, and a REAL write test (not inferred from mode bits)"
+          echo "src_owner($SRC_DIR) = $OWNER"
+          echo "this step runs as    = $(id -un) uid=$(id -u)"
+          echo "id of build user     : $(id "$OWNER" 2>&1)"
+          if [ -d /opt/openestate/releases ]; then
+            probe="/opt/openestate/releases/.diag-probe-$$"
+            if runuser -u "$OWNER" -- mkdir "$probe" 2>&1; then
+              echo "WRITE TEST: '$OWNER' CAN create entries in /opt/openestate/releases"
+              runuser -u "$OWNER" -- rmdir "$probe" 2>&1 || true
+            else
+              echo "WRITE TEST: '$OWNER' CANNOT create entries in /opt/openestate/releases"
+            fi
+          else
+            echo "WRITE TEST: skipped - /opt/openestate/releases does not exist yet"
+          fi
+          echo "::endgroup::"
+
+          echo "::group::the build user's environment INSIDE runuser (what build_release sees)"
+          echo "-- plain 'runuser -u OWNER --', the exact form run_as_src_owner uses --"
+          runuser -u "$OWNER" -- sh -c 'echo "HOME=$HOME"; echo "PWD=$PWD"; echo "USER=${USER:-<unset>}"; echo "LOGNAME=${LOGNAME:-<unset>}"; echo "XDG_DATA_HOME=${XDG_DATA_HOME:-<unset>}"; echo "XDG_CONFIG_HOME=${XDG_CONFIG_HOME:-<unset>}"; echo "npm_config_prefix=${npm_config_prefix:-<unset>}"; echo "PATH=$PATH"' 2>&1
+          echo "-- same, but cwd set to the checkout the way _build_in_checkout does --"
+          ( cd "$SRC_DIR" && runuser -u "$OWNER" -- sh -c 'echo "HOME=$HOME"; echo "PWD=$PWD"; echo "pwd -P=$(pwd -P)"' ) 2>&1
+          echo "::endgroup::"
+
+          echo "::group::pnpm's own view, as the build user, from the checkout"
+          ( cd "$SRC_DIR" && runuser -u "$OWNER" -- sh -c 'echo "store path : $(pnpm store path 2>&1)"; echo "store-dir  : $(pnpm config get store-dir 2>&1)"; echo "global-dir : $(pnpm config get global-dir 2>&1)"; echo "pnpm ver   : $(pnpm --version 2>&1)"' ) 2>&1
+          echo "::endgroup::"
 
       - name: Run upgrade-native.sh
         working-directory: deploy/native
