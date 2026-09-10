@@ -70,6 +70,19 @@ PREVIOUS_RELEASE="$(readlink -f "$CURRENT_LINK")"
 SRC_OWNER="$(src_owner "$SRC_DIR")"
 log "Source checkout ${SRC_DIR} is owned by '${SRC_OWNER}' — git and build steps run as that user."
 
+# Fired here, at the earliest point the information exists — right after
+# the build user is known, and so before the git checks, before the
+# backup and long before the build. An install performed with the older
+# root-mode scripts left root-owned build output in the checkout that
+# '${SRC_OWNER}' cannot replace; refusing now costs nothing and leaves the
+# running install completely untouched, where discovering it inside the
+# build costs a pre-upgrade backup and several minutes first.
+#
+# build_release() asserts the same thing again as a backstop for callers
+# that do not check for themselves (install-native.sh). The second call is
+# a silent no-op whenever this one passed.
+assert_build_artifacts_owned "$SRC_DIR" "$SRC_OWNER"
+
 # ---------------------------------------------------------------------
 # Decide WHAT to build, and refuse rather than guess. All of this runs
 # before the backup and before any build, so a refusal costs nothing and

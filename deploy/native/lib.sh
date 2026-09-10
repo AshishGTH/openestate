@@ -57,6 +57,109 @@ run_as_src_owner() {
   fi
 }
 
+# _build_artifact_paths SRC_DIR -> prints each build-output path that exists
+#
+# The paths build_release() itself writes inside the checkout, and only
+# those. Globbed against the same workspace layout pnpm-workspace.yaml
+# declares (apps/*, packages/*, plugins/*, docs) rather than a hardcoded
+# list of package names, so adding a workspace package cannot silently
+# fall out of this list.
+#
+# Deliberately NOT derived from .gitignore, even though every path here is
+# gitignored. The reverse is not true: `git ls-files --others --ignored`
+# on this repo also returns apps/*/.env, apps/api/uploads/, .test-env and
+# .pnpm-store/ — secrets and user data that have nothing to do with a
+# build and must never be swept into an ownership decision about one.
+_build_artifact_paths() {
+  local src_dir="$1" p
+  for p in \
+    "$src_dir"/node_modules \
+    "$src_dir"/.turbo \
+    "$src_dir"/*.tsbuildinfo \
+    "$src_dir"/{apps,packages,plugins}/*/node_modules \
+    "$src_dir"/{apps,packages,plugins}/*/dist \
+    "$src_dir"/{apps,packages,plugins}/*/.turbo \
+    "$src_dir"/{apps,packages,plugins}/*/*.tsbuildinfo \
+    "$src_dir"/docs/node_modules \
+    "$src_dir"/docs/.turbo
+  do
+    [ -e "$p" ] && printf '%s\n' "$p"
+  done
+  # Explicit: the loop's last `[ -e ]` failing must not make this function
+  # look like it errored to a caller running under `set -e`.
+  return 0
+}
+
+# assert_build_artifacts_owned SRC_DIR OWNER
+#
+# Refuses when the checkout already contains build artifacts owned by
+# someone other than the user the build will run as. It does NOT fix them:
+# repairing ownership means a recursive chown, as root, over paths derived
+# from a variable — and the operator running one command deliberately is
+# preferable to this script mutating ~83,000 inodes on their behalf. It
+# also sidesteps pnpm's hardlink semantics entirely, since chowning the
+# virtual store would reach through hardlinks into the global pnpm store
+# of whichever user created it.
+#
+# Why this exists at all: before the ownership fix, install-native.sh and
+# upgrade-native.sh ran the build as root, so every install performed that
+# way left root-owned node_modules/ and dist/ behind. The build now
+# correctly runs as the checkout's owner — who cannot replace those files.
+# `pnpm install` does NOT catch it (it is a no-op when the lockfile is
+# already satisfied); the first real write does, as a raw
+# "EACCES: permission denied, unlink ..." from inside prisma generate.
+#
+# Compared against OWNER, never against the literal "root": a checkout
+# that is itself root-owned (the README's own `sudo git clone`) has
+# root-owned artifacts AND builds as root, which is consistent and must
+# stay a silent no-op.
+#
+# KNOWN GAP, stated plainly rather than papered over: this is a SHALLOW
+# check — it stats the top directory of each artifact path, not the tree
+# beneath it. A root build that wrote INTO an already-owner-owned
+# node_modules/ leaves the top directory owner-owned while files below it
+# are root-owned; this check passes and the operator still gets the raw
+# EACCES. The deep alternative (`find ! -user`) closes that gap but walks
+# every one of ~83,000 entries on a clean tree, on every build, to catch a
+# case that only arises from mixing build users mid-tree. If the deep
+# version is ever wanted, it belongs here, behind the same call sites.
+assert_build_artifacts_owned() {
+  local src_dir="$1" owner="$2"
+  local p p_owner
+  local -a offenders=() offender_paths=()
+
+  while IFS= read -r p; do
+    p_owner="$(stat -c %U "$p" 2>/dev/null || echo '<unknown>')"
+    if [ "$p_owner" != "$owner" ]; then
+      offenders+=("  ${p}  (owned by '${p_owner}')")
+      offender_paths+=("$p")
+    fi
+  done < <(_build_artifact_paths "$src_dir")
+
+  [ "${#offender_paths[@]}" -eq 0 ] && return 0
+
+  # One command that fixes every offending path at once — an operator
+  # should not have to run this five times.
+  local fix="sudo chown -R ${owner}: ${offender_paths[*]}"
+
+  die "Refusing to build: the source checkout contains build artifacts owned by another user.
+
+The build runs as '${owner}' (the owner of ${src_dir}), but these paths are not:
+$(printf '%s\n' "${offenders[@]}")
+
+Almost always this means the install was done with an older version of
+these scripts, which built as root. The build cannot replace files it does
+not own, and would fail part-way through with a bare
+\"EACCES: permission denied, unlink ...\" from inside pnpm.
+
+Fix it with one command, then re-run this script:
+  ${fix}
+
+(This is NOT the git-metadata refusal, which reports \"Cannot read git
+state\" and concerns .git rather than build output. If you hit that one
+too, its own message names the command for it.)"
+}
+
 # git_as_owner SRC_DIR GIT_ARGS...
 #
 # Every git command these scripts run against the checkout goes through
@@ -113,6 +216,15 @@ build_release() {
   local src_dir="$1" releases_dir="$2"
   local release_id owner
   owner="$(src_owner "$src_dir")"
+
+  # Backstop, so no caller can skip it — install-native.sh reaches this
+  # without any check of its own, and its header advertises being safe to
+  # re-run, which is exactly how a checkout built by the older root-mode
+  # scripts gets here. upgrade-native.sh ALSO calls this directly, much
+  # earlier, so that its operator gets the refusal before a backup is
+  # taken rather than from inside a command substitution here.
+  assert_build_artifacts_owned "$src_dir" "$owner"
+
   release_id="$(date -u +%Y%m%d%H%M%S)-$(git_as_owner "$src_dir" rev-parse --short HEAD 2>/dev/null || echo nogit)"
   local release_dir="${releases_dir}/${release_id}"
 
