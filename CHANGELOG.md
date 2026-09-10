@@ -102,6 +102,68 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`upgrade-native.sh` could report a successful upgrade without having
+  upgraded anything, and left a root-owned source checkout behind.**
+  Three defects, all in the native deploy tooling only — no application
+  code changes.
+  1. **Stale-commit upgrades reported success.** Without `--ref` the
+     script never fetched, never checked anything, and simply built
+     whatever commit happened to be checked out — so an operator who
+     forgot to update the checkout "upgraded" to the release they were
+     already running and was told it worked. It now fetches and
+     **refuses to build** a checkout that is behind its upstream, or one
+     that is detached / has no upstream, naming the exact commands to
+     run. With `--ref`, a **branch** now resolves through
+     `origin/<branch>` rather than the local branch: `git fetch` does not
+     fast-forward a local branch, so `--ref main` on a stale checkout
+     used to build old code silently. Tags were already correct and
+     behave exactly as before. The checkout is left detached at the
+     resolved commit, so it cannot drift again.
+  2. **The build ran as root inside the source checkout**, leaving
+     root-owned `node_modules/` and `dist/` behind and rewriting `.git`
+     as root, after which the admin's own plain `git fetch` in that
+     checkout failed and needed `sudo`. Everything that touches the
+     checkout — git, `pnpm install`, every build — now runs as the
+     checkout's **owning user**, derived with `stat -c %U` rather than
+     configured. Only systemd, nginx, file placement outside the
+     checkout, and the release-directory chown stay privileged. A
+     root-owned checkout (the README's own `sudo git clone`) still
+     builds as root, exactly as before.
+     `install-native.sh`'s corepack step moves with it: `corepack
+     enable` stays root, because it installs the pnpm shim into the
+     global Node bin directory, but `corepack prepare` now runs as the
+     build user. That cache is per-user (`$COREPACK_HOME`, under the
+     user's `$HOME`), and the build is its only consumer — preparing it
+     as root warmed a cache nothing read, and left the build to fetch
+     pnpm again implicitly part-way through, where a failure is much
+     harder to place. Nothing new is written to disk for this: corepack
+     writes inside that user's own home, never into the checkout.
+  3. **No outcome was ever asserted.** The upgrade now verifies that the
+     release it built carries the commit that was requested — *before*
+     running any migration or cutting over — and that
+     `/opt/openestate/current` actually points at the new release before
+     the service is restarted. Either mismatch is a hard failure with
+     the previous release still serving.
+  Also refuses to build a checkout with uncommitted tracked changes,
+  since the release could not then be tied to any commit. Gitignored
+  build artifacts (`node_modules/`, `dist/`, `.turbo/`, `*.tsbuildinfo`)
+  do not trip this, so it does not misfire on an install a previous
+  root-mode upgrade already littered.
+- **`wait_for_health` treated a degraded API as healthy, in both
+  `install-native.sh` and `upgrade-native.sh`.** It only checked for an
+  HTTP 2xx, but `/api/v1/health` answers **200** with
+  `{"status":"degraded"}` when its database or Redis check fails — there
+  is no status-code override. An upgrade that cut over to a release
+  which could not reach Redis therefore passed the healthcheck, skipped
+  the automatic rollback, and printed "Upgrade complete". The check now
+  parses the body and requires `status: "ok"`.
+  **This changes behaviour for existing installs**: an install or
+  upgrade against a broken or unreachable Redis/PostgreSQL that
+  previously reported success will now fail — `install-native.sh` exits
+  non-zero, and `upgrade-native.sh` rolls the symlink back to the
+  previous release. That is the intended outcome, but it means a run
+  that used to "pass" on a half-working dependency will now stop and
+  say so.
 - **Correctness bug: construction-linked payment plans could show a
   customer overdue, and accrue delay interest, against a construction
   stage the builder had not reached.** Every payment-plan milestone

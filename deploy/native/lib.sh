@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Shared helpers for the deploy/native/*.sh scripts. Sourced, not executed.
 
+# This file's own absolute path, captured at source time. build_release()
+# re-enters this file (`runuser ... bash -c '. "$1"'`) to run the build
+# phase as an unprivileged user, so it has to be able to name itself.
+LIB_SH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
 log()  { printf '\033[1;32m[openestate]\033[0m %s\n' "$1"; }
 warn() { printf '\033[1;33m[openestate]\033[0m %s\n' "$1"; }
 die()  { printf '\033[1;31m[openestate]\033[0m %s\n' "$1" >&2; exit 1; }
@@ -14,10 +19,293 @@ rand_hex_32() {
   openssl rand -hex 32
 }
 
+# src_owner SRC_DIR -> prints the OS user that owns the source checkout.
+#
+# The single source of truth for "who must the build run as". It is
+# DERIVED, never configured: the account we must not lock out of the
+# checkout is, by definition, the one that owns it. $SUDO_USER would be
+# wrong here — it is unset under a root cron/systemd timer and after a
+# plain `su -`, and it names whoever invoked sudo rather than whoever owns
+# the files. If the checkout is itself root-owned (the README's own
+# `sudo git clone`), this returns "root", every drop-privileges call below
+# becomes a no-op, and behaviour is exactly what it was before — while
+# being correct for every non-root clone.
+src_owner() { stat -c %U "$1"; }
+
+# run_as_src_owner SRC_DIR CMD [ARGS...]
+#
+# Runs CMD as the checkout's owner, or directly when we already are them —
+# so these scripts still work when invoked by a non-root user, and so a
+# root-owned checkout costs nothing.
+#
+# `runuser`, not `sudo -u`: sudo applies /etc/sudoers' `secure_path`, which
+# REPLACES PATH for the target command. corepack's `pnpm` shim and a
+# NodeSource `node` both live in /usr/bin and would survive that, but an
+# admin whose Node came from nvm/fnm/asdf has them outside secure_path and
+# the build would die with a bare "pnpm: command not found". runuser
+# (util-linux — present on every distro these scripts support) leaves PATH
+# alone, and still sets HOME to the target user's, which is what corepack
+# and pnpm need for their version cache.
+run_as_src_owner() {
+  local dir="$1"; shift
+  local owner
+  owner="$(src_owner "$dir")"
+  if [ "$owner" = "$(id -un)" ]; then
+    "$@"
+  else
+    runuser -u "$owner" -- "$@"
+  fi
+}
+
+# _build_artifact_paths SRC_DIR -> prints each build-output path that exists
+#
+# The paths build_release() itself writes inside the checkout, and only
+# those. Globbed against the same workspace layout pnpm-workspace.yaml
+# declares (apps/*, packages/*, plugins/*, docs) rather than a hardcoded
+# list of package names, so adding a workspace package cannot silently
+# fall out of this list.
+#
+# Deliberately NOT derived from .gitignore, even though every path here is
+# gitignored. The reverse is not true: `git ls-files --others --ignored`
+# on this repo also returns apps/*/.env, apps/api/uploads/, .test-env and
+# .pnpm-store/ — secrets and user data that have nothing to do with a
+# build and must never be swept into an ownership decision about one.
+_build_artifact_paths() {
+  local src_dir="$1" p
+  for p in \
+    "$src_dir"/node_modules \
+    "$src_dir"/.turbo \
+    "$src_dir"/*.tsbuildinfo \
+    "$src_dir"/{apps,packages,plugins}/*/node_modules \
+    "$src_dir"/{apps,packages,plugins}/*/dist \
+    "$src_dir"/{apps,packages,plugins}/*/.turbo \
+    "$src_dir"/{apps,packages,plugins}/*/*.tsbuildinfo \
+    "$src_dir"/docs/node_modules \
+    "$src_dir"/docs/.turbo
+  do
+    [ -e "$p" ] && printf '%s\n' "$p"
+  done
+  # Explicit: the loop's last `[ -e ]` failing must not make this function
+  # look like it errored to a caller running under `set -e`.
+  return 0
+}
+
+# assert_build_artifacts_owned SRC_DIR OWNER
+#
+# Refuses when the checkout already contains build artifacts owned by
+# someone other than the user the build will run as. It does NOT fix them:
+# repairing ownership means a recursive chown, as root, over paths derived
+# from a variable — and the operator running one command deliberately is
+# preferable to this script mutating ~83,000 inodes on their behalf. It
+# also sidesteps pnpm's hardlink semantics entirely, since chowning the
+# virtual store would reach through hardlinks into the global pnpm store
+# of whichever user created it.
+#
+# Why this exists at all: before the ownership fix, install-native.sh and
+# upgrade-native.sh ran the build as root, so every install performed that
+# way left root-owned node_modules/ and dist/ behind. The build now
+# correctly runs as the checkout's owner — who cannot replace those files.
+# `pnpm install` does NOT catch it (it is a no-op when the lockfile is
+# already satisfied); the first real write does, as a raw
+# "EACCES: permission denied, unlink ..." from inside prisma generate.
+#
+# Compared against OWNER, never against the literal "root": a checkout
+# that is itself root-owned (the README's own `sudo git clone`) has
+# root-owned artifacts AND builds as root, which is consistent and must
+# stay a silent no-op.
+#
+# KNOWN GAP, stated plainly rather than papered over: this is a SHALLOW
+# check — it stats the top directory of each artifact path, not the tree
+# beneath it. A root build that wrote INTO an already-owner-owned
+# node_modules/ leaves the top directory owner-owned while files below it
+# are root-owned; this check passes and the operator still gets the raw
+# EACCES. The deep alternative (`find ! -user`) closes that gap but walks
+# every one of ~83,000 entries on a clean tree, on every build, to catch a
+# case that only arises from mixing build users mid-tree. If the deep
+# version is ever wanted, it belongs here, behind the same call sites.
+assert_build_artifacts_owned() {
+  local src_dir="$1" owner="$2"
+  local p p_owner
+  local -a offenders=() offender_paths=()
+
+  while IFS= read -r p; do
+    p_owner="$(stat -c %U "$p" 2>/dev/null || echo '<unknown>')"
+    if [ "$p_owner" != "$owner" ]; then
+      offenders+=("  ${p}  (owned by '${p_owner}')")
+      offender_paths+=("$p")
+    fi
+  done < <(_build_artifact_paths "$src_dir")
+
+  [ "${#offender_paths[@]}" -eq 0 ] && return 0
+
+  # One command that fixes every offending path at once — an operator
+  # should not have to run this five times.
+  local fix="sudo chown -R ${owner}: ${offender_paths[*]}"
+
+  die "Refusing to build: the source checkout contains build artifacts owned by another user.
+
+The build runs as '${owner}' (the owner of ${src_dir}), but these paths are not:
+$(printf '%s\n' "${offenders[@]}")
+
+Almost always this means the install was done with an older version of
+these scripts, which built as root. The build cannot replace files it does
+not own, and would fail part-way through with a bare
+\"EACCES: permission denied, unlink ...\" from inside pnpm.
+
+Fix it with one command, then re-run this script:
+  ${fix}
+
+(This is NOT the git-metadata refusal, which reports \"Cannot read git
+state\" and concerns .git rather than build output. If you hit that one
+too, its own message names the command for it.)"
+}
+
+# _modules_recorded_store MODULES_YAML -> prints the store path pnpm recorded
+#
+# pnpm has written this file as JSON (v9) and as YAML (older versions), so
+# both shapes are tried rather than depending on either. On Linux — the
+# only platform these scripts support — a store path contains no character
+# JSON escapes, so the extracted value needs no unescaping.
+_modules_recorded_store() {
+  local f="$1"
+  {
+    sed -n 's/.*"storeDir"[[:space:]]*:[[:space:]]*"\(.*\)".*/\1/p' "$f"
+    sed -n 's/^[[:space:]]*storeDir:[[:space:]]*\(.*\)$/\1/p' "$f"
+  } 2>/dev/null | head -1
+}
+
+# assert_modules_store_matches SRC_DIR OWNER
+#
+# Refuses when node_modules was created against a DIFFERENT pnpm store than
+# the one the build user will use.
+#
+# This is a genuinely separate condition from assert_build_artifacts_owned,
+# not a stricter version of it, and the difference is not theoretical — it
+# is what CI hit. `node_modules/.modules.yaml` records the store the
+# creating user's pnpm used. A build performed as root records root's
+# store; the build now runs as the checkout's owner, whose store is a
+# different path entirely. pnpm treats that as a modules directory it did
+# not create and wants to remove and reinstall it from scratch.
+#
+# Crucially, repairing OWNERSHIP does not repair this. An operator who
+# follows the ownership refusal and runs the chown ends up with a tree they
+# own, that pnpm still considers foreign — every file readable and writable,
+# and still wrong. So the two checks cannot be merged: one asks "can the
+# build user write these files", the other asks "will pnpm accept this tree
+# at all", and either can hold without the other. This also covers the case
+# the shallow ownership check documents as its blind spot (a root build into
+# an already-owner-owned node_modules), because .modules.yaml records the
+# store regardless of who owns which directory.
+#
+# Why refuse instead of letting pnpm decide: measured directly against
+# pnpm 9.15.0 with a foreign storeDir and no terminal — plain `pnpm install
+# --frozen-lockfile` prints its confirmation prompt, installs NOTHING, and
+# exits 0, so the run fails several steps later as a misleading
+# "Cannot find module ..." instead of at the real cause. Both `CI=true` and
+# `--config.confirmModulesPurge=false` avoid that by silently WIPING the
+# modules directory and reinstalling — an unattended destructive action, a
+# different bad outcome rather than a fix. pnpm offers no "refuse if the
+# tree is foreign" mode, so the loud failure has to be this check, before
+# pnpm is invoked at all.
+assert_modules_store_matches() {
+  local src_dir="$1" owner="$2"
+  local modules_yaml="${src_dir}/node_modules/.modules.yaml"
+
+  # No modules tree yet (a fresh clone) — nothing to be foreign.
+  [ -f "$modules_yaml" ] || return 0
+
+  local recorded expected
+  recorded="$(_modules_recorded_store "$modules_yaml")"
+  # Unreadable or an unrecognised shape: say so rather than assuming it is
+  # fine. A skip that looks like a pass is the failure mode this whole
+  # check exists to remove.
+  [ -n "$recorded" ] || die "Refusing to build: ${modules_yaml} exists but no pnpm store path could be read from it.
+
+That file records which pnpm store the existing node_modules was built
+against. Without it there is no way to tell whether the build user's pnpm
+will accept this tree or silently decline to install into it.
+
+Remove the modules directories and let the build recreate them:
+  $(_modules_removal_command "$src_dir" )"
+
+  if ! expected="$(run_as_src_owner "$src_dir" pnpm -C "$src_dir" store path 2>/dev/null | tr -d '\r' | tail -1)"; then
+    expected=""
+  fi
+  [ -n "$expected" ] || die "Refusing to build: could not determine which pnpm store '${owner}' would use ('pnpm store path' failed).
+
+The existing node_modules was built against:
+  ${recorded}
+
+Without the build user's own store path there is no way to tell whether
+pnpm will accept that tree. Fix pnpm for '${owner}' (corepack must be able
+to provide the pinned version), then re-run this script."
+
+  [ "$recorded" = "$expected" ] && return 0
+
+  die "Refusing to build: the existing node_modules belongs to a different pnpm store.
+
+  recorded in ${modules_yaml}:
+    ${recorded}
+  store that '${owner}' will use:
+    ${expected}
+
+Almost always this means the install was done with an older version of
+these scripts, which built as root and therefore recorded root's store.
+The build now runs as '${owner}'.
+
+Changing ownership does NOT fix this — a chown makes the files writable
+but leaves the tree one pnpm still considers foreign. Left alone, pnpm
+would either wipe the directory unattended or install nothing at all and
+let the build fail later with a misleading \"Cannot find module ...\".
+
+Remove the modules directories and re-run this script; the build recreates
+them against the correct store:
+  $(_modules_removal_command "$src_dir")
+
+(This is NOT the artifact-ownership refusal, which reports \"build
+artifacts owned by another user\" and is fixed with chown, nor the
+git-metadata one, which reports \"Cannot read git state\".)"
+}
+
+# _modules_removal_command SRC_DIR -> the one command that clears every
+# modules directory this build would use. Printed, never run: this script
+# refuses and instructs, it does not delete an operator's files.
+_modules_removal_command() {
+  local src_dir="$1"
+  local -a mod_dirs=()
+  while IFS= read -r p; do
+    case "$p" in */node_modules) mod_dirs+=("$p") ;; esac
+  done < <(_build_artifact_paths "$src_dir")
+  [ "${#mod_dirs[@]}" -eq 0 ] && { printf 'sudo rm -rf %s/node_modules' "$src_dir"; return 0; }
+  printf 'sudo rm -rf %s' "${mod_dirs[*]}"
+}
+
+# git_as_owner SRC_DIR GIT_ARGS...
+#
+# Every git command these scripts run against the checkout goes through
+# here. Running git under sudo writes root-owned objects into .git and
+# rewrites .git/index as root, after which the admin's own plain `git
+# fetch` in that checkout fails with EACCES — cumulative damage that
+# survives the upgrade, so it is prevented at the source rather than
+# cleaned up afterwards.
+git_as_owner() {
+  local dir="$1"; shift
+  run_as_src_owner "$dir" git -C "$dir" "$@"
+}
+
 # wait_for_health URL [max_tries]
+#
+# Polls until the endpoint reports status "ok". HTTP 200 alone is NOT
+# enough: /api/v1/health answers 200 with {"status":"degraded"} when its
+# database or Redis check fails — see apps/api/src/health/health.controller.ts,
+# which has no status-code override — so the old `r.ok` test happily passed
+# a release that had cut over but could not reach Redis, and the caller
+# printed success over it. Requiring status "ok" means a degraded boot
+# times out here and takes the caller's failure path (rollback, for
+# upgrade-native.sh) instead of being reported as a successful upgrade.
 wait_for_health() {
   local url="$1" tries=0 max="${2:-60}"
-  until node -e "fetch('$url').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; do
+  until node -e "fetch('$url').then(r=>r.ok?r.json():Promise.reject(new Error('http '+r.status))).then(b=>process.exit(b.status==='ok'?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; do
     tries=$((tries + 1))
     if [ "$tries" -ge "$max" ]; then
       return 1
@@ -37,11 +325,38 @@ wait_for_health() {
 # copied in by hand or the deployed API boots with missing modules. Also
 # builds the two static frontends and regenerates the Prisma client in
 # place.
+# Ownership: every step that reads or writes the SOURCE CHECKOUT — the git
+# read that names the release, pnpm install, and every build — runs as the
+# checkout's owner, never as root (see src_owner()). Before this split the
+# whole build ran under the caller's sudo and left root-owned node_modules/
+# and dist/ behind in the checkout, which then broke the admin's own git
+# commands there. Only the release directory's creation and its handover
+# chown stay privileged, and both live outside the checkout.
 build_release() {
   local src_dir="$1" releases_dir="$2"
-  local release_id
-  release_id="$(date -u +%Y%m%d%H%M%S)-$(cd "$src_dir" && git rev-parse --short HEAD 2>/dev/null || echo nogit)"
+  local release_id owner
+  owner="$(src_owner "$src_dir")"
+
+  # Backstop, so no caller can skip it — install-native.sh reaches this
+  # without any check of its own, and its header advertises being safe to
+  # re-run, which is exactly how a checkout built by the older root-mode
+  # scripts gets here. upgrade-native.sh ALSO calls this directly, much
+  # earlier, so that its operator gets the refusal before a backup is
+  # taken rather than from inside a command substitution here.
+  assert_build_artifacts_owned "$src_dir" "$owner"
+  # Separate condition, separate message — see assert_modules_store_matches.
+  # Runs before pnpm is invoked, because pnpm's own behaviour on a foreign
+  # tree is either a silent no-op or an unattended wipe, never a useful error.
+  assert_modules_store_matches "$src_dir" "$owner"
+
+  release_id="$(date -u +%Y%m%d%H%M%S)-$(git_as_owner "$src_dir" rev-parse --short HEAD 2>/dev/null || echo nogit)"
   local release_dir="${releases_dir}/${release_id}"
+
+  # Created here, and handed to the build user, because the unprivileged
+  # build phase below writes the deployed tree straight into it. The caller
+  # chowns it to the app user the moment this returns, exactly as before.
+  mkdir -p "$release_dir"
+  [ "$owner" = "$(id -un)" ] || chown "$owner" "$release_dir"
 
   # The whole block's stdout is redirected to stderr: build_release()'s
   # return value is the release path, returned via `$(build_release ...)`
@@ -50,8 +365,62 @@ build_release() {
   # instead of the path, corrupting every later use of $RELEASE_DIR. This
   # keeps the build fully visible in the terminal while keeping stdout
   # clean for the one `printf` below that's the actual return channel.
-  (
-    cd "$src_dir" || exit 1
+  #
+  # `|| build_status=$?` rather than `if ! ...; then build_status=$?`, for
+  # the reason upgrade-native.sh's sync step documents at length: `!`
+  # negates the status before `$?` is read, collapsing every failure to 0.
+  #
+  # BOTH branches go through a fresh `bash -c`, including the one that does
+  # not change user — that is load-bearing, not redundancy. errexit is
+  # suppressed for a command whose status is being tested, and `||` here is
+  # exactly that, so `set -e` inside _build_in_checkout would NOT fire if it
+  # ran in this same shell: a failing `pnpm install` would fall straight
+  # through the remaining build steps and report status 0. Verified both
+  # ways before relying on it. A separate `bash` process starts with its own
+  # shell options, so the suppression cannot cross into it and the first
+  # failing step aborts the build with its real status.
+  local build_status=0
+  if [ "$owner" = "$(id -un)" ]; then
+    # shellcheck disable=SC2016  # deliberate: $1/$2/$3 are expanded by the
+    # INNER bash from the positional args passed after it, not out here.
+    bash -c '. "$1"; _build_in_checkout "$2" "$3"' \
+      _ "$LIB_SH" "$src_dir" "$release_dir" >&2 || build_status=$?
+  else
+    # shellcheck disable=SC2016  # same reason as above.
+    runuser -u "$owner" -- bash -c '. "$1"; _build_in_checkout "$2" "$3"' \
+      _ "$LIB_SH" "$src_dir" "$release_dir" >&2 || build_status=$?
+  fi
+
+  if [ "$build_status" -ne 0 ]; then
+    # Only removes it if it is still EMPTY — a partially built release is
+    # left in place for inspection, as before. Without this, the mkdir
+    # hoisted above would litter an empty, validly-named release directory
+    # on every failed build.
+    rmdir "$release_dir" 2>/dev/null || true
+    return "$build_status"
+  fi
+
+  printf '%s' "$release_dir"
+}
+
+# _build_in_checkout SRC_DIR RELEASE_DIR
+#
+# The unprivileged half of build_release(): everything that touches the
+# source checkout. Never call this directly — build_release() runs it as
+# the checkout's owner. It is a top-level function (rather than an inline
+# subshell) only because `runuser ... bash -c` has to re-source this file
+# to reach it.
+#
+# The body is a `( ... )` subshell, so `set -e` and `cd` stay contained:
+# errexit is SUPPRESSED in build_release()'s own call context (it is
+# invoked as `x=$(build_release ...) || die`, and bash exempts commands
+# whose status is being tested), so it is re-armed explicitly here — every
+# step below must abort the build on failure rather than falling through
+# to a half-built release.
+_build_in_checkout() (
+    set -e
+    local src_dir="$1" release_dir="$2"
+    cd "$src_dir"
     # openestate.env (sourced by the caller before this runs, so the
     # deployed app gets NODE_ENV=production at runtime) must not leak into
     # the build: pnpm treats NODE_ENV=production as "skip devDependencies,"
@@ -61,7 +430,13 @@ build_release() {
     # service, never on the build that produces it.
     unset NODE_ENV
     log "Installing workspace dependencies..."
-    pnpm install --frozen-lockfile
+    # stdin closed deliberately, as belt-and-braces rather than as the fix:
+    # assert_modules_store_matches() above already refuses the state that
+    # makes pnpm prompt. If pnpm ever prompts for some other reason, a
+    # closed stdin turns it into an immediate failure instead of a build
+    # that hangs forever on a real operator's terminal waiting for a
+    # keystroke nobody is there to press.
+    pnpm install --frozen-lockfile < /dev/null
 
     log "Building packages in dependency order..."
     pnpm --filter @openestate/db generate
@@ -75,8 +450,6 @@ build_release() {
     export VITE_API_URL=""
     pnpm --filter @openestate/web build
     pnpm --filter @openestate/portal build
-
-    mkdir -p "$release_dir"
 
     log "Deploying API as a standalone production tree..."
     pnpm --filter @openestate/api deploy --prod "${release_dir}/api"
@@ -109,18 +482,4 @@ build_release() {
 
     cp -r apps/web/dist "${release_dir}/web"
     cp -r apps/portal/dist "${release_dir}/portal"
-  ) >&2
-  local build_status=$?
-  # Explicit check, not reliance on `set -e` propagating through this
-  # subshell: build_release() is called as `x=$(build_release ...) || die`,
-  # and bash disables errexit for commands whose exit status is itself
-  # being tested (POSIX "commands run for their status aren't subject to
-  # -e") — that suppression was observed to leak into this subshell too,
-  # letting a failed build silently fall through to the `printf` below and
-  # report success. Checking $? explicitly here doesn't depend on that.
-  if [ "$build_status" -ne 0 ]; then
-    return "$build_status"
-  fi
-
-  printf '%s' "$release_dir"
-}
+)
