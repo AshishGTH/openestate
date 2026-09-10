@@ -82,6 +82,12 @@ log "Source checkout ${SRC_DIR} is owned by '${SRC_OWNER}' — git and build ste
 # that do not check for themselves (install-native.sh). The second call is
 # a silent no-op whenever this one passed.
 assert_build_artifacts_owned "$SRC_DIR" "$SRC_OWNER"
+# The second, independent inherited-state condition: a modules tree
+# built against a different user's pnpm store. Ownership and store
+# identity can each be wrong without the other — an operator who runs
+# the chown above still has a tree pnpm considers foreign — so this is
+# a separate check with its own message, not a stricter version of it.
+assert_modules_store_matches "$SRC_DIR" "$SRC_OWNER"
 
 # ---------------------------------------------------------------------
 # Decide WHAT to build, and refuse rather than guess. All of this runs

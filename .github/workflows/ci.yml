@@ -729,15 +729,54 @@ jobs:
       #
       # Every real install done with the older scripts needs this same
       # one-time repair; that is the transition this job reproduces.
-      - name: Repair the baseline install's root-owned build artifacts
+      - name: Clear the baseline install's modules directories
         run: |
           set -euo pipefail
+          # The baseline install above ran the PRE-FIX install-native.sh,
+          # which built as root. That leaves two independent problems, and
+          # this step is the operator applying the remedy the script's own
+          # refusals instruct:
+          #
+          #   1. root-owned build artifacts the new build user cannot
+          #      replace -> chown, and
+          #   2. a node_modules built against ROOT's pnpm store, which the
+          #      build user's pnpm treats as foreign and refuses to install
+          #      into (it either no-ops and lets the build fail later with a
+          #      misleading "Cannot find module ...", or wipes the tree
+          #      unattended).
+          #
+          # (2) is not fixed by (1) — a chown makes the files writable and
+          # leaves the tree just as foreign — so the remedy for the modules
+          # directories is removal, not ownership repair. Removing them
+          # subsumes the chown for those paths, and the build recreates them
+          # against the correct store.
+          #
+          # Uses the script's own _build_artifact_paths(), so CI can never
+          # act on a different set than the checks inspect.
+          #
+          # NOTE FOR WHOEVER READS THIS NEXT: with this step in place, this
+          # job no longer reproduces the inherited-artifacts state end to
+          # end — it repairs it and then exercises the upgrade. The two
+          # refusals themselves are proved by native-upgrade-refspec (cases
+          # 6 and 7), which can construct those states without an install.
+          # This job's value is the FULL transition afterwards: build,
+          # migrate, cutover, healthcheck and the permission-delivery
+          # assertions. Do not delete this step expecting the refusals to
+          # still be covered here; they are not.
           . deploy/native/lib.sh
-          mapfile -t artifact_paths < <(_build_artifact_paths "$GITHUB_WORKSPACE")
-          echo "Repairing ${#artifact_paths[@]} artifact path(s) to 'runner':"
-          printf '  %s\n' "${artifact_paths[@]}"
-          if [ "${#artifact_paths[@]}" -gt 0 ]; then
-            sudo chown -R runner: "${artifact_paths[@]}"
+          mapfile -t modules_dirs < <(_build_artifact_paths "$GITHUB_WORKSPACE" | grep '/node_modules$' || true)
+          echo "Removing ${#modules_dirs[@]} modules directory(ies):"
+          printf '  %s\n' "${modules_dirs[@]}"
+          if [ "${#modules_dirs[@]}" -gt 0 ]; then
+            sudo rm -rf "${modules_dirs[@]}"
+          fi
+          # Any remaining root-owned artifacts (dist/, .turbo/, tsbuildinfo)
+          # are still unwritable by the build user, so they get the chown the
+          # ownership refusal asks for.
+          mapfile -t rest < <(_build_artifact_paths "$GITHUB_WORKSPACE" || true)
+          if [ "${#rest[@]}" -gt 0 ]; then
+            echo "Chowning ${#rest[@]} remaining artifact path(s) to 'runner'"
+            sudo chown -R runner: "${rest[@]}"
           fi
 
       - name: Run upgrade-native.sh
@@ -985,7 +1024,7 @@ jobs:
           [ "$differs" -eq 0 ] || exit 1
           echo "All $(ls "$GITHUB_WORKSPACE"/deploy/native/*.sh | wc -l) deploy/native scripts are byte-identical to the workspace."
 
-      - name: Drive upgrade-native.sh's ref decision (6 cases)
+      - name: Drive upgrade-native.sh's ref decision + inherited-state refusals (7 cases)
         run: |
           set -euo pipefail
 
@@ -1037,7 +1076,7 @@ jobs:
           head_sha() { git -C "$REFSPEC_WORK" rev-parse HEAD; }
 
           # ---------------------------------------------------------------
-          CASE="1/6 — no --ref, detached HEAD"
+          CASE="1/7 — no --ref, detached HEAD"
           EXPECTED="checkout detached at ${REFSPEC_BASE_SHA} (no branch, so no upstream to compare against); the script must REFUSE rather than rebuild whatever is checked out"
           git -C "$REFSPEC_WORK" checkout --quiet --detach "$REFSPEC_BASE_SHA"
           run_upgrade
@@ -1048,7 +1087,7 @@ jobs:
           echo "PASS ${CASE}"
 
           # ---------------------------------------------------------------
-          CASE="2/6 — no --ref, branch behind upstream"
+          CASE="2/7 — no --ref, branch behind upstream"
           EXPECTED="local branch main at ${REFSPEC_BASE_SHA}, one commit behind origin/main (${REFSPEC_UPSTREAM_TIP}); the script must REFUSE — this is the state that caused the original incident"
           git -C "$REFSPEC_WORK" checkout --quiet main
           git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_BASE_SHA"
@@ -1060,7 +1099,7 @@ jobs:
           echo "PASS ${CASE}"
 
           # ---------------------------------------------------------------
-          CASE="3/6 — --ref with a tag"
+          CASE="3/7 — --ref with a tag"
           EXPECTED="checkout moved ahead to ${REFSPEC_UPSTREAM_TIP} first, then --ref v-refspec-test (a tag at ${REFSPEC_BASE_SHA}); the script must resolve the tag and check it out, i.e. move HEAD BACKWARD to the tag"
           git -C "$REFSPEC_WORK" checkout --quiet main
           git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_UPSTREAM_TIP"
@@ -1076,7 +1115,7 @@ jobs:
           echo "PASS ${CASE}"
 
           # ---------------------------------------------------------------
-          CASE="4/6 — --ref with a branch that is behind its upstream"
+          CASE="4/7 — --ref with a branch that is behind its upstream"
           EXPECTED="local branch main at ${REFSPEC_BASE_SHA}, behind origin/main (${REFSPEC_UPSTREAM_TIP}); --ref main must resolve through origin/main to the REMOTE tip, not build the stale local branch"
           git -C "$REFSPEC_WORK" checkout --quiet main
           git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_BASE_SHA"
@@ -1090,7 +1129,7 @@ jobs:
           echo "PASS ${CASE}"
 
           # ---------------------------------------------------------------
-          CASE="5/6 — dirty working tree"
+          CASE="5/7 — dirty working tree"
           EXPECTED="local branch main up to date with origin/main, but with an uncommitted change to a TRACKED file; the script must REFUSE, because a release built from it would not correspond to any commit"
           git -C "$REFSPEC_WORK" checkout --quiet main
           git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_UPSTREAM_TIP"
@@ -1107,7 +1146,7 @@ jobs:
           # Not a ref case — an ownership one, covered here because it is the
           # other refusal that must fire before anything is built, and this
           # is the only job that can construct it without a real install.
-          CASE="6/6 — inherited root-owned build artifacts"
+          CASE="6/7 — inherited root-owned build artifacts"
           EXPECTED="clean, up-to-date checkout owned by 'runner', but containing a ROOT-owned node_modules/ — the state an install performed with the older root-building scripts leaves behind; the script must REFUSE up front rather than fail part-way through the build with a raw EACCES"
           git -C "$REFSPEC_WORK" checkout --quiet main
           git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_UPSTREAM_TIP"
@@ -1125,5 +1164,33 @@ jobs:
           if [ -n "${REFSPEC_WORK:-}" ]; then sudo rm -rf "${REFSPEC_WORK}/node_modules"; fi
           echo "PASS ${CASE}"
 
+          # ---------------------------------------------------------------
+          # The second inherited-state condition, and deliberately built so
+          # the FIRST one cannot fire: node_modules is owned by 'runner', so
+          # the ownership check passes cleanly, and only the store recorded
+          # in .modules.yaml is foreign. That is what makes these two
+          # genuinely independent checks rather than one in two places — and
+          # it is the exact state an operator reaches by following the
+          # ownership refusal's chown advice, which repairs permissions and
+          # leaves the tree just as foreign to pnpm.
+          CASE="7/7 — node_modules built against another user's pnpm store"
+          EXPECTED="clean, up-to-date checkout with a RUNNER-owned node_modules (so the ownership check passes) whose .modules.yaml records a root-owned pnpm store; the script must REFUSE with the store message, not the ownership one"
+          git -C "$REFSPEC_WORK" checkout --quiet main
+          git -C "$REFSPEC_WORK" reset --hard --quiet "$REFSPEC_UPSTREAM_TIP"
+          mkdir -p "$REFSPEC_WORK/node_modules"
+          printf '{\n  "storeDir": "/root/.local/share/pnpm/store/v3",\n  "virtualStoreDir": "%s/node_modules/.pnpm"\n}\n' \
+            "$REFSPEC_WORK" > "$REFSPEC_WORK/node_modules/.modules.yaml"
+          run_upgrade
+          assert_script_under_test_ran
+          [ "$RC" -ne 0 ] || fail "expected a non-zero exit (a refusal), got 0. A modules tree from another user's store makes pnpm either install nothing (and the build fail later with a misleading module-not-found) or wipe the directory unattended."
+          grep -q "belongs to a different pnpm store" "$OUT" || fail \
+            "exited ${RC}, but not with the foreign-store refusal. Expected output matching \"belongs to a different pnpm store\"."
+          if grep -q "build artifacts owned by another user" "$OUT"; then fail \
+            "the ARTIFACT-OWNERSHIP refusal fired instead of the store one. node_modules was created owner-owned precisely so it would not — if this fires, the two checks are no longer independent and this case is no longer testing what it claims."; fi
+          grep -q "sudo rm -rf" "$OUT" || fail \
+            "the refusal fired but did not print a removal command. Chown is NOT the remedy here; the message must tell the operator to remove the modules directories."
+          if [ -n "${REFSPEC_WORK:-}" ]; then rm -rf "${REFSPEC_WORK}/node_modules"; fi
+          echo "PASS ${CASE}"
+
           echo ""
-          echo "All 6 cases passed against the real upgrade-native.sh."
+          echo "All 7 cases passed against the real upgrade-native.sh."
