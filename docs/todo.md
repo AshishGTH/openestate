@@ -485,6 +485,10 @@ this note once it has a real, tested effect.
   tokens.** Limited impact: login separately refuses inactive accounts.
 - **`PasswordReset.consumedAt` now means either "used" or "superseded by a
   newer link"** — the table can't tell them apart; needs a `supersededAt` column.
+- **A used, an expired, and a superseded reset token all produce the same
+  "Invalid or expired reset token" message**, so an admin can't tell a
+  customer why their link failed. Distinguishing them needs the
+  `supersededAt` column above.
 - **`AuthService.confirmPasswordReset` doesn't check `User.isActive`.**
 - **`password_resets.created_by_id` has no foreign key to `users`**, while
   `portal_password_resets.created_by_id` (added for admin-issued portal
@@ -494,6 +498,11 @@ this note once it has a real, tested effect.
   reset links**, though an admin-issued link does supersede pending
   self-service ones. Asymmetric by omission, not design: the processor was
   deliberately left unmodified when admin-issued portal links were added.
+- **Portal invites don't supersede each other**: re-sending an invite
+  leaves every earlier invite link live for its full multi-day expiry
+  (`INVITE_EXPIRY_DAYS`). Reset links supersede; invites don't.
+  Pre-existing and out of scope for the reset-link work, but the asymmetry
+  deserves a deliberate decision rather than staying an accident.
 
 ## Portal (Phase 6)
 
@@ -733,6 +742,17 @@ seems like the safer default (a closed lead shouldn't resurrect via a
 side effect of logging a call), but nobody has actually asked for
 either behavior — this is speculative, not SOP-mandated. Whoever
 changes it should decide deliberately, not fix it as a "bug."
+
+## `UserForm` wipes anything typed before the user record finishes loading
+
+`apps/web/src/pages/admin/UserForm.tsx` calls `reset()` once the user,
+roles and users-list queries have all arrived, and that overwrites every
+field — so anything an admin types into the edit form before then is
+silently lost. Pre-existing. Surfaced by a flaky `user-role-edit.spec.ts`
+(it typed the new name the moment the URL matched; the role, picked
+later, survived and the name didn't), and worked around in the spec by
+waiting for the form to be populated — not fixed in the app. A real
+admin on a slow connection hits the same thing.
 
 ## `apps/e2e`'s CI job has a real, pre-existing intermittent flakiness under concurrency — found while shipping the pre-sales reporting suite, not caused by it
 

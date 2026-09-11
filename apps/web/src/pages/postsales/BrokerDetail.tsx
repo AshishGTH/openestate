@@ -13,7 +13,7 @@ import {
 import { api, downloadFile, type ApiError } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 import { useAuth } from '../../lib/auth';
-import RevealedResetLink from '../../components/RevealedResetLink';
+import RevealedResetLink, { ResetLinkSupersedeNote } from '../../components/RevealedResetLink';
 
 interface Broker {
   id: string;
@@ -354,6 +354,7 @@ export default function BrokerDetail() {
               {resettingPortalPassword ? 'Generating…' : 'Reset portal password'}
             </button>
           </div>
+          <ResetLinkSupersedeNote />
           {inviteLink && (
             <RevealedResetLink url={inviteLink.url} expiresAt={inviteLink.expiresAt} onDismiss={() => setInviteLink(null)} />
           )}

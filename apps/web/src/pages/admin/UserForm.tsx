@@ -16,7 +16,7 @@ import {
 import { api } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 import { useAuth } from '../../lib/auth';
-import RevealedResetLink from '../../components/RevealedResetLink';
+import RevealedResetLink, { ResetLinkSupersedeNote } from '../../components/RevealedResetLink';
 
 interface Role {
   id: string;
@@ -278,7 +278,10 @@ export default function UserForm() {
         </div>
       </form>
 
-      {isEdit && hasPermission(PERMISSIONS.ADMIN_USER_UPDATE) && (
+      {/* Gated on the loaded record, like the reset() effect above: until it
+          arrives isPortalUser reads false, so a portal user's screen would
+          briefly offer the staff button — which the API refuses with a 400. */}
+      {isEdit && existingUser && hasPermission(PERMISSIONS.ADMIN_USER_UPDATE) && (
         <div className="mt-8 rounded-md border border-slate-200 p-4">
           <h2 className="text-sm font-medium text-slate-900">Password</h2>
           {isPortalUser ? (
@@ -301,6 +304,7 @@ export default function UserForm() {
                 Generates a one-time reset link for you to send this user directly. Their current
                 password stays valid until they use it — you never see or set their password directly.
               </p>
+              <ResetLinkSupersedeNote />
               <button
                 type="button"
                 onClick={() => {

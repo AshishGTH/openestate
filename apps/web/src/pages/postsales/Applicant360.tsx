@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { formatInr, forcePasswordResetResponseSchema, NO_PORTAL_ACCOUNT_ERROR, PERMISSIONS } from '@openestate/shared';
 import { api, downloadFile, type ApiError } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
-import RevealedResetLink from '../../components/RevealedResetLink';
+import RevealedResetLink, { ResetLinkSupersedeNote } from '../../components/RevealedResetLink';
 
 interface Applicant {
   id: string;
@@ -260,6 +260,7 @@ export default function Applicant360() {
               {resettingPortalPassword ? 'Generating…' : 'Reset portal password'}
             </button>
           </div>
+          <ResetLinkSupersedeNote />
           {inviteLink && (
             <RevealedResetLink url={inviteLink.url} expiresAt={inviteLink.expiresAt} onDismiss={() => setInviteLink(null)} />
           )}

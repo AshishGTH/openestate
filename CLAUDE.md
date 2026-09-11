@@ -6787,6 +6787,68 @@ fields including IP) checked out against the code as written.
   standing rules are not yet satisfied for this work; a Playwright pass
   is the next step, not a formality after the fact.
 
+### Admin reset links verified in a real browser — two real Copy bugs found and fixed (closes Layer One)
+
+- **Real-browser verification is now DONE for both flows, and this file's
+  browser rule is satisfied for this feature.** `apps/e2e/tests/admin-reset-links.spec.ts`
+  drives staff and portal reset end to end: an admin generates the link
+  in the real UI, the spec reads the URL from the DOM (never the
+  clipboard), a fresh logged-out browser context visits it, sets a
+  password, and logs in as that user; the old password is then refused.
+  It also covers supersede (the earlier link is rejected), the
+  portal-user pointer on UserForm, `NO_PORTAL_ACCOUNT`, and the reveal
+  panel. It runs on its own `resetLinks` fixture company because it
+  changes a portal user's password.
+- **Browser testing found two real bugs that every unit and API test
+  missed, both in code that had already passed review** — both in
+  `RevealedResetLink`'s Copy button:
+  - **`navigator.clipboard` is undefined on non-secure origins**, so Copy
+    threw and did nothing, with no feedback, on the DEFAULT native install
+    (plain HTTP on a LAN address). The feature is "copy this link and send
+    it", and copy did not work on the primary deployment target.
+  - **`writeText` was not awaited**, so "Copied" appeared even when the
+    write failed — an admin would then paste whatever was already on
+    their clipboard, possibly a live reset link for a different customer.
+
+  Both fixed: the write is awaited, success is claimed only on success,
+  and a missing API or a refused write both fall back to selecting the URL
+  text and telling the admin to press Ctrl+C (⌘C on Apple devices) — in
+  neutral, non-alarming text, since nothing is wrong with the link itself.
+  The spec covers both paths: `clipboard-write` is granted (write only,
+  never read) for success, and the Clipboard API is removed before page
+  load for the fallback, asserting the message and that the selection is
+  exactly the URL.
+- **This is another instance of this project's dominant bug class:
+  correct components, wrong composition, invisible to review, found only
+  by real execution.** Each line of the Copy handler was fine in isolation;
+  it was wrong only against the environment it actually ships into.
+- **UserForm's Password section now renders only after the user record
+  loads.** Until then `isPortalUser` read false, so a portal user's screen
+  briefly offered "Generate reset link" — which the API refuses with a 400
+  and a red toast. Gated on the loaded record, the same way the form's
+  `reset()` effect already is; the hydration logic itself is unchanged.
+- **A shared one-sentence warning (`ResetLinkSupersedeNote`) tells admins
+  that generating a new reset link cancels any earlier one**, on UserForm,
+  Applicant360 and BrokerDetail. It deliberately says "reset link", not
+  "link": portal invites do NOT supersede each other (`sendInvite` only
+  inserts), so a generic sentence would have been false on screen. The
+  invite asymmetry itself is logged in `docs/todo.md`.
+- **The e2e harness serves staff and portal on separate origins; production
+  serves both from one.** The spec asserts the generated URL's origin, path
+  and query strictly, then rewrites only the origin to reach the portal dev
+  server. So the harness proves the portal link carries the staff origin
+  and the correct `/portal` path — right for the supported single-origin
+  nginx layout, and it would not hold if the portal were ever hosted
+  separately.
+- Verified: `apps/web` typecheck/lint/build clean; the full Playwright
+  suite 47/47 with no retries; the new spec 6/6 on three consecutive runs
+  (the staff reset-confirm throttle — 5 per 300s, Redis-persisted — is
+  spent at exactly 2 per run, so local back-to-back runs clear the test
+  Redis's `throttle:*` keys first, as CI's fresh Redis does implicitly).
+  `user-role-edit.spec.ts` now waits for the form to populate before
+  typing — a pre-existing `reset()` race this spec's extra worker load
+  surfaced, worked around in the spec and logged in `docs/todo.md`.
+
 ### Uploaded documents plan: owner decisions (2026-09-14)
 
 Plan: `docs/plans/uploaded-documents-plan.md` (revision 2). Documentation
