@@ -1,8 +1,10 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { formatInr } from '@openestate/shared';
-import { api, downloadFile } from '../../lib/api';
+import { formatInr, forcePasswordResetResponseSchema, NO_PORTAL_ACCOUNT_ERROR, PERMISSIONS } from '@openestate/shared';
+import { api, downloadFile, type ApiError } from '../../lib/api';
+import { useAuth } from '../../lib/auth';
+import RevealedResetLink from '../../components/RevealedResetLink';
 
 interface Applicant {
   id: string;
@@ -99,6 +101,7 @@ interface LetterTemplate {
 
 export default function Applicant360() {
   const { applicantId } = useParams<{ applicantId: string }>();
+  const { hasPermission } = useAuth();
   const [selectedBookingId, setSelectedBookingId] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery<ThreeSixty>({
@@ -136,24 +139,60 @@ export default function Applicant360() {
   const templatesFor = (entityType: string) => templatesRes?.data?.filter((t) => t.entityType === entityType) ?? [];
 
   const [inviteChannel, setInviteChannel] = useState<'EMAIL' | 'SMS'>('EMAIL');
-  const [inviteLink, setInviteLink] = useState('');
+  const [inviteLink, setInviteLink] = useState<{ url: string; expiresAt: string } | null>(null);
   const [inviteError, setInviteError] = useState('');
   const [sendingInvite, setSendingInvite] = useState(false);
 
   async function sendPortalInvite() {
     setInviteError('');
-    setInviteLink('');
+    setInviteLink(null);
     setSendingInvite(true);
     try {
-      const res = await api<{ inviteId: string; token: string }>('/admin/portal-invites', {
+      const res = await api<{ inviteId: string; token: string; expiresAt: string }>('/admin/portal-invites', {
         method: 'POST',
         body: JSON.stringify({ applicantId, channel: inviteChannel }),
       });
-      setInviteLink(`${window.location.origin}/portal/invite/${res.inviteId}?token=${res.token}`);
+      setInviteLink({
+        url: `${window.location.origin}/portal/invite/${res.inviteId}?token=${res.token}`,
+        expiresAt: res.expiresAt,
+      });
     } catch (err) {
       setInviteError((err as Error).message);
     } finally {
       setSendingInvite(false);
+    }
+  }
+
+  // ── Portal password reset ──
+  const [resettingPortalPassword, setResettingPortalPassword] = useState(false);
+  const [portalResetLink, setPortalResetLink] = useState<{ url: string; expiresAt: string } | null>(null);
+  const [portalResetError, setPortalResetError] = useState('');
+  const [portalNoAccount, setPortalNoAccount] = useState(false);
+
+  async function resetPortalPassword() {
+    setPortalResetError('');
+    setPortalResetLink(null);
+    setPortalNoAccount(false);
+    setResettingPortalPassword(true);
+    try {
+      const res = await api<{ token: string; expiresAt: string }>('/admin/portal-password-resets', {
+        method: 'POST',
+        body: JSON.stringify({ applicantId }),
+      });
+      const parsed = forcePasswordResetResponseSchema.parse(res);
+      setPortalResetLink({
+        url: `${window.location.origin}/portal/reset-password?token=${parsed.token}`,
+        expiresAt: parsed.expiresAt,
+      });
+    } catch (err) {
+      const apiErr = err as ApiError;
+      if (apiErr.status === 409 && apiErr.body?.code === NO_PORTAL_ACCOUNT_ERROR) {
+        setPortalNoAccount(true);
+      } else {
+        setPortalResetError(apiErr.message);
+      }
+    } finally {
+      setResettingPortalPassword(false);
     }
   }
 
@@ -199,25 +238,43 @@ export default function Applicant360() {
         {applicant.city && <span>{applicant.city}</span>}
       </div>
 
-      <div className="mt-3 flex items-center gap-2">
-        <select value={inviteChannel} onChange={(e) => setInviteChannel(e.target.value as 'EMAIL' | 'SMS')} className="rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-          <option value="EMAIL">Email</option>
-          <option value="SMS">SMS</option>
-        </select>
-        <button
-          onClick={sendPortalInvite}
-          disabled={sendingInvite}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-        >
-          {sendingInvite ? 'Sending…' : 'Send Portal Invite'}
-        </button>
-      </div>
-      {inviteLink && (
-        <p className="mt-1 text-xs text-slate-500 break-all">
-          Invite link (delivery via {inviteChannel} is not configured on this install — share manually): {inviteLink}
-        </p>
+      {hasPermission(PERMISSIONS.ADMIN_PORTAL_INVITE_SEND) && (
+        <div className="mt-3">
+          <div className="flex items-center gap-2">
+            <select value={inviteChannel} onChange={(e) => setInviteChannel(e.target.value as 'EMAIL' | 'SMS')} className="rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+              <option value="EMAIL">Email</option>
+              <option value="SMS">SMS</option>
+            </select>
+            <button
+              onClick={sendPortalInvite}
+              disabled={sendingInvite}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {sendingInvite ? 'Sending…' : 'Send Portal Invite'}
+            </button>
+            <button
+              onClick={resetPortalPassword}
+              disabled={resettingPortalPassword}
+              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {resettingPortalPassword ? 'Generating…' : 'Reset portal password'}
+            </button>
+          </div>
+          {inviteLink && (
+            <RevealedResetLink url={inviteLink.url} expiresAt={inviteLink.expiresAt} onDismiss={() => setInviteLink(null)} />
+          )}
+          {inviteError && <p className="mt-1 text-xs text-red-600">{inviteError}</p>}
+          {portalResetLink && (
+            <RevealedResetLink url={portalResetLink.url} expiresAt={portalResetLink.expiresAt} onDismiss={() => setPortalResetLink(null)} />
+          )}
+          {portalNoAccount && (
+            <p className="mt-1 text-xs text-slate-600">
+              This person doesn&apos;t have a portal account yet — use Send Portal Invite above first.
+            </p>
+          )}
+          {portalResetError && <p className="mt-1 text-xs text-red-600">{portalResetError}</p>}
+        </div>
       )}
-      {inviteError && <p className="mt-1 text-xs text-red-600">{inviteError}</p>}
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <section className="rounded-lg border border-slate-200 bg-white p-4">

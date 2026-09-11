@@ -6718,6 +6718,75 @@ fields including IP) checked out against the code as written.
   been exercised in a real browser yet — the admin UI that shows and
   copies the link is the next step.
 
+### Admin UI for the reset links — a complete URL, not a bare token (builds the UI the entry above deferred)
+
+- **Admins now see the complete reset URL, not a bare token, built at the
+  call site and passed whole into a shared `RevealedResetLink` component.**
+  Deliberately NOT built inside the component: the staff URL
+  (`<origin>/reset-password?token=`) and the portal URL
+  (`<origin>/portal/reset-password?token=`) differ by the `/portal`
+  prefix, and a conditional inside a shared component — "am I rendering
+  for staff or portal this time" — is exactly how a customer eventually
+  gets handed a 404 link. Each caller (`UserForm.tsx`, `Applicant360.tsx`,
+  `BrokerDetail.tsx`) builds its own URL from `window.location.origin`
+  and its own known prefix, and only the finished string crosses into the
+  shared component.
+- **`UsersService.findOne`/`findAll` now select `applicantId`/`brokerId`**
+  so the staff Users screen can tell a portal user from a staff user —
+  neither field was selected before, so the frontend had no way to know.
+  Both endpoints stay gated by `ADMIN_USER_READ`, unchanged.
+- **`UserForm.tsx` hides the reset button entirely for a portal-linked
+  user and links to the applicant or broker record instead**, because the
+  staff force-reset endpoint already refuses a portal user with `400`
+  (see the entry above) — showing the button and letting it fail would be
+  a dead end with no next step. The link goes to
+  `/postsales/applicants/:id` or `/postsales/brokers/:id` (confirmed
+  against `App.tsx`, not guessed), where the real portal-reset action
+  lives.
+- **`NO_PORTAL_ACCOUNT` renders as a calm inline message pointing at the
+  Send Portal Invite control, never as an error.** It is the expected
+  path for anyone who's never been invited, not a failure — red styling
+  or alarming language here would be wrong for the common case. Matched
+  only on the shared `NO_PORTAL_ACCOUNT_ERROR` constant, never on message
+  text.
+- **The applicant and broker portal blocks are now gated client-side by
+  `ADMIN_PORTAL_INVITE_SEND`** — the invite controls had no client-side
+  gate before this (the backend permission check was always the real
+  enforcement; this only stops the button rendering for someone who can't
+  use it). `BrokerDetail.tsx` checks it via the constant
+  (`hasPermission(PERMISSIONS.ADMIN_PORTAL_INVITE_SEND)`), not a string
+  literal like this file's older permission checks (`'admin.broker.update'`,
+  etc.) — a typo in a literal compiles clean and silently hides a
+  control; the constant can't drift from what the backend actually
+  guards. The file's other, pre-existing literal checks were left as-is —
+  fixing the one this feature touches, not unrelated churn.
+- **The existing invite-link display was converted to the same
+  reveal-once component**, replacing plain, no-copy-button text with the
+  Copy affordance — request logic (`sendPortalInvite`) untouched, only
+  how the resulting link is shown. Its real `expiresAt`
+  (`INVITE_EXPIRY_DAYS` — days, not `PasswordReset`'s 30 minutes) is
+  threaded through from the actual API response, confirmed against
+  `PortalAuthService.sendInvite`'s return value rather than assumed.
+- **The panel's relative-expiry line goes stale if left open, and a
+  stale "N minutes from now" about a dead link is worse than none** — an
+  admin mid-call with the customer, tab left open, would otherwise read a
+  reassuring number about a link that already died. Fixed with a
+  30-second `setInterval` recomputing "now" (cleared on unmount) plus an
+  unmistakable expired state that replaces the whole panel body once the
+  moment passes — the clock time (`toLocaleTimeString`) never goes stale
+  on its own, but the interval is still needed to flip the panel into
+  that expired state without a manual re-render. 30s chosen as frequent
+  enough to catch a reset link's 30-minute window promptly, negligible
+  overhead against an invite's multi-day one.
+- **Verification note, stated plainly rather than overstated:** `apps/web`
+  typecheck/lint/build are clean, and `apps/api`'s full suite (614/614,
+  zero skipped) still passes since the only backend change was the
+  additive `select`. **Nothing in this feature — staff or portal, Step 1
+  through this UI — has been exercised in a real browser yet.** This
+  file's own primary lesson and its auth/frontend-request-construction
+  standing rules are not yet satisfied for this work; a Playwright pass
+  is the next step, not a formality after the fact.
+
 ### Uploaded documents plan: owner decisions (2026-09-14)
 
 Plan: `docs/plans/uploaded-documents-plan.md` (revision 2). Documentation

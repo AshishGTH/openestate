@@ -76,6 +76,13 @@ export class UsersService {
           lastLoginAt: true,
           createdAt: true,
           managerId: true,
+          // Portal-linked (customer/broker) users are created via invite-
+          // consume and never through this table's own create/edit forms —
+          // apps/web's Users/UserForm screens use these to redirect a
+          // staff admin to the applicant/broker record instead of a dead
+          // "force password reset" action that the backend would 400 on.
+          applicantId: true,
+          brokerId: true,
           role: { select: { id: true, name: true, slug: true } },
         },
       }),
@@ -190,6 +197,9 @@ export class UsersService {
         createdAt: true,
         updatedAt: true,
         managerId: true,
+        // See the identical comment on findAll's select.
+        applicantId: true,
+        brokerId: true,
         role: { select: { id: true, name: true, slug: true } },
       },
     });
