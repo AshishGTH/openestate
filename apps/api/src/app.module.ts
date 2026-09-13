@@ -24,6 +24,7 @@ import { CommissionModule } from './commission/commission.module';
 import { QueuesModule } from './queues/queues.module';
 import { NotificationModule } from './notifications/notification.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { TwoFactorPendingGuard } from './auth/guards/two-factor-pending.guard';
 import { DefaultThrottlerGuard } from './auth/guards/default-throttler.guard';
 import { TenantContextInterceptor } from './auth/interceptors/tenant-context.interceptor';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
@@ -111,6 +112,15 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
           // PasswordChangeThrottlerGuard's doc comment for why one bucket
           // covers all three routes.
           { name: 'password-change', ttl: 300_000, limit: 5 },
+          // Second-factor attempts on staff and portal totp/verify, per
+          // user (TotpVerifyThrottlerGuard). Same window and limit as
+          // portal-auth, and env-configurable for the same test-harness
+          // reason; unset in a real install it stays 5.
+          {
+            name: 'totp-verify',
+            ttl: 300_000,
+            limit: Number(process.env.TOTP_VERIFY_THROTTLE_LIMIT ?? 5),
+          },
           // Phase 7 commit 2: per-API-key limit, not a global constant —
           // the resolver reads the LeadApiKeyGuard-populated
           // req.leadApiKey (that guard runs first in the route's guard
@@ -163,6 +173,11 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     // route in the app, including staff routes.
     { provide: APP_GUARD, useClass: DefaultThrottlerGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    // Straight after JwtAuthGuard (global guards run in registration
+    // order): a 2FA-pending token is refused on every route except
+    // totp/verify, before CSRF or permissions are even looked at. Global,
+    // so no controller can opt out — see the guard's doc comment.
+    { provide: APP_GUARD, useClass: TwoFactorPendingGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     // Establishes ambient tenant/portal context for the rest of the

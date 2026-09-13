@@ -29,6 +29,9 @@ import { Public } from '../auth/guards/jwt-auth.guard';
 import { PORTAL_CSRF_COOKIE } from '../auth/csrf-cookie-names';
 import { PortalAuthThrottlerGuard } from './portal-throttler.guard';
 import { PasswordChangeThrottlerGuard } from '../auth/guards/password-change-throttler.guard';
+import { RequirePermissions } from '../auth/guards/permissions.guard';
+import { TWO_FACTOR_PENDING_PERMISSION } from '../auth/guards/two-factor-pending.guard';
+import { TotpVerifyThrottlerGuard } from '../auth/guards/totp-verify-throttler.guard';
 
 class PortalLoginDto extends createZodDto(portalLoginSchema) {}
 class PortalInviteConsumeDto extends createZodDto(portalInviteConsumeSchema) {}
@@ -103,7 +106,13 @@ export class PortalAuthController {
     return { accessToken: result.accessToken };
   }
 
-  @UseGuards(PortalAuthThrottlerGuard)
+  // Same as the staff verify: only a 2FA-pending token carries this, so a
+  // full session can't call it, and it's the one portal route a
+  // 2FA-pending token CAN call (TwoFactorPendingGuard).
+  @RequirePermissions(TWO_FACTOR_PENDING_PERMISSION)
+  // Per-IP portal-auth bucket (unchanged) plus the per-user verify bucket
+  // staff verify also uses.
+  @UseGuards(PortalAuthThrottlerGuard, TotpVerifyThrottlerGuard)
   @Post('totp/verify')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify TOTP code after portal login' })

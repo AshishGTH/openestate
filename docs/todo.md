@@ -432,6 +432,43 @@ this note once it has a real, tested effect.
   call — out of Phase 6's approved scope. Unblocked by adding that
   dependency and wiring one shared Redis-backed storage instance for the
   single throttler registration.
+- **`PermissionsGuard` is default-allow: a route with no
+  `@RequirePermissions` lets any valid JWT through without looking at what
+  it carries.** This is the root cause of the 2FA bypass fixed on
+  `fix/temptoken-scope-enforcement`, where a password-only tempToken could
+  strip or take over 2FA through the undecorated `totp/*` routes. That fix
+  (`TwoFactorPendingGuard`) contains the blast radius for the one token
+  that must never act as a session; it does not remove the policy. 19 of
+  317 routes are undecorated today (the self-service routes in `auth/` and
+  `portal-auth/`, plus `GET /company/terminology` and `GET /portal/branding`),
+  and any route added later without a decorator is open to every valid
+  token too. Flipping to default-deny, with an explicit opt-in for "any
+  signed-in user" routes, touches every controller and needs its own
+  branch and its own full testing.
+- **SECURITY-RELEVANT: staff and portal auth aren't bound to their own
+  users.** A pending-2FA token issued by one surface is accepted by the
+  other surface's `totp/verify` — portal verify will issue a staff user a
+  portal-shaped token, and staff verify a portal user a staff-shaped one
+  with no `applicantId`. Separately, staff login resolves users by email
+  without excluding portal-linked users. No privilege escalation was
+  found: portal controllers refuse tokens with no `applicantId` ("Not a
+  customer portal session") and portal refresh refuses staff users. But
+  this is the same shape as the tempToken scope bug — a credential
+  accepted where nobody intended, harmless until some future endpoint
+  makes it harmful. Needs its own analysis.
+- **SECURITY-RELEVANT: one recovery code can be spent twice by two
+  concurrent requests.** `verifyTotp` (staff and portal) consumes a
+  recovery code with a read-then-write — load the array, splice, save — so
+  two simultaneous requests with the same code both find it and both get a
+  session. Pre-existing. The fix is the same shape as `reserveTotpAttempt`
+  (`apps/api/src/auth/totp-lockout.ts`): a single atomic statement that
+  removes the code only if it is still present.
+- **`totp/verify`'s rate limit counts each endpoint separately.** A
+  pending-2FA token is accepted by both the staff and the portal verify
+  endpoint, and the throttler keys each handler on its own, so the
+  per-user 5-per-5-minutes limit allows 10 across the two. The stated
+  budget only holds end to end because the TOTP lockout counter lives on
+  the user row. Remove the lockout and the effective limit doubles.
 
 ## Portal (Phase 6)
 

@@ -144,6 +144,10 @@ model User {
   totpSecret    String?  @map("totp_secret") @db.VarChar(255)
   totpEnabled   Boolean  @default(false) @map("totp_enabled")
   recoveryCodes String[] @map("recovery_codes")
+  // Second-factor lockout, separate from the password lockout below —
+  // apps/api/src/auth/totp-lockout.ts has the why.
+  failedTotpAttempts Int       @default(0) @map("failed_totp_attempts")
+  totpLockedUntil    DateTime? @map("totp_locked_until")
 
   failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
   lockedUntil         DateTime? @map("locked_until")

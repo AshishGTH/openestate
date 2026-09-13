@@ -6399,3 +6399,110 @@ and it wasn't, anywhere.
   column recording an absolute expiry per family (needs a migration, but
   existing rows come in `NULL` and can be read as exempt, so deploying it
   grandfathers every session already open rather than killing them).
+
+### SECURITY: 2FA bypass through the mid-login token, and brute-forceable 2FA codes — both fixed
+
+- **Vulnerability.** When TOTP is on, login returns a tempToken instead of
+  a session, scoped to `permissions: ['auth.totp.verify']` and meant only
+  for `totp/verify`. But `PermissionsGuard` is default-allow: it returns
+  `true` for any route with no `@RequirePermissions`, without ever looking
+  at what the token carries. 19 of 317 routes were undecorated, so a
+  tempToken reached `totp/setup`, `totp/confirm`, `totp/disable`,
+  `change-password`, `force-change-password` and `logout-all`. (It could
+  not read business data directly — all 288 permission-guarded routes
+  still returned 403.)
+- **Impact.** An attacker holding only a valid password could log in, take
+  the tempToken, and within that one login run setup → confirm → verify:
+  enrol their own authenticator, get a full session, take the freshly
+  generated recovery codes, and leave the real owner's authenticator
+  rejected. 2FA gave no protection against the one attacker it exists to
+  stop. Both surfaces — and because staff and portal share a JWT secret, a
+  staff tempToken operated portal endpoints too. Proven with 12 exploit
+  tests that passed against the unfixed code, now flipped into the
+  regression suite `apps/api/test/e2e-temptoken-scope.test.ts`.
+- **Fix shape: a denylist on the token, not an allowlist on routes.**
+  `TwoFactorPendingGuard` is a global guard registered straight after
+  `JwtAuthGuard`. It refuses any token carrying the marker (plain 403, no
+  explanation) on every route except the two verify endpoints — including
+  routes that don't exist yet, so nobody has to remember a decorator. The
+  only escape hatch is `@RequirePermissions(auth.totp.verify)`, and because
+  no role can hold that permission, opening a route to tempTokens closes it
+  to full sessions at the same time. The exception can't quietly become the
+  next hole. Both verify endpoints now require it, so a full session can no
+  longer call verify.
+- **One signer.** The marker string was hand-written in two services and
+  could have drifted, letting the guard miss one surface's tempToken. Both
+  now call `TokenService.signTwoFactorPendingToken`, which sets the marker
+  and the lifetime in one place.
+- **tempToken lifetime cut from 15 minutes to 5.** It had inherited
+  `JWT_ACCESS_EXPIRES_IN` by sharing `signAccessToken`; a per-call
+  `expiresIn` overrides the module default. Five minutes, not less, leaves
+  time to open an authenticator app or find a recovery code. Neither
+  frontend decodes the tempToken — both pass it back as an opaque Bearer —
+  so its payload and lifetime can change freely.
+- **Root cause deliberately not changed here.** `PermissionsGuard`'s
+  default-allow policy is what made this possible. Flipping 288 routes to
+  default-deny is its own branch with its own testing; this fix contains the
+  blast radius for the one token that must never act as a session, and
+  doesn't remove the policy. Recorded in `docs/todo.md`.
+- **Second finding: 2FA codes were brute-forceable on staff.** Staff
+  `totp/verify` had only the default 100-per-minute-per-IP bucket, and
+  failed codes counted toward nothing, while portal verify had a 5-per-5-
+  minutes bucket — a staff/portal mirroring divergence. Both verify
+  endpoints now share `TotpVerifyThrottlerGuard`: 5 attempts per 5 minutes
+  (`TOTP_VERIFY_THROTTLE_LIMIT`), keyed by the verified token's `sub`
+  rather than the client IP. Rotating addresses gains an attacker nothing,
+  and staff behind one office NAT don't share a budget. TOTP and recovery
+  codes spend from the same budget; portal verify also keeps its per-IP
+  bucket.
+- **Lockout: its own counter and lock, not the password lockout's.** New
+  columns `failed_totp_attempts` / `totp_locked_until` (migration
+  `20260914120000_user_totp_lockout`): 5 consecutive failed codes lock the
+  second factor for 5 minutes; a successful verify clears both. Reusing
+  `failedLoginAttempts` / `lockedUntil` was rejected for two reasons. A
+  correct password clears that counter before the 2FA step, so anyone
+  holding the password could reset it at will and the lockout would never
+  fire. And `lockedUntil` gates the password step, so wrong codes setting
+  it would let an attacker lock the owner out of their own account on
+  demand. The TOTP path never touches the password fields (tested with
+  marker values, so even a write of 0 or null would show).
+- **The lockout is not redundant with the rate limit.** A pending-2FA
+  token is accepted by BOTH verify endpoints, and the throttler counts each
+  handler separately, so the rate limit alone allowed 10 attempts per 5
+  minutes, not 5. The counter on the user row is what makes the stated
+  limit true — tested: after 5 failures on staff verify, the same token on
+  portal verify passes that endpoint's rate limit (4 remaining) and is
+  refused by the lock. On a single endpoint the two overlap almost
+  entirely. The lock also blocks fixed-window boundary bursts and survives
+  a Redis restart (not separately tested).
+- **`reserveTotpAttempt` is one atomic `UPDATE`** that records the attempt
+  before the code is checked, sets the lock on the 5th, and refuses while
+  locked — so a locked account's code is never evaluated and the response
+  can't reveal whether it was right. A read-then-write would let concurrent
+  requests all pass the lock check before any failure was recorded; a test
+  proves only 5 of 8 simultaneous attempts are checked. Locked response:
+  429, `Too many incorrect codes. Wait a few minutes, then sign in again.`
+  (a wrong code stays 401 `Invalid TOTP code`).
+- **The lock uses `now() AT TIME ZONE 'UTC'` explicitly.** The column is
+  `TIMESTAMP` holding UTC, and the deployment VM's Postgres session runs in
+  Asia/Kolkata, where a bare `now()` would be shifted. The lockout tests run
+  the app's database session in Asia/Kolkata and assert the lock lands 5
+  minutes out in real time. That assertion was mutation-checked: with a
+  bare `now()` in the built code, the lock landed about 5.5 hours out and
+  the test failed on both surfaces.
+- **A TOTP lock clears its counter on expiry**, unlike the password
+  lockout, which re-locks on the next failure. With no admin 2FA reset yet,
+  someone working through recovery codes after losing their phone shouldn't
+  be rationed to one attempt per 5 minutes. The cost is real: never clearing
+  would cut an attacker's steady-state rate about 5×.
+- **Honest limit: brute force is mitigated, not solved.** Each guess
+  succeeds with probability about 3 in a million, and the combined limits
+  allow about 1,440 guesses a day per account. An undetected attacker with a
+  valid password still has roughly a 32% chance over 90 days (median about
+  160 days). What closes that is notifying the owner of repeated failures
+  and locks, which is not built.
+- **Verification:** lockout 17/17, throttle 9/9, regression 23/23, apps/api
+  647/647 (96 files), Playwright 41/41 including both real-browser 2FA specs
+  (`auth-2fa.spec.ts`, `portal-2fa.spec.ts`); apps/api build, typecheck and
+  lint clean. The locked-out message itself has not been clicked through in
+  a browser — the Playwright specs never reach a lock.
