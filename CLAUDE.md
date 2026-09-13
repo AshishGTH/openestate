@@ -6506,3 +6506,24 @@ and it wasn't, anywhere.
   (`auth-2fa.spec.ts`, `portal-2fa.spec.ts`); apps/api build, typecheck and
   lint clean. The locked-out message itself has not been clicked through in
   a browser — the Playwright specs never reach a lock.
+
+### User-facing docs had drifted from this log — one claim traced to nothing
+
+A v0.5.0 documentation audit found `docs/docs/installation.md` asserting a
+specific verification event — `upgrade-native.sh` run fresh end-to-end on a
+real Ubuntu 24.04 box, plus 2FA/TOTP and broker NOC→cancel→clawback→
+statement-PDF flows exercised there — with no corresponding entry anywhere
+in this log. The nearest real entry (Phase 8, "CI native-install job added,
+VM re-verified") says the opposite: that session's own 24.04 re-verification
+attempt used the same 25.10 box by mistake and explicitly says to treat
+24.04 as unverified until a real one is tested. The doc's claim didn't
+survive contact with the actual dated record — removed, not softened.
+
+This log was treated as authoritative over the doc, not the other way
+round, because it's append-only and dated; a user-facing doc has no such
+guarantee and can drift silently between releases with nobody rereading it.
+**Standing rule going forward: a verification claim in a user-facing doc
+(README, `docs/docs/`) must trace to an entry here, or it doesn't get
+written.** If a claim can't be traced to a specific session's entry, say so
+explicitly in the doc (as `installation.md`'s 24.04 caveat now does) rather
+than asserting it.

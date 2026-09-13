@@ -8,12 +8,17 @@ OpenEstate is AGPL-3.0 licensed. Install it natively on your own server —
 your own PostgreSQL and Redis, a systemd service, standard Linux paths —
 like you would Zabbix or Wazuh, not a stack of containers you don't control.
 
-> **Status: v0.3.0 — the core sales funnel works end to end for a first
+> **Status: v0.5.0 — the core sales funnel works end to end for a first
 > pilot, with a short list of known gaps worth reading before you rely on
-> it.** Auth/RBAC, multi-tenancy, inventory, pre-sales, the post-sales
-> ledger, brokers/commissions, both portals, plugins, webhooks, custom
-> fields, and staff-published construction updates are all built and
-> exercised end to end in a real browser against a real install. Before
+> it.** Auth/RBAC, multi-tenancy, inventory (including plotted/farmhouse
+> land sales, not just apartment-style units), a configurable lead-stage
+> pipeline, manager-hierarchy-scoped lead visibility, pre-sales (including
+> an expanded reporting suite), the post-sales ledger, brokers/commissions,
+> both portals, plugins, webhooks, and custom fields are all built and
+> exercised end to end in a real browser against a real install. v0.5.0
+> itself is a security release — it closes a two-factor-authentication
+> bypass and makes 2FA codes resistant to guessing; see
+> [SECURITY.md](SECURITY.md) if you're running an earlier version. Before
 > onboarding a real customer, read
 > [Known gaps](docs/docs/features-and-usage.md#known-gaps-before-you-run-a-real-project-on-this) —
 > a Unit-level custom field can be defined but never captured, and
@@ -86,10 +91,14 @@ DNS, the install is also reachable at the server's IP address directly.
 
 **Verified on:** Ubuntu 25.10 (PostgreSQL 17) — a full clean-VM install
 from these exact commands, ending in a working login and a completed
-booking. Ubuntu 24.04 (PostgreSQL 16) is the documented target and is
-exercised by CI's `native-install` job on `ubuntu-latest`, but has not been
-hand-verified on a real 24.04 box recently. Other distributions are
-unverified.
+booking, repeated across multiple sessions. Ubuntu 24.04 (PostgreSQL 16)
+is the documented target and is exercised by CI's `native-install` job on
+`ubuntu-latest`, but a hand-verified real-24.04-box pass has not been
+independently reconfirmed since an earlier session's own claim of having
+done one — treat 24.04 as unverified until it's re-checked on a real box
+rather than assuming that claim still holds (see §2 of the
+[Installation Guide](docs/docs/installation.md) and CLAUDE.md's decisions
+log for the same caveat). Other distributions are unverified.
 
 This creates a dedicated `openestate` system user, builds the app from
 source, sets up the database roles, installs a systemd service
@@ -170,9 +179,12 @@ flowchart TB
 apps/api        NestJS backend (controller → service → repository)
 apps/web        Staff admin SPA (React + Vite + Tailwind)
 apps/portal     Customer + broker portal SPA (role-routed)
+apps/e2e        Playwright end-to-end suite (real browser, real API, real DB)
+apps/website    Public marketing site (React + Vite)
 packages/db     Prisma schema, migrations, seed data
 packages/shared Types, zod schemas, constants shared FE/BE
 packages/sdk    Generated TypeScript API client (from OpenAPI)
+packages/plugin-sdk  Capability-gated PluginContext API for first-party plugins
 plugins/        First-party plugins (lead sources, messaging, telephony)
 deploy/native/  Native install: install-native.sh, systemd unit, nginx
                 config, backup/restore/upgrade/uninstall scripts
@@ -186,7 +198,10 @@ India-specific compliance handling, and the plugin boundary.
 ## Roadmap
 
 All phases below shipped as of v0.1.0; the project has followed semantic
-versioning (v0.1.0 → v0.3.0 and counting) since. See
+versioning (v0.1.0 → v0.5.0 and counting) since — manager-hierarchy lead
+ownership, the Docker-to-native install migration, plotted/farmhouse
+inventory, the lead-stage pipeline, an expanded pre-sales reporting suite,
+and v0.5.0's 2FA security fix all shipped after v0.1.0. See
 [CHANGELOG.md](CHANGELOG.md) for what each release since v0.1.0 added.
 
 | Phase | Scope |

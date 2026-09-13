@@ -44,14 +44,27 @@ with role-based access so each audience sees only what they should.
 - Automatic duplicate detection — a lead with a phone number already in
   the system links to the existing person instead of creating a
   duplicate.
+- A configurable lead-stage pipeline (admin-defined stages beyond the
+  base Open/Continued/Dumped/Successful status, with a full stage-history
+  audit trail per lead) sitting alongside — not replacing — that status.
 - Round-robin auto-assignment across your sales team, or manual
-  reassignment.
+  reassignment. Lead visibility follows your manager hierarchy: a manager
+  sees their own leads plus their full reporting subtree, not the whole
+  company, unless their role is explicitly granted company-wide visibility.
 - A follow-up timeline per lead (calls, site visits, emails) with an
   overdue-follow-up queue so nothing falls through.
-- Funnel, source-conversion, and staff-performance reports.
+- A pre-sales reporting suite — funnel, source-conversion, staff- and
+  manager-performance, and more, each filterable by date range and
+  project, scoped by the same manager hierarchy, with view/export/print
+  as separate permissions.
 
 ### 2. Post-sales — the part other CRMs don't get right
 This is OpenEstate's core differentiator. Once a lead converts:
+- **Inventory isn't limited to apartment-style towers.** A project can
+  also be plotted/farmhouse/villa land inventory — priced and booked per
+  acre or guntha (not forced through a per-square-foot conversion), with
+  an optional Sector/Block/Cluster grouping for browsing. Both shapes
+  live in the same booking flow below.
 - **Booking wizard**: applicant + co-applicants, unit selection, a
   cost breakup (base price + preferential-location charges + parking +
   club + maintenance + GST), and a payment plan (down-payment,
@@ -129,7 +142,7 @@ commission summaries, and more — every report exports to CSV.
 
 ## What OpenEstate deliberately does not do (yet)
 
-Honesty matters more than a feature list. As of v0.3.0:
+Honesty matters more than a feature list. As of v0.5.0:
 - No native mobile app (the portals are mobile-web, not App Store apps).
 - No built-in accounting/GL beyond the receivables ledger — it's not a
   full accounting system; export to your accountant's tool.

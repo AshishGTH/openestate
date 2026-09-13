@@ -36,20 +36,23 @@ an integration.
 - Ubuntu 22.04 LTS or 24.04 LTS. Other systemd-based distros likely work
   but aren't tested — the install script assumes `apt`-family package
   names in its error messages.
-- **Tested platforms**: Ubuntu 24.04 LTS with PostgreSQL 16, and Ubuntu
-  25.10 with PostgreSQL 17 — both verified end-to-end (fresh install,
-  real HTTP login, upgrade/rollback, backup/restore, uninstall) on a
-  real VM. The scripts only check that a `psql` client is present,
-  never an exact major version, so newer Ubuntu releases that ship a
-  newer default PostgreSQL (25.10 ships 17, not 16) work without any
-  script changes — `sudo apt-get install -y postgresql` is enough; only
-  pin `postgresql-16` specifically if you need that exact major version.
-  A later session additionally verified `upgrade-native.sh` fresh
-  end-to-end on that same 24.04 VM (first real exercise of that script),
-  plus full application-level flows (2FA/TOTP enrollment and recovery
-  codes, broker NOC → cancel → commission clawback → statement PDF) —
-  none of these are install-script concerns, but they confirm the
-  deployed app itself is sound on 24.04, not just the installer.
+- **Tested platforms**: Ubuntu 25.10 with PostgreSQL 17 is the one
+  genuinely re-verified end-to-end on a real VM — fresh install, real
+  HTTP login, upgrade/rollback, backup/restore, uninstall, plus
+  application-level flows (2FA/TOTP enrollment and recovery codes, broker
+  NOC → cancel → commission clawback → statement PDF) — repeated across
+  multiple sessions. **Ubuntu 24.04 LTS with PostgreSQL 16 is the
+  documented target, not a currently-confirmed one**: an earlier session
+  claimed to have verified it, but a later session's own attempt to
+  re-verify used the same 25.10 box by mistake and never actually touched
+  a 24.04 machine — see CLAUDE.md's decisions log, which says explicitly
+  to treat 24.04 as unverified until it's checked again on a real 24.04
+  box, not assumed from the 25.10 result. The scripts only check that a
+  `psql` client is present, never an exact major version, so newer Ubuntu
+  releases that ship a newer default PostgreSQL (25.10 ships 17, not 16)
+  work without any script changes — `sudo apt-get install -y postgresql`
+  is enough; only pin `postgresql-16` specifically if you need that exact
+  major version.
   A `native-install` CI job (`.github/workflows/ci.yml`) runs the same
   install on a real `ubuntu-latest` GitHub-hosted runner on every push
   as the ongoing automated guarantee, and is green: the install step
@@ -219,6 +222,24 @@ first `pnpm install`/build).
     a receipt, download the PDF, and check it looks right before you invite
     real customers to the portal. Then delete or archive the test data.
 
+### Rate limits (optional tuning)
+
+`/etc/openestate/openestate.env` sets three rate-limit buckets, all
+optional — leave them commented out unless you have a specific reason,
+they're already sane defaults for a real install:
+
+- **`DEFAULT_THROTTLE_LIMIT`** (default `100`) — every route not covered
+  by a bucket below, keyed by client IP, per 60 seconds.
+- **`PORTAL_AUTH_THROTTLE_LIMIT`** (default `5`) — portal login,
+  invite-consume, and password-reset, keyed by client IP, per 5 minutes.
+  Keep this tight; the one legitimate reason to raise it is many portal
+  users sharing one public IP (an office, a carrier-grade NAT).
+- **`TOTP_VERIFY_THROTTLE_LIMIT`** (default `5`) — 2FA code attempts on
+  both staff and portal, keyed by the *user*, per 5 minutes, so rotating
+  IP addresses gains an attacker nothing and staff behind one office
+  address don't share a budget. TOTP and recovery codes count alike. Also
+  keep this tight.
+
 ---
 
 ## 5. Daily / weekly operations SOP
@@ -259,7 +280,7 @@ journalctl -u openestate-api -n 200    # last 200 lines
 
 ```bash
 cd /opt/openestate-src/deploy/native
-sudo ./upgrade-native.sh --ref v0.2.0
+sudo ./upgrade-native.sh --ref v0.5.0
 ```
 
 This: takes an automatic backup first (same as `backup-native.sh`, unless
@@ -320,32 +341,40 @@ money.
 ## 8. Recovering a lost admin password
 
 ```bash
-cat > /tmp/reset-admin.js <<'EOF'
-const { PrismaClient } = require('/opt/openestate/current/api/node_modules/@prisma/client');
-const argon2 = require('/opt/openestate/current/api/node_modules/argon2');
-const { randomBytes } = require('crypto');
-(async () => {
-  const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL_SYSTEM });
-  const newPassword = randomBytes(18).toString('base64url');
-  const hash = await argon2.hash(newPassword, { type: argon2.argon2id });
-  const { count } = await prisma.user.updateMany({
-    where: { email: 'admin@demo-realty.com' },
-    data: { passwordHash: hash, forcePasswordChange: true },
-  });
-  if (count === 0) { console.error('No user found with that email.'); process.exit(1); }
-  console.log('New password:', newPassword);
-  await prisma.$disconnect();
-})();
-EOF
-set -a; source /etc/openestate/openestate.env; set +a
-sudo -u openestate env DATABASE_URL_SYSTEM="$DATABASE_URL_SYSTEM" node /tmp/reset-admin.js
-rm /tmp/reset-admin.js
+cd /opt/openestate-src/deploy/native
+sudo ./reset-admin-password.sh --email admin@demo-realty.com
 ```
-Swap the `email` filter for a different admin account if you're recovering
-one other than the seeded default. This prints a new random password and
-forces a change on next login (same as the original install flow).
-Requires server access — this is intentional (nobody, including us, can
-reset your password remotely; your data is yours).
+
+This resets a **staff** user's password hash directly in the database via
+`DATABASE_URL_SYSTEM`, clears any account lockout, and revokes every
+existing session for that user. Omit `--password` (as above) and it
+generates a random one and prints it once — copy it immediately, it's not
+shown again and isn't stored in plaintext anywhere. Pass `--password
+NEW_PW` instead if you'd rather set one yourself (minimum 12 characters).
+Swap the `--email` for a different admin account if you're recovering one
+other than the seeded default; it refuses portal-linked accounts
+(customer/broker) by design — see below for those. Requires server access
+— this is intentional (nobody, including us, can reset your password
+remotely; your data is yours).
+
+> **This does not clear two-factor authentication.** If the account also
+> has 2FA enabled, this script's own header says it "bypasses login and
+> 2FA entirely" — that's true of the login step, but the TOTP prompt still
+> comes right after. **An admin who has lost both their password and their
+> authenticator device will get a working password back and then be stuck
+> at the 2FA screen with no way past it.** There is no admin-side "clear
+> this user's 2FA" tool yet, self-service or otherwise. If that's your
+> situation, know it before you run the command above, not after: your
+> only recovery path today is a direct database update by someone
+> comfortable clearing `totp_enabled`/`totp_secret`/`recovery_codes` on
+> the `users` table themselves. Plan to enable 2FA on more than one admin
+> account, or keep a recovery code somewhere safe, so this never becomes
+> your only way in.
+
+For a locked-out **portal** user (customer or broker), this script won't
+help — it explicitly excludes them. Use the portal's own self-service
+"forgot password" flow, or the admin "Reset portal password"/"Send
+Portal Invite" actions in the staff app instead.
 
 ---
 
