@@ -11,9 +11,15 @@ pre-sales lead management, post-sales unit/installment/receipt management, a
 customer portal, and a broker portal. Its plugin system lets other verticals
 adapt it without forking core code.
 
-As of v0.3.0, the core sales funnel — auth/RBAC, multi-tenancy, inventory,
-pre-sales, the post-sales ledger, brokers/commissions, both portals, plugins,
-webhooks, and custom fields — is built and exercised end to end. See the
+As of v0.5.0, the core sales funnel — auth/RBAC, multi-tenancy, inventory
+(unit-based and plotted/farmhouse land sales), a configurable lead-stage
+pipeline, manager-hierarchy-scoped lead visibility, pre-sales (including an
+expanded reporting suite), the post-sales ledger, brokers/commissions, both
+portals, plugins, webhooks, and custom fields — is built and exercised end
+to end. v0.5.0 itself is a security release, closing a two-factor-
+authentication bypass and making 2FA codes resistant to guessing — see
+[SECURITY.md](https://github.com/AshishGTH/openestate/blob/master/SECURITY.md)
+if you're upgrading from an earlier version. See the
 [known gaps](./features-and-usage.md#known-gaps-before-you-run-a-real-project-on-this)
 before relying on it for a real pilot.
 

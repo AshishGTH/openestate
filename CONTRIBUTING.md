@@ -1,7 +1,9 @@
 # Contributing to OpenEstate
 
-Thanks for considering a contribution. OpenEstate is early (Phase 0 as of
-this writing) — expect the architecture to shift as later phases land.
+Thanks for considering a contribution. OpenEstate is on v0.5.0 — the core
+architecture (auth/RBAC, multi-tenancy, the ledger model, the plugin
+boundary) is settled, but still evolving; read CLAUDE.md's decisions log
+before assuming a pattern is fixed in stone.
 
 ## Ground rules
 
@@ -117,6 +119,9 @@ Open a GitHub issue. Security issues are handled separately — see
 
 ## Plugin contributions
 
-Once the plugin system lands (Phase 7), see `docs/plugin-development` for
-the manifest format and scoped service API. Vertical-specific logic belongs
+The plugin system shipped in Phase 7. There's no standalone
+plugin-development guide yet — read the
+[`generic-sales`](https://github.com/AshishGTH/openestate/tree/master/plugins/generic-sales)
+plugin alongside `packages/plugin-sdk`'s capability-gated `PluginContext`
+API; it's the closest thing to one today. Vertical-specific logic belongs
 in a plugin, not in core.

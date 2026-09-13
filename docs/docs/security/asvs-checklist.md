@@ -48,8 +48,11 @@ work — read that file for the full reasoning behind any entry here.
 - **V2.1 Password security** — Implemented. argon2id hashing
   (`apps/api/src/auth/`), no maximum-length truncation, no composition
   rules beyond a minimum length (avoids the well-documented pitfalls of
-  forced complexity rules). Account lockout with exponential backoff
-  after repeated failed logins.
+  forced complexity rules). Account lockout after repeated failed logins:
+  5 wrong passwords locks the account for a flat 15 minutes
+  (`AuthService.recordFailedAttempt`) — a fixed window, not an escalating
+  backoff; a login attempt right after the lock expires gets the same
+  15-minute lock again, it does not grow with repeat offenses.
 - **V2.2 General authenticator security** — Implemented for the credential
   most likely to be attacked in the open: this phase replaced the
   seed script's hardcoded initial admin password
@@ -59,9 +62,45 @@ work — read that file for the full reasoning behind any entry here.
 - **V2.5 Credential recovery** — Implemented. Password reset via a
   single-use, time-limited token dispatched through the async queue
   (`BullMQ`) — never a synchronous email-send in the request path.
-- **V2.8 One-time verifier (2FA)** — Implemented. TOTP (RFC 6238),
-  encrypted-at-rest secret (`TOTP_ENCRYPTION_KEY`, AES-256-GCM, its own
-  key — never reused from PAN's, Phase 1 decision).
+- **V2.8 One-time verifier (2FA)** — Implemented, with a real bypass
+  history worth stating plainly rather than glossing over. TOTP
+  (RFC 6238), encrypted-at-rest secret (`TOTP_ENCRYPTION_KEY`, AES-256-GCM,
+  its own key — never reused from PAN's, Phase 1 decision).
+
+  **From v0.1.0 through v0.4.0, the second factor could be bypassed
+  entirely by anyone who knew the account's password** — the short-lived
+  token login hands back while 2FA is pending was accepted by endpoints
+  it was never scoped for (2FA setup/confirm/disable, change-password,
+  logout-all), on both staff and portal. A password alone was enough to
+  turn a victim's 2FA off, or replace it with an attacker's own
+  authenticator. **Fixed in v0.5.0** — see the "Two-factor authentication
+  bypass and guessable 2FA codes" advisory in
+  [SECURITY.md](https://github.com/AshishGTH/openestate/blob/master/SECURITY.md)
+  for the full account; OpenEstate had no installs outside the author's
+  own test machines at the time, so there was no third party to notify.
+
+  **What the control actually does now**, not just "TOTP is implemented":
+  - `TwoFactorPendingGuard` (global, `apps/api/src/auth/guards/`) refuses
+    that pending-2FA token on every route except the two `totp/verify`
+    endpoints — a denylist on the token, not a per-route allowlist, so a
+    future endpoint added with no decorator is closed by default rather
+    than silently open.
+  - The pending-2FA token expires after 5 minutes (was 15, inherited by
+    accident from the ordinary access-token lifetime).
+  - Code entry is rate-limited per user — 5 attempts per 5 minutes
+    (`TOTP_VERIFY_THROTTLE_LIMIT`), keyed by the token's own subject
+    rather than client IP, so rotating addresses buys an attacker nothing.
+  - A separate lockout — `failed_totp_attempts`/`totp_locked_until` on
+    `users`, distinct from the password lockout above — locks the second
+    factor for 5 minutes after 5 consecutive wrong codes (TOTP or
+    recovery codes alike), and is never driven by a wrong password, so it
+    can't be used to lock an account's owner out on demand.
+  - Brute force is mitigated, not eliminated: each guess succeeds with
+    probability roughly 3 in a million, and the combined limits allow
+    about 1,440 guesses a day per account — a patient, undetected
+    attacker with a valid password still has a real chance over months.
+    Notifying an account owner of repeated failed 2FA attempts would
+    close that gap further; it isn't built.
 
 ## V3 — Session Management
 
