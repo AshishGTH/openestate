@@ -1,4 +1,6 @@
 import 'reflect-metadata';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { NestFactory } from '@nestjs/core';
@@ -61,7 +63,10 @@ async function bootstrap() {
     const config = new DocumentBuilder()
       .setTitle('OpenEstate API')
       .setDescription('OpenEstate CRM REST API')
-      .setVersion('0.1.0')
+      // Same package.json the health endpoint reads (health.controller.ts),
+      // so the API docs can't report a stale hardcoded version — this one
+      // said 0.1.0 from v0.1.0 through v0.4.0.
+      .setVersion((JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf-8')) as { version: string }).version)
       .addBearerAuth()
       .build();
     const document = SwaggerModule.createDocument(app, config);

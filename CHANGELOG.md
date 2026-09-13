@@ -3,7 +3,32 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.5.0]
+
+A security release. It closes a two-factor authentication bypass and makes
+2FA codes resistant to guessing — both found during pre-launch review, see
+the advisory in [SECURITY.md](SECURITY.md). It also ships everything merged
+since v0.4.0: the Docker removal, plotted/farmhouse inventory, the lead-stage
+pipeline, the pre-sales reporting suite and the fixes listed below.
+
+### Upgrade notes — read this before upgrading
+
+- **13 database migrations run on upgrade.** One of them,
+  `20260914120000_user_totp_lockout`, adds two columns to `users`
+  (`failed_totp_attempts`, `totp_locked_until`). Adding them is
+  metadata-only, but `users` is read on almost every request, so the
+  migration still needs a brief exclusive lock. `upgrade-native.sh` gives
+  up after `MIGRATION_LOCK_TIMEOUT` (15s by default) and leaves the previous
+  release running; if that happens, retry during a quieter period.
+- **New optional setting: `TOTP_VERIFY_THROTTLE_LIMIT`, default 5** — 2FA
+  code attempts allowed per user per 5 minutes. Leave it unset unless you
+  have a specific reason; it's documented in
+  `deploy/native/openestate.env.example`.
+- **The step between entering a password and entering a 2FA code now
+  expires after 5 minutes instead of 15.** Someone who takes longer than
+  that to enter their code signs in again.
+- Also read "Removed" (Docker is no longer an install path) and the
+  minimum-password-length change under "Security".
 
 ### Removed
 
@@ -41,6 +66,32 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   removed.
 
 ### Security
+
+- **Fixed: a password alone could turn off or take over an account's
+  two-factor authentication.** With 2FA on, signing in with a password
+  returns a short-lived token that is only meant for the next step, entering
+  the code. The server also accepted that token on other endpoints — the
+  ones that set up, confirm and turn off 2FA, change the password, and sign
+  out every session. Anyone who knew an account's password could therefore
+  turn its 2FA off, or enrol their own authenticator app, sign in, take the
+  new recovery codes and leave the real owner's authenticator rejected.
+  Staff and customer/broker portal accounts were both affected. The token is
+  now refused everywhere except code entry — including on any endpoint added
+  in future — a normal session can no longer call code entry, and the token
+  expires after 5 minutes instead of 15. Present in every release from
+  v0.1.0 through v0.4.0.
+
+- **Fixed: 2FA codes on staff accounts could be guessed by brute force.**
+  Staff code entry had no rate limit of its own and wrong codes counted
+  toward nothing, so anyone holding a password could keep guessing the
+  six-digit code. (Portal code entry was limited per network address.) Both
+  now allow 5 attempts per user per 5 minutes, however many addresses they
+  come from, and 5 wrong codes in a row — TOTP or recovery codes alike —
+  lock code entry for 5 minutes, answered with a 429 saying to wait and
+  sign in again. That lock is separate from the password lockout, so wrong
+  codes can't be used to lock an owner out of their own account, and a
+  correct code clears it. Present in every release from v0.1.0 through
+  v0.4.0.
 
 - **Minimum password length raised from 8 to 12 characters, everywhere a
   password is set.** All 7 password-setting schemas
