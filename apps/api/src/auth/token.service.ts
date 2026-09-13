@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { PrismaClient } from '@openestate/db';
 import { SYSTEM_PRISMA } from '../database/database.module';
 import type { JwtPayload } from '@openestate/shared';
+import { TWO_FACTOR_PENDING_PERMISSION, TWO_FACTOR_PENDING_TTL_SECONDS } from './guards/two-factor-pending.guard';
 
 @Injectable()
 export class TokenService {
@@ -25,6 +26,20 @@ export class TokenService {
 
   signAccessToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
     return this.jwt.sign(payload);
+  }
+
+  /**
+   * What login returns instead of a session when TOTP is on. Good for
+   * totp/verify and nothing else (TwoFactorPendingGuard). One signer for
+   * staff and portal, so the marker and the lifetime can't drift apart.
+   */
+  signTwoFactorPendingToken(
+    payload: Omit<JwtPayload, 'iat' | 'exp' | 'permissions' | 'forcePasswordChange'>,
+  ): string {
+    return this.jwt.sign(
+      { ...payload, permissions: [TWO_FACTOR_PENDING_PERMISSION] },
+      { expiresIn: TWO_FACTOR_PENDING_TTL_SECONDS },
+    );
   }
 
   async createRefreshToken(

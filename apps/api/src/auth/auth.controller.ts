@@ -25,6 +25,9 @@ import { AuthService } from './auth.service';
 import { Public } from './guards/jwt-auth.guard';
 import { STAFF_CSRF_COOKIE } from './csrf-cookie-names';
 import { PasswordChangeThrottlerGuard } from './guards/password-change-throttler.guard';
+import { RequirePermissions } from './guards/permissions.guard';
+import { TWO_FACTOR_PENDING_PERMISSION } from './guards/two-factor-pending.guard';
+import { TotpVerifyThrottlerGuard } from './guards/totp-verify-throttler.guard';
 
 class LoginDto extends createZodDto(loginSchema) {}
 class TotpVerifyDto extends createZodDto(totpVerifySchema) {}
@@ -110,6 +113,11 @@ export class AuthController {
     return { accessToken: result.accessToken };
   }
 
+  // Only a 2FA-pending token carries this permission, so a full session
+  // can't call verify, and this is the one staff route a 2FA-pending token
+  // CAN call (TwoFactorPendingGuard).
+  @RequirePermissions(TWO_FACTOR_PENDING_PERMISSION)
+  @UseGuards(TotpVerifyThrottlerGuard)
   @Post('totp/verify')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Verify TOTP code after login' })

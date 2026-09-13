@@ -13,6 +13,7 @@ import { PrismaClient } from '@openestate/db';
 import { SYSTEM_PRISMA } from '../database/database.module';
 import { TokenService } from '../auth/token.service';
 import { TotpService } from '../auth/totp.service';
+import { reserveTotpAttempt, TOTP_ATTEMPTS_CLEARED } from '../auth/totp-lockout';
 import { PORTAL_QUEUE } from '../queues/queues.module';
 import { PROCESS_PASSWORD_RESET_JOB } from './portal-password-reset.processor';
 import { SYSTEM_ROLES } from '@openestate/shared';
@@ -84,12 +85,11 @@ export class PortalAuthService {
     });
 
     if (user.totpEnabled && user.totpSecret) {
-      const tempToken = this.tokenService.signAccessToken({
+      const tempToken = this.tokenService.signTwoFactorPendingToken({
         sub: user.id,
         companyId: user.companyId,
         email: user.email,
         roleSlug: user.role.slug,
-        permissions: ['auth.totp.verify'],
         applicantId: user.applicantId ?? undefined,
         brokerId: user.brokerId ?? undefined,
       });
@@ -110,9 +110,13 @@ export class PortalAuthService {
       throw new BadRequestException('2FA not enabled');
     }
 
+    // Throws 429 without looking at the code if the user is TOTP-locked.
+    await reserveTotpAttempt(this.prisma, user.id);
+
     const decryptedSecret = this.totpService.decrypt(user.totpSecret);
 
     if (this.totpService.verify(decryptedSecret, code)) {
+      await this.prisma.user.update({ where: { id: user.id }, data: TOTP_ATTEMPTS_CLEARED });
       return this.issueTokens(user);
     }
 
@@ -122,7 +126,7 @@ export class PortalAuthService {
       if (idx !== -1) {
         const remaining = [...codes];
         remaining.splice(idx, 1);
-        await this.prisma.user.update({ where: { id: user.id }, data: { recoveryCodes: remaining } });
+        await this.prisma.user.update({ where: { id: user.id }, data: { recoveryCodes: remaining, ...TOTP_ATTEMPTS_CLEARED } });
         return this.issueTokens(user);
       }
     }
