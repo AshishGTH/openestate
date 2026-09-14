@@ -58,10 +58,19 @@ have two-factor authentication (2FA) turned on.
 
 **Fixed in:** v0.5.0.
 
-**Exposure:** none outside the author's own test machines. OpenEstate has
-not been installed anywhere else, so no third party ever ran an affected
-version and there is nothing to report or rotate. Both problems were found
-during pre-launch security review.
+**Exposure:**
+
+- At the time this was fixed, the only known installations of OpenEstate
+  were the author's own test machines.
+- Both problems were found during pre-launch security review — not by
+  investigating a real incident.
+- **This describes what the author knew about their own installs. It
+  says nothing about yours.** The author has no record of who else has
+  run an affected version.
+- There is no audit-log entry for 2FA setup, disable, or password-change
+  events, on either the staff or portal side. That means neither the
+  author nor you can determine, after the fact, whether a specific
+  install was exploited.
 
 **1. A password alone could turn off or take over 2FA.** When 2FA is on,
 signing in takes two steps: the password, then a six-digit code from an
