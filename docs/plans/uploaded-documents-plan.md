@@ -1,12 +1,20 @@
 # Uploaded documents + booking custom fields — plan for review
 
-**Status:** revision 3, 2026-09-15. Not built. Owner rulings on revision 2's
+**Status:** revision 4, 2026-09-15. Not built. Owner rulings on revision 2's
 objections applied (recorded in CLAUDE.md's decisions log, dated the same
-day). §6 is now a log of what was ruled, not a list of open questions —
-the one item deliberately left unfixed (§6, item 4 — a `RolesService`
+day), plus one same-day correction to revision 3's own design. §6 is now a
+log of what was ruled and corrected, not a list of open questions — the
+one item deliberately left unfixed (§6, item 4 — a `RolesService`
 self-escalation gap, reported and tracked in `docs/todo.md`, low severity)
 is a security backlog item outside this plan's scope, not something this
 plan is waiting on.
+
+Changes in revision 4 (a correction, not an owner ruling — §6):
+- **`uid` dropped from the layer (a) definition-name guard.** It would
+  have false-positived on ordinary integration field names ("External
+  UID", "Partner UID") with no exemption path around it, and it's a weak
+  signal for Aadhaar specifically. `aadhaar`/`aadhar`/`आधार` are
+  unaffected and have no comparable legitimate-name conflict.
 
 Changes in revision 3:
 - **Aadhaar guard redesigned into three layers** (§2h): a zero-false-positive
@@ -419,48 +427,36 @@ that "the guard fired" means "this really was one." Both layers 2 and 3
 are pattern-based; layer 1 is the only zero-false-positive layer, and it
 only catches a field's *name*, not what gets typed into it.
 
-#### Layer (a) — definition-name guard (new; zero measured false positives on the target class)
+#### Layer (a) — definition-name guard (new; no known false positive on its target class)
 
 **Rule:** reject **creating** a custom field, or **renaming** one (the only
 mutable identifying text — `key` is immutable after creation and already
 regex-locked to lowercase snake_case), when its `key` or `label`, after
-normalization, contains `aadhaar`, `aadhar`, or `आधार` as a substring, or
-`uid` as a whole token.
+normalization, contains `aadhaar`, `aadhar`, or `आधार` as a substring.
 
-**Normalization (applied to `key` and `label` independently):**
-1. Lowercase.
-2. For the substring check (`aadhaar`/`aadhar`/`आधार`): strip every
-   character that isn't `[a-z0-9]` or Devanagari (`ऀ–ॿ`), then
-   test `includes()`. This catches `aadhar_no`, `Aadhaar-Number`, `AADHAAR
-   NO`, `आधार संख्या` — anything using those words with different casing,
-   spacing, punctuation or a leading/trailing modifier.
-3. For the `uid` check: split on any run of non-alphanumeric characters
-   into tokens, and test whether `uid` is one of them exactly — **not** a
-   substring test. This is deliberate: `uid` as a bare substring matches
-   inside ordinary English words (`liquid`, `squid`, `guide` all contain
-   the letters u-i-d in sequence), which a real-estate CRM's field labels
-   will plausibly use ("Site Guide", "Liquid Assets"). Word-boundary
-   matching avoids that at the cost of missing a run-together variant like
-   `UIDNumber` (documented as a known miss below, not silently assumed
-   fixed).
-4. `key` never needs the Devanagari branch (the existing key regex,
-   `^[a-z][a-z0-9_]*$`, already forbids it) — the check runs on both fields
-   through one function regardless, so there's one code path to test, not
-   two.
+**`uid` was in this rule in revision 3 and is dropped here (revision 4,
+correction, see §6):** it would have false-positived on ordinary,
+plausible integration field names ("External UID", "Partner UID"), the
+layer (c) exemption deliberately can't reach layer (a) to work around that,
+and "UID" is a weak, generic signal for Aadhaar specifically — layer (b)'s
+pattern+Verhoeff check is what actually has to catch a determined or
+mistaken 12-digit entry, keyword or not. `aadhaar`/`aadhar`/`आधार` have no
+such legitimate-field-name conflict and stay.
 
-**What this would wrongly catch, stated plainly (the "uid" token is the
-only realistic source):**
-- A field genuinely meant to hold an external system's identifier, named or
-  keyed literally "UID", "External UID", "uid_number", "Partner UID" —
-  these are ordinary, plausible field names in a CRM that integrates with
-  other systems, and all of them are blocked by this rule. The operator's
-  only path around it is to rename the field (e.g. "External Reference
-  ID", "Partner Ref"), which the exemption in layer (c) does **not** help
-  with — see below.
-- The `aadhaar`/`aadhar`/`आधार` substring checks have no known plausible
-  false-positive in English or Hindi real-estate CRM vocabulary — those
-  character sequences aren't substrings of other ordinary words the way
-  "uid" is.
+**Normalization (applied to `key` and `label` independently):** lowercase,
+then strip every character that isn't `[a-z0-9]` or Devanagari (`ऀ–ॿ`), then
+test `includes()` for `aadhaar`, `aadhar`, or `आधार`. This catches
+`aadhar_no`, `Aadhaar-Number`, `AADHAAR NO`, `आधार संख्या` — anything using
+those words with different casing, spacing, punctuation or a leading/
+trailing modifier. `key` never technically needs the Devanagari branch
+(the existing key regex, `^[a-z][a-z0-9_]*$`, already forbids it), but the
+check runs on both fields through one function regardless, so there's one
+code path to test, not two.
+
+**What this would wrongly catch:** nothing known. The
+`aadhaar`/`aadhar`/`आधार` substring checks have no known plausible
+false-positive in English or Hindi real-estate CRM vocabulary — those
+character sequences aren't substrings of other ordinary words.
 
 **Interaction with the existing "Aadhaar (reference only)" custom field**
 already created on the verification VM (finding 4): this guard only fires
@@ -473,9 +469,9 @@ checked like any other rename.
 column. (The exemption column below is the only schema change layer (a)
 and (c) together require.)
 
-**Error message:** "Field names and keys can't reference Aadhaar or UID
+**Error message:** "Field names and keys can't reference Aadhaar
 (matched: \"aadhaar\"). See CLAUDE.md's Aadhaar policy." — names the
-matched keyword so an admin isn't left guessing why "Building UID" was
+matched keyword so an admin isn't left guessing why the field was
 rejected.
 
 #### Layer (b) — value guard (as revision 2, unchanged)
@@ -721,8 +717,9 @@ No new permission constants, so the permission sync is a no-op.
 - `packages/shared/src/aadhaar-guard.ts` (+ export, + tests against the
   Wikipedia worked examples, the table-inverse property, and
   `containsAadhaarKeyword`'s own cases: `aadhar_no`, `Aadhaar-Number`,
-  `आधार`, `uid`/`UID`/`external_uid`, and the documented non-matches
-  `liquid`/`squid`/`Site Guide`)
+  `आधार`, and a non-match confirming `external_uid`/`Partner UID` are
+  accepted — a name test proving the dropped "uid" check stays dropped, not
+  just its absence)
 - `packages/shared/src/custom-field.dto.ts` (also fix its "frozen list"
   misquote, and its "See docs/todo.md" pointer — that todo entry was
   removed on 2026-09-14 when this plan absorbed it)
@@ -748,8 +745,9 @@ EXCLUSIVE, catalog-only; covered by `lock_timeout`.
 
 **Playwright:**
 1. Admin tries to create a field keyed `aadhaar_number` → rejected inline
-   and by `page.request` (layer a). Tries `external_uid` → also rejected.
-   Tries `bank_account_number` → accepted.
+   and by `page.request` (layer a). Tries `external_uid` → accepted (the
+   "uid" check was dropped from layer a, revision 4 — this scenario proves
+   it stays dropped). Tries `bank_account_number` → accepted.
 2. On Add Inquiry, a checksum-valid test value in the bank-account field
    shows an inline error (layer b); `page.request` with the same value
    gets a 400.
@@ -778,8 +776,7 @@ itself — never a real Aadhaar number.
 
 **What could go wrong:**
 - The permutation-conformance gate fails, or is skipped (§2h).
-- Residual false positives on layer (b) (§2h); the layer (a) `uid`
-  false-positive class (§2h).
+- Residual false positives on layer (b) (§2h).
 - Redaction removing a phone number from a lead note.
 - The exemption checkbox is set on a field for a reason other than the
   stated one (a real bank-account field), quietly reopening a bypass —
@@ -1084,16 +1081,28 @@ unbuilt, by explicit instruction.
 
 1 & 2. **(C) Checksum false positives/negatives — accepted as a known
    residual, and the guard was redesigned rather than tuned further.**
-   Redesigned into three layers (§2h): a definition-name guard (layer a,
-   zero measured false positives on its target class, but a real false
-   positive on any field genuinely named/keyed "UID"), the pattern+Verhoeff
-   value guard from revision 2 unchanged (layer b, ~10% residual false
-   positive rate, 0% of single-digit typos caught), and a per-field,
-   audited exemption for legitimate 12-digit fields (layer c). None of
-   revision 2's three named options (accept both / exempt `91[6-9]…` /
-   keyword-only) were taken as-is — the layered design supersedes that
-   framing entirely, and the plan now states the residual rates as
-   deterrence, not prevention, rather than presenting the guard as solved.
+   Redesigned into three layers (§2h): a definition-name guard (layer a),
+   the pattern+Verhoeff value guard from revision 2 unchanged (layer b,
+   ~10% residual false positive rate, 0% of single-digit typos caught), and
+   a per-field, audited exemption for legitimate 12-digit fields (layer c).
+   None of revision 2's three named options (accept both / exempt
+   `91[6-9]…` / keyword-only) were taken as-is — the layered design
+   supersedes that framing entirely, and the plan now states the residual
+   rates as deterrence, not prevention, rather than presenting the guard as
+   solved.
+
+   **Correction, revision 4, same day — reversing revision 3's own layer
+   (a) design, not an owner ruling:** revision 3 had layer (a) also reject
+   a bare `uid` token. This was my own objection to raise, not something
+   asked for, so it's recorded as a correction rather than a ruling: `uid`
+   is a weak, generic signal for Aadhaar specifically (unlike
+   `aadhaar`/`aadhar`/`आधार`, which have no other legitimate use as a field
+   name), it would have blocked ordinary integration field names ("External
+   UID", "Partner UID"), and the layer (c) exemption can't reach layer (a)
+   to work around it — so there would have been no way to keep such a
+   field. Dropped. `aadhaar`/`aadhar`/`आधार` are unaffected; layer (b) is
+   what actually has to catch a determined or accidental 12-digit entry,
+   keyword or not.
 
 3. **(A+B) Staff can't take back their own mistaken upload — resolved,
    ruled in the requester's favour.** Anyone may delete a file they
@@ -1183,6 +1192,5 @@ unbuilt, by explicit instruction.
 13. The layer (c) exemption rides on the existing `admin.custom-field.update`
     permission rather than a new one — a recommendation made in this plan
     (§2h), not something the owner ruled on directly.
-14. The layer (a) `uid` token match has no exemption path at all (by design
-    — see §2h, "cannot be exempted"); a field genuinely needing that name
-    must be renamed, not flagged around it.
+14. ~~The layer (a) `uid` token match has no exemption path~~ — removed;
+    the `uid` check itself was dropped from layer (a) in revision 4 (§6).

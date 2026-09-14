@@ -6732,3 +6732,24 @@ objections the previous day's entry left open.
   it is a standalone, read-only tool that touches neither the install nor
   the upgrade path, so v0.7.0's "no deploy-script changes" claim still
   holds for the scripts an operator actually runs to install or upgrade.
+
+### Uploaded documents plan: `uid` dropped from the layer (a) guard (2026-09-15, same day, correction not a ruling)
+
+**Supersedes the layer (a) description in the entry immediately above —
+that entry's `uid` word-boundary check no longer exists.** This was raised
+as an objection by the assistant, not requested by the owner, and applied
+as a correction to a design that had shipped in the plan only hours
+earlier. Plan now at revision 4.
+
+`uid` is dropped from layer (a) entirely. It would have false-positived on
+ordinary, plausible integration field names ("External UID", "Partner
+UID") with no way around it — the layer (c) exemption deliberately can't
+reach layer (a), by design, so there was no workaround for a company that
+genuinely needed such a field name, only a rename. `uid` is also a weak,
+generic signal for Aadhaar specifically, unlike `aadhaar`/`aadhar`/`आधार`,
+none of which have any known legitimate use as a field name. Layer (b)'s
+pattern+Verhoeff value check is what actually has to catch a determined or
+accidental 12-digit entry — layer (a) narrowed to the three Aadhaar-specific
+words is enough to keep it a true zero-known-false-positive layer, which
+was the property the previous entry claimed for it but didn't actually
+have while `uid` was still in the rule.
