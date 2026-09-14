@@ -426,6 +426,18 @@ this note once it has a real, tested effect.
 
 ## Auth / rate limiting (Phase 1, widened in Phase 6)
 
+- **SECURITY-RELEVANT: 2FA and password-change events write no audit
+  row.** `AuthService` and `PortalAuthService` use `SYSTEM_PRISMA`, which
+  carries no audit extension, so `User`'s `AUDITED_MODELS` registration
+  never fires for these calls. Affects both staff and portal surfaces.
+  Means no operator can determine whether a 2FA compromise occurred.
+  Should be closed before or alongside the planned admin-side 2FA reset,
+  which would otherwise also write no trail. **Safe to fix without
+  touching the audit architecture** — the same manual
+  `auditLog.create()`-inside-a-`SYSTEM_PRISMA`-transaction pattern already
+  used for `RESET_LINK_ISSUED`/`PORTAL_RESET_ISSUED` applies directly
+  here, so this doesn't need a design decision first, just the same
+  treatment applied to a few more call sites.
 - **Redis-backed `ThrottlerStorage` for the default/`portal-auth`/
   `portal-read` buckets.** CLAUDE.md's security rules call for
   `@nestjs/throttler` + a Redis store; `app.module.ts`'s single
