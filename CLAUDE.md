@@ -6580,3 +6580,155 @@ nothing in it is actually wrong the way the lockout line was. Everything
 else in the section (input validation, parameterized queries, Redis-backed
 rate limiting, security headers/CORS/CSRF, upload validation, audit log
 fields including IP) checked out against the code as written.
+
+### Uploaded documents plan: owner decisions (2026-09-14)
+
+Plan: `docs/plans/uploaded-documents-plan.md` (revision 2). Documentation
+only; nothing built. The Aadhaar PII rule in "Security rules" is deliberately
+**not** amended yet — that edit ships in v0.9.0 with document upload, so this
+file is true at every release.
+
+- **Aadhaar (owner decision 1):** a scanned Aadhaar card may be collected as
+  an encrypted uploaded document when the operator enables that document
+  type; the number is never stored in any structured, searchable or
+  exportable field. Exact replacement wording is in the plan, §3.
+- **Documents attach to applicants and bookings through one table,
+  `uploaded_documents`,** with exactly one owner per row (two real foreign
+  keys plus a `num_nonnulls` CHECK). Rules out a second mirrored table and
+  an `entity_type`/`entity_id` pair without foreign keys. Not named
+  `documents`: `GET /documents/:id/download` already serves generated PDFs.
+- **Multiple files per document type per entity (A).** No replace endpoint,
+  no one-per-slot unique index; `document_types.max_files` (default 5,
+  ceiling 10), enforced under a per-(type, entity) advisory lock because a
+  count can't be a unique index. "Required" means at least one live file.
+- **Required documents never block booking creation (F).** A visible
+  "missing" state only; a gate at allotment or registration stays open. A
+  required booking *custom field* does block Confirm — it's typed into the
+  form, whereas files can only be uploaded after save.
+- **Encrypted at rest under a new key domain,
+  `UPLOADED_DOCUMENT_ENCRYPTION_KEYS`** (versioned, same format as
+  `PLUGIN_SECRET_ENCRYPTION_KEYS`). Project media and generated PDFs stay
+  unencrypted.
+- **Fresh-install grants (B):** read + upload for super_admin, company_admin,
+  sales_manager, sales_executive; delete for super_admin, company_admin,
+  sales_manager; read for accounts. New `admin.document-type.manage` for the
+  master. Existing installs: only super_admin receives them automatically;
+  every other role is granted deliberately through Roles. The dormant
+  `POSTSALES_DOCUMENT_*` and `PORTAL_DOCUMENT_UPLOAD` constants are **not**
+  reused — they're already granted on every install, so activating them
+  would silently widen roles on upgrade. `POSTSALES_BOOKING_UPDATE` is
+  reused for booking custom-field edits: activating it gives no role more
+  than it can already do with bookings.
+- **Booking custom fields** get a `bookings.custom_fields` JSONB column,
+  written from `BookingController` inside an outer transaction that
+  `createBooking` joins. `BookingService` itself is not edited; no ledger,
+  GST or status-machine code changes. The column on the frozen `Booking`
+  table is an owner-approved exception. There is no written "frozen list" in
+  this file — "frozen" is descriptive; `docs/todo.md` had misquoted one.
+- **The Aadhaar guard requires a valid Verhoeff checksum (C).** Pattern
+  alone rejects too many phone and account numbers. Tables verified this
+  session against the Wikipedia *Verhoeff algorithm* article (citing
+  Verhoeff 1969) and its worked example, plus structural checks. UIDAI's
+  *A UID Numbering Scheme* (May 2010) specifies 12 digits with a Verhoeff
+  check digit, but names the permutation only as "such as … other
+  permutations can also be used" — so v0.7.0 must pass a human conformance
+  check against real cards before shipping, with only the result recorded.
+  Measured residuals: ~10% of any 12-digit number starting 2–9 still match,
+  including ~1 in 10 contiguous `91` + mobile numbers. Aadhaar numbers with
+  a single mistyped digit fail the checksum and are therefore not caught.
+- **`applicant_documents` is not dropped in the document migration and never
+  aborts an upgrade (D).** It's kept one more release, with a non-fatal
+  warning from `upgrade-native.sh` if it has rows, and removed in v0.10.0 —
+  the same deferred-drop pattern as `document_types.entity_type`, which is
+  still written by the previous release during the upgrade window. An
+  upgrade that hard-fails on a builder's server is worse than a dead table.
+- **Release sequence (E):** v0.6.0 = the finished
+  `feat/admin-generated-reset-links` and `fix/login-cross-links` branches;
+  v0.7.0 = Aadhaar guard + booking custom fields (no env vars, no changes to
+  install/upgrade/backup/restore — one new standalone read-only script);
+  v0.8.0 = deploy plumbing only, to prove `upgrade-native.sh` can add a
+  boot-required setting to an existing install without failing the
+  healthcheck, with CI asserting the outcome (a key-canary encrypt on first
+  boot, decrypt on restart, and a wrong-key restart that fails) rather than
+  the env line; v0.9.0 = document types, applicant and booking documents,
+  the Aadhaar rule amendment, key rotation; v0.10.0 = deferred drops.
+- **Raised with the owner and still open:** checksum residuals and missed
+  typos (with exemption options); staff unable to delete their own mistaken
+  upload; `RolesService.update()` letting company_admin grant itself any
+  permission, so "grant deliberately" is a process step, not a boundary;
+  what the v0.10.0 drop does if `applicant_documents` has rows (proposed:
+  rename, don't drop); v0.8.0 refusing boot on a key mismatch before any
+  document exists. Full list: the plan, §6.
+  **Superseded by the next entry — every item here except the
+  `RolesService` one was ruled on the following day.**
+
+### Uploaded documents plan: rulings on the open objections (2026-09-15)
+
+Plan revised to revision 3 (`docs/plans/uploaded-documents-plan.md`).
+Documentation only, again — nothing built. Rules on the six substantive
+objections the previous day's entry left open.
+
+- **Aadhaar guard redesigned into three layers, not just re-tuned** — the
+  single pattern+Verhoeff guard from the prior entry was judged to reject
+  too many ordinary phone and account numbers on its own. Layer (a): reject
+  creating or renaming a custom field whose key or label contains
+  `aadhaar`/`aadhar`/`आधार` (substring match, case/whitespace-normalized —
+  no realistic false positive found) or `uid` (word-boundary match only,
+  specifically to avoid `liquid`/`squid`/`guide`-class false positives that
+  a plain substring check would hit; still false-positives on a field
+  genuinely meant to be called "UID" for an unrelated external system —
+  accepted, no exemption applies to this layer). Layer (b): the
+  pattern+Verhoeff value guard as previously designed, unchanged. Layer
+  (c): a new `allows_twelve_digit_values` boolean on
+  `CustomFieldDefinition`, default false, that skips layer (b) for one
+  field only (a legitimate bank-account-number field, the motivating case)
+  — audited for free via the existing `AUDITED_MODELS` diff extension,
+  shown with an inline warning and an ongoing list badge in the admin UI,
+  and explicitly incapable of bypassing layer (a): a field cannot be named
+  "Aadhaar" and exempted at the same time. Rides on the existing
+  `admin.custom-field.update` permission rather than a new one — reasoned,
+  not assumed: that permission is already held only by company_admin and
+  super_admin on a fresh install, the same two roles already trusted with
+  every other aspect of a custom field's validation shape, so a dedicated
+  permission would add sprawl without adding containment. The plan now
+  states plainly, in one place, that all of this is deterrence against
+  accidental storage, not prevention against deliberate evasion — the
+  measured residual rates (roughly 10% of legitimate 12-digit values still
+  pass layer (b); 0% of single-digit Aadhaar typos are caught by it) are
+  written down so nobody downstream assumes the guard is airtight. The
+  pre-ship human conformance check against real Aadhaar numbers is kept,
+  with an exact, specified procedure (a Node REPL with history disabled,
+  the number never assigned to a variable or pasted elsewhere, and only
+  the pass/fail outcome — never a digit — recorded in this log).
+- **Self-delete: anyone may delete a file they uploaded themselves, no time
+  window, regardless of the delete permission; deleting someone else's file
+  still needs it.** Both paths write the same audit row, distinguished only
+  by actor id — no separate audit code needed. Closes the "staff can't take
+  back their own mistake" gap from the prior entry.
+- **`RolesService.update()`'s missing grantor check is reported, not
+  fixed, by explicit instruction — answered directly rather than left
+  vague.** Grepped `packages/shared/src/roles.ts` line by line: on a fresh
+  install, only `company_admin` (via its `admin.*` prefix filter) and
+  `super_admin` (via `Object.values(P)`) hold `admin.role.update`; no
+  lesser system role lists any `ADMIN_ROLE_*` permission by any path.
+  **Marked low severity for that specific reason** — the gap lets an
+  already-fully-trusted role grant itself something it doesn't yet hold,
+  which is not an escalation across a boundary this system currently
+  defines, though it would extend to any custom role an admin has already,
+  deliberately, granted `admin.role.update` to. Added to `docs/todo.md` as
+  a standalone security item rather than folded into this feature's scope.
+- **`applicant_documents`'s disposition decided now, not deferred a second
+  time.** In the v0.9.0 migration itself: drop it if it has zero rows,
+  rename it to `applicant_documents_legacy` if it has any — never abort the
+  upgrade, never destroy data, log the outcome loudly either way via an
+  explicit post-migration check in `upgrade-native.sh` rather than assuming
+  a SQL-level `NOTICE`/`WARNING` reaches the script's own output (unverified
+  either way). No `v0.10.0` step remains for this table; `v0.10.0` now only
+  drops `document_types.entity_type`.
+- **v0.8.0's boot-refuses-on-key-mismatch design and v0.9.0's three-PR split
+  (foundation / booking documents / rotation+docs) are both kept exactly as
+  designed**, confirmed rather than revised.
+- **`find-aadhaar-like-values.sh` stays under `deploy/native/`** — confirmed
+  it is a standalone, read-only tool that touches neither the install nor
+  the upgrade path, so v0.7.0's "no deploy-script changes" claim still
+  holds for the scripts an operator actually runs to install or upgrade.

@@ -570,32 +570,81 @@ the admin Custom Fields page has zero effect anywhere else in the product,
 exactly the same failure shape the original v0.2.3 gap analysis wanted to
 close for every entity.
 
-## Custom field values on BOOKING need a frozen-service exception
+## Dormant permission constants: `POSTSALES_DOCUMENT_*` and `PORTAL_DOCUMENT_UPLOAD`
 
-**Resolved for three of the four supported entity types' frontend, all
-four on the backend, as of the pre-pilot walkthrough** — APPLICANT,
-INQUIRY and PROJECT capture, validate, store, display and export custom
-field values through the real UI; UNIT's backend support is complete but
-has no frontend (see the entry above). See CLAUDE.md's v0.2.3 decisions
-entry for why storage is inline JSONB rather than EAV.
+**What:** four constants in `packages/shared/src/permissions.ts` —
+`postsales.document.read`, `postsales.document.upload`,
+`postsales.document.delete` and `portal.document.upload` — are checked by
+no route anywhere in `apps/api` (grepped). They are nonetheless granted
+in `packages/shared/src/roles.ts`:
+- sales_manager and sales_executive: read + upload (explicit)
+- company_admin: all three `postsales.document.*` (via the `postsales.*`
+  prefix)
+- super_admin: all four
+- customer: `portal.document.upload`
 
-`BOOKING` is the one remaining gap, deliberately. Giving it values
-means adding a `custom_fields` column to `bookings` and accepting the
-field in `BookingService.createBooking`, and that service is on
-CLAUDE.md's frozen list ("don't modify without asking"). Adding a
-nullable JSONB column does not affect ledger math, so this is a small
-change — but it crosses a line that is documented as requiring an
-explicit decision, so it waits until someone actually asks for it
-rather than being slipped in.
+Seeding and `sync-permissions` have put them in the `permissions` table
+and in `role_permissions`.
 
-Until then the gap is **visible rather than silent**: the API rejects
-a definition created for BOOKING (`supportsCustomFieldValues()` in
-`packages/shared/src/custom-field.dto.ts` is the single source of
-truth) and the admin UI marks the BOOKING tab "(unsupported)" with an
-explanation and a disabled Add Field button. When it is enabled, add
-`'BOOKING'` to `CUSTOM_FIELD_VALUE_ENTITIES`, add the column +
-migration, and wire `resolveValuesForWrite` into the booking
-create/update path exactly as the other four do.
+**Why it matters:** they look like the obvious names for uploaded
+documents, and reusing them would silently widen roles on upgrade: every
+existing sales_executive would gain access to KYC scans, and every
+customer a portal upload capability, with no admin decision. The uploaded-
+documents plan (`docs/plans/uploaded-documents-plan.md`, §2d) uses new
+`postsales.uploaded-document.*` names for exactly that reason.
+
+**Why deferred:** deleting a constant from the code removes nothing from
+the database — `syncPermissions` only inserts. A real cleanup needs:
+- a migration deleting these keys' `role_permissions` and `permissions`
+  rows
+- removing the constants and their entries in `ROLE_PERMISSIONS`
+
+Custom roles an admin built may include them — harmless, since nothing
+checks them, but the Roles UI still lists them until the rows go.
+
+**Unblocked by:** v0.9.0 shipping the replacement permissions. Clean up in
+any release after that, so the new names exist before the old ones
+disappear. (`POSTSALES_BOOKING_UPDATE` was dormant in the same way; it
+stops being dormant in v0.7.0, which uses it for booking custom-field
+edits.)
+
+## SECURITY: `RolesService.update()` doesn't check the grantor already holds a permission before granting it
+
+**What:** `RolesService.update()` (and `.create()`) let a caller with
+`admin.role.update` set a role's `permissionIds` to any list of valid
+permission ids — including permissions the caller's own role doesn't hold.
+There is no check anywhere in the method that the grantor's current
+permission set is a superset of what they're about to grant. Found while
+scoping the uploaded-documents plan
+(`docs/plans/uploaded-documents-plan.md`), which needed to reason about who
+can reach a newly-added permission.
+
+**Severity, reasoned, not assumed:** grepped `packages/shared/src/roles.ts`
+directly. On a fresh install, only `company_admin` (via its `admin.*`
+prefix filter) and `super_admin` (via `Object.values(P)`, every
+permission) hold `admin.role.update` — no lesser system role
+(`sales_manager`, `sales_executive`, `accounts`, `customer`, `broker`)
+lists any `ADMIN_ROLE_*` permission through any path. So today, on a
+fresh install, this gap lets an already-maximally-trusted role (one of the
+only two roles that can edit ANY role's permissions at all) grant itself
+something it doesn't yet hold — not an escalation across a boundary this
+system currently defines. **Low severity for that specific reason.** It
+would extend further if an admin has deliberately granted a lesser custom
+role `admin.role.update` — that role would inherit the same self-grant
+ability, but only because an equally privileged actor chose to hand it
+that permission first.
+
+**Fix, not built:** `RolesService.update()`/`.create()` should reject (or
+silently drop, with a clear response) any `permissionIds` entry the
+calling user's own current permission set doesn't already contain — the
+standard "you cannot grant what you don't hold" rule most RBAC systems
+enforce and this one doesn't. Needs its own test proving a role WITH
+`admin.role.update` but a narrower permission set (a hypothetical custom
+"role-editor" role, say) cannot use it to grant itself something broader.
+
+**Unblocked by:** nothing technical — it's a straightforward service-layer
+check. Deferred because it's a pre-existing gap unrelated to any feature
+currently being built, not because it's hard.
 
 ## Legacy system-written keys inside `custom_fields`
 
