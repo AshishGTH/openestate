@@ -4,6 +4,13 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## 2FA/TOTP enrolment and the broker NOC → cancel → clawback → statement flow have never been exercised on a native-install VM
+
+2FA/TOTP enrolment and the broker NOC → cancel → clawback → statement flow
+have never been exercised on a native-install VM. Run them during the
+v0.5.0 VM deployment, then restore the claim to installation.md if they
+pass.
+
 ## Nightly property test now takes ~32min at 2000 runs — consider sharding across matrix jobs instead of one long job
 
 The nightly (`schedule`/`workflow_dispatch`) CI run was silently cancelling
