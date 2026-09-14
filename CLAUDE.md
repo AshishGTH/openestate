@@ -103,9 +103,13 @@ docs/           Docusaurus site: install, admin, API, plugin dev
   keyed to their own applicant_id/broker_id.
 - Rate limiting on all auth endpoints and portal endpoints
   (@nestjs/throttler + Redis store).
-- Account lockout with exponential backoff after failed logins.
+- Account lockout after repeated failed logins: 5 wrong passwords locks
+  the account for a flat 15 minutes (not an escalating backoff — the same
+  15-minute lock repeats on every subsequent failure until a successful
+  login).
 - Secrets only via environment variables; ship `.env.example`,
-  never a real `.env`. Generate strong defaults in install.sh.
+  never a real `.env`. Generate strong defaults in
+  `deploy/native/install-native.sh`.
 - Security headers via helmet; strict CORS allowlist from env;
   CSRF protection on cookie-based portal sessions.
 - File uploads: extension + MIME + magic-byte validation, size
@@ -6527,3 +6531,52 @@ guarantee and can drift silently between releases with nobody rereading it.
 written.** If a claim can't be traced to a specific session's entry, say so
 explicitly in the doc (as `installation.md`'s 24.04 caveat now does) rather
 than asserting it.
+
+**Follow-up review of this same audit, before it merged, found the
+standing rule above hadn't actually been applied to the whole claim it was
+written about.** "Removed, not softened" was true for the OS-version half
+(24.04 → 25.10) but not for the other half: the "plus application-level
+flows (2FA/TOTP enrollment and recovery codes, broker NOC → cancel →
+commission clawback → statement PDF)" clause survived the edit unchanged,
+just re-attributed to 25.10 and strengthened with "repeated across
+multiple sessions" — with no more support than it had before. Grepped
+this log for every mention of "clawback" (four total, none a VM
+verification) and for "2FA/TOTP"/"recovery codes" near VM context
+(zero) — nothing here confirms those flows were ever exercised against a
+native install, on either Ubuntu version. The nearest real flow-level
+verification found (Phase 6's "Final manual click-through") ran against
+dev servers, not a native install, and doesn't mention clawback at all.
+Fixed by actually removing the clause this time, per the rule already
+stated above rather than a new one — `docs/todo.md` now carries the
+follow-up ("2FA/TOTP enrolment and the broker NOC → cancel → clawback →
+statement flow have never been exercised on a native-install VM") so the
+claim can be restored honestly once it's real.
+
+**Same review also found and fixed a real, invented UI label in the same
+file's §8**: "the admin 'Reset portal password' ... action" doesn't exist
+under that name anywhere in `apps/web`. The actual control is "Force
+password reset" (`UserForm.tsx`, verified against the button's own JSX
+text before writing the fix) on the Admin → Users page — it already
+works for portal-linked accounts (`UsersService.forcePasswordReset`
+branches on `applicantId`/`brokerId`), the doc just named it wrong.
+
+**And a third, unrelated drift found while re-reading this section: this
+file's own "Security rules" (near the top) said "Account lockout with
+exponential backoff after failed logins" — verified against
+`AuthService.recordFailedAttempt` (`MAX_FAILED_ATTEMPTS = 5`,
+`LOCKOUT_MINUTES = 15`) and there is no escalation logic at all; every
+lockout past the threshold is the same flat 15 minutes, repeating until a
+successful login. Corrected the line to say what the code actually does.
+Same section's "install.sh" reference was also stale — that file was
+deleted outright when Docker was removed (see this file's own "Docker
+removed entirely" entries); the real path is `deploy/native/
+install-native.sh`. The rest of that section was checked against code too:
+one line ("portal users... can only ever read rows keyed to their own
+applicant_id/broker_id") simplifies real RLS policies that also carve out
+co-applicants and booking-reachable rows rather than every table being a
+direct applicant_id/broker_id column match — true in effect, imprecise in
+mechanism, and left as a simplification rather than rewritten, since
+nothing in it is actually wrong the way the lockout line was. Everything
+else in the section (input validation, parameterized queries, Redis-backed
+rate limiting, security headers/CORS/CSRF, upload validation, audit log
+fields including IP) checked out against the code as written.

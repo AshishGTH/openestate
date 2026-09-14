@@ -38,10 +38,8 @@ an integration.
   names in its error messages.
 - **Tested platforms**: Ubuntu 25.10 with PostgreSQL 17 is the one
   genuinely re-verified end-to-end on a real VM — fresh install, real
-  HTTP login, upgrade/rollback, backup/restore, uninstall, plus
-  application-level flows (2FA/TOTP enrollment and recovery codes, broker
-  NOC → cancel → commission clawback → statement PDF) — repeated across
-  multiple sessions. **Ubuntu 24.04 LTS with PostgreSQL 16 is the
+  HTTP login, upgrade/rollback, backup/restore, uninstall — repeated
+  across multiple sessions. **Ubuntu 24.04 LTS with PostgreSQL 16 is the
   documented target, not a currently-confirmed one**: an earlier session
   claimed to have verified it, but a later session's own attempt to
   re-verify used the same 25.10 box by mistake and never actually touched
@@ -373,8 +371,9 @@ remotely; your data is yours).
 
 For a locked-out **portal** user (customer or broker), this script won't
 help — it explicitly excludes them. Use the portal's own self-service
-"forgot password" flow, or the admin "Reset portal password"/"Send
-Portal Invite" actions in the staff app instead.
+"forgot password" flow, or the admin "Force password reset" action
+(on the Admin → Users page — this works for portal-linked accounts too,
+not just staff) or "Send Portal Invite" in the staff app instead.
 
 ---
 
