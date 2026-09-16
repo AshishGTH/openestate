@@ -2981,6 +2981,8 @@ Implemented staff and portal together, per the standing rule above.
   — one bucket/guard reused across staff change-password, portal
   change-password, and the new staff reset-confirm endpoint below,
   rather than three near-identical guards.
+  **Corrected by the "Admin-generated password-reset links" entry
+  below** — one limit setting, but a separate counter per route handler.
 - Admin "force password reset for another user"
   (`POST /users/:id/force-password-reset`, `ADMIN_USER_UPDATE`) issues
   a reset link, never sets or reveals a password. Branches on the
@@ -2994,6 +2996,9 @@ Implemented staff and portal together, per the standing rule above.
   queue — unlike self-service `requestPasswordReset`, there's no
   identifier-guessing/timing concern here, the admin already knows
   this is a real user by id.
+  **Partly superseded by the "Admin-generated password-reset links"
+  entry below** — the token is now returned to the admin, and portal
+  targets are refused here rather than branched on.
 - `deploy/native/reset-admin-password.sh`: break-glass CLI for a
   locked-out super admin, run as root directly on the VM. Bypasses the
   API/login/2FA entirely — hashes a new (generated or `--password`)
@@ -6581,6 +6586,273 @@ else in the section (input validation, parameterized queries, Redis-backed
 rate limiting, security headers/CORS/CSRF, upload validation, audit log
 fields including IP) checked out against the code as written.
 
+### Admin-generated password-reset links — the token goes back to the admin (partly supersedes the force-reset bullet above)
+
+- **`POST /users/:id/force-password-reset` now answers `200 { token,
+  expiresAt }` and hands the raw token to the calling admin, once — not
+  `204` with the token only "sent".** This install has no mailer by
+  design: the only `CommunicationProvider` is
+  `ConsoleCommunicationProvider`, which logs, so the old flow issued a
+  live token that reached nobody. Delivery is now the admin's job, out
+  of band (WhatsApp, phone, in person). Only the SHA-256 hash is stored,
+  so the response is the one place the raw token exists. The best-effort
+  `provider.send()` stays, but a missing address or a provider error is
+  logged and swallowed — it can never stop the token reaching the admin.
+  **Superseded by the "Admin reset links: review fixes" entry below** —
+  the staff path no longer calls `provider.send()` at all.
+- **URL assembly is client-side, from `window.location.origin`**
+  (`<origin>/reset-password?token=<token>`), matching the portal-invite
+  precedent (`Applicant360.tsx`/`BrokerDetail.tsx` build
+  `/portal/invite/...` the same way). Deliberately no
+  `FRONTEND_URL`/`APP_URL` env var: the staff SPA is served at `/` on the
+  same origin as the API (`deploy/native/nginx`), so the browser already
+  knows the right base, and a configured one is one more per-install
+  value to get wrong.
+- **Portal targets are refused with 400; deactivated targets with 409.**
+  The old portal branch (a `PortalPasswordReset` row created from this
+  same function) is removed — portal users get a dedicated endpoint, not
+  yet built. The 409 matches `PortalPasswordResetProcessor`, which
+  already refuses deactivated users: an admin path should not be more
+  permissive than the unauthenticated one. Both checks run before any
+  token exists, so neither can leave a partial write.
+  **Built by the "Admin-generated portal password-reset links" entry
+  below** — that dedicated portal endpoint now exists.
+- **A new token supersedes any live one for that user.** One interactive
+  transaction: `SELECT … FOR UPDATE` on the user row (serialises
+  concurrent issuance, so two clicks cannot leave two live links), then
+  unconsumed, unexpired `PasswordReset` rows for that user and company
+  get `consumedAt = now()`, then the new row is created. Known cost,
+  logged in `docs/todo.md`: `consumedAt` now means "used" or
+  "superseded", and the table cannot tell which without a
+  `supersededAt` column.
+- **A `RESET_LINK_ISSUED` audit row is written explicitly, inside the same
+  transaction.** `forcePasswordReset` runs on `SYSTEM_PRISMA`, which
+  carries no audit extension (only `createTenantPrismaClient` gets
+  `auditExtension()`), so nothing beyond `PasswordReset.createdById`
+  would otherwise record which admin issued a link. Same direct
+  `auditLog.create` shape as `CustomFieldsService`'s purge: actor = the
+  admin, entity = the target user, IP from the request context, `after`
+  = the reset row's id and expiry. Neither the token nor its hash ever
+  appears in it, and sharing the transaction means no token can exist
+  without its audit row.
+- **Permission deliberately stays `ADMIN_USER_UPDATE`.** A dedicated
+  permission was considered and rejected: new `PERMISSIONS` keys
+  auto-sync only to `super_admin` on upgrade (see the pre-pilot
+  super_admin entry), so moving force-reset behind a new key would
+  silently remove it from every existing `company_admin` role until an
+  admin re-granted it by hand.
+- **Correction to the password-change entry: `PasswordChangeThrottlerGuard`
+  is not "one bucket" across its three routes.** `@nestjs/throttler`
+  6.5.0 keys every counter as `sha256(controller-handler-throttler-
+  tracker)`, so the 5-per-300s limit is one setting but each route
+  handler keeps its own counter, per user id when authenticated or per
+  IP for the public confirm endpoint. The guard's own comment now says
+  so. Test budgets are therefore per handler: no more than 5
+  unauthenticated calls to one handler per test run.
+- **Verified locally against CI's exact service images** —
+  `postgres:16-alpine` and `redis:7-alpine` as throwaway local test
+  infrastructure only (nothing added to the repo), provisioned by an
+  unmodified `scripts/test-setup.sh`: `apps/api` 604/604 and
+  `packages/db` 65/65 with zero skipped, and the changed test file
+  (19 tests) green on five separate runs. Not yet exercised in a browser
+  — the staff UI that displays the link is the next step.
+
+### Admin-generated portal password-reset links — the portal counterpart (builds the endpoint the entry above deferred)
+
+- **New `POST /admin/portal-password-resets`, mirroring
+  `POST /admin/portal-invites` in shape and permission
+  (`ADMIN_PORTAL_INVITE_SEND`).** The body is exactly one of
+  `applicantId`/`brokerId`; it answers `200 { token, expiresAt }` and
+  hands the raw token to the calling admin once, like the staff endpoint.
+  No new permission, for the same upgrade-sync reason as the staff entry
+  above: a new key would reach only `super_admin`, silently taking the
+  action away from every existing `company_admin`. Its own controller
+  (`PortalPasswordResetAdminController`) because Nest binds the path
+  prefix per class; same module, service, and permission as invites.
+- **A separate endpoint, not a relabelled invite action, because a
+  `PortalInvite` row and a `PortalPasswordReset` row are different facts.**
+  Re-sending an invite would also have reset the password (consuming an
+  invite re-issues credentials for an existing portal `User`), but if a
+  customer later disputes activity on their account, "was granted access"
+  and "had their password reset" must stay distinguishable in the audit
+  trail — a distinction that cannot be recovered later if collapsed now.
+- **`PortalPasswordReset.createdById` added — nullable, DB-level FK to
+  `users` (`ON DELETE SET NULL`, same shape as
+  `portal_invites.created_by_id`), no backfill.** NULL means self-service:
+  the portal user requested it and no admin was involved. Existing rows
+  have no known creator, and inventing one would falsify the trail. No RLS
+  change: the table's only policy is the `company_id` tenant isolation
+  policy.
+- **Portal reset URL template: `${origin}/portal/reset-password?token=...`.**
+  The portal SPA is built with base `/portal/`, served by nginx at
+  `/portal/`, and its `BrowserRouter` has `basename="/portal"`, so the
+  route path is `/reset-password`. Same shape as the existing invite
+  links (`/portal/invite/:id?token=`), and built client-side from
+  `window.location.origin` for the same reason as the staff link.
+- **`409` with a machine-readable `code: NO_PORTAL_ACCOUNT` when the
+  applicant or broker has no `User` row — they were never invited.** It is
+  the common case and has a specific remedy (send an invite), so the UI
+  must be able to tell it apart from the deactivated-account `409`, which
+  carries no code. `NO_PORTAL_ACCOUNT_ERROR` is exported from
+  `packages/shared` and used by both the API and the frontend, so the UI
+  never matches on message text. An applicant or broker outside the
+  caller's company is `404`.
+- **The service re-checks exactly-one-of `applicantId`/`brokerId`** rather
+  than relying on the zod boundary alone: called with neither, the lookup
+  would pass `{ id: undefined }`, which Prisma treats as no filter — it
+  would match an arbitrary broker in the company.
+- **Audit action `PORTAL_RESET_ISSUED`** — shortened because `action` is
+  `VarChar(20)` and `PORTAL_RESET_LINK_ISSUED` is 24 characters. Written
+  explicitly inside the same transaction as the token (SYSTEM_PRISMA has no
+  audit extension), never containing the token or its hash. Superseding,
+  the row lock, and the 30-minute expiry work exactly as on the staff path;
+  an admin-issued link also supersedes a pending self-service one (the
+  reverse doesn't happen yet — logged in `docs/todo.md`).
+- **This endpoint deliberately does NOT call `CommunicationProvider.send`.**
+  There is no mailer, and `ConsoleCommunicationProvider` logs message
+  bodies in plaintext (`docs/todo.md`); adding a new plaintext-token log
+  line for a customer account would be a regression. The staff path keeps
+  its best-effort send only because it already had one.
+  **Superseded by the "Admin reset links: review fixes" entry below** —
+  the staff path now follows this same rule.
+- **Verified locally against the same `postgres:16-alpine`/`redis:7-alpine`
+  test containers as the staff entry:** `apps/api` 614/614 and
+  `packages/db` 65/65 with zero skipped, and the new test file (10 tests)
+  green on three separate runs. Neither the staff nor the portal path has
+  been exercised in a real browser yet — the admin UI that shows and
+  copies the link is the next step.
+
+### Admin UI for the reset links — a complete URL, not a bare token (builds the UI the entry above deferred)
+
+- **Admins now see the complete reset URL, not a bare token, built at the
+  call site and passed whole into a shared `RevealedResetLink` component.**
+  Deliberately NOT built inside the component: the staff URL
+  (`<origin>/reset-password?token=`) and the portal URL
+  (`<origin>/portal/reset-password?token=`) differ by the `/portal`
+  prefix, and a conditional inside a shared component — "am I rendering
+  for staff or portal this time" — is exactly how a customer eventually
+  gets handed a 404 link. Each caller (`UserForm.tsx`, `Applicant360.tsx`,
+  `BrokerDetail.tsx`) builds its own URL from `window.location.origin`
+  and its own known prefix, and only the finished string crosses into the
+  shared component.
+- **`UsersService.findOne`/`findAll` now select `applicantId`/`brokerId`**
+  so the staff Users screen can tell a portal user from a staff user —
+  neither field was selected before, so the frontend had no way to know.
+  Both endpoints stay gated by `ADMIN_USER_READ`, unchanged.
+- **`UserForm.tsx` hides the reset button entirely for a portal-linked
+  user and links to the applicant or broker record instead**, because the
+  staff force-reset endpoint already refuses a portal user with `400`
+  (see the entry above) — showing the button and letting it fail would be
+  a dead end with no next step. The link goes to
+  `/postsales/applicants/:id` or `/postsales/brokers/:id` (confirmed
+  against `App.tsx`, not guessed), where the real portal-reset action
+  lives.
+- **`NO_PORTAL_ACCOUNT` renders as a calm inline message pointing at the
+  Send Portal Invite control, never as an error.** It is the expected
+  path for anyone who's never been invited, not a failure — red styling
+  or alarming language here would be wrong for the common case. Matched
+  only on the shared `NO_PORTAL_ACCOUNT_ERROR` constant, never on message
+  text.
+- **The applicant and broker portal blocks are now gated client-side by
+  `ADMIN_PORTAL_INVITE_SEND`** — the invite controls had no client-side
+  gate before this (the backend permission check was always the real
+  enforcement; this only stops the button rendering for someone who can't
+  use it). `BrokerDetail.tsx` checks it via the constant
+  (`hasPermission(PERMISSIONS.ADMIN_PORTAL_INVITE_SEND)`), not a string
+  literal like this file's older permission checks (`'admin.broker.update'`,
+  etc.) — a typo in a literal compiles clean and silently hides a
+  control; the constant can't drift from what the backend actually
+  guards. The file's other, pre-existing literal checks were left as-is —
+  fixing the one this feature touches, not unrelated churn.
+- **The existing invite-link display was converted to the same
+  reveal-once component**, replacing plain, no-copy-button text with the
+  Copy affordance — request logic (`sendPortalInvite`) untouched, only
+  how the resulting link is shown. Its real `expiresAt`
+  (`INVITE_EXPIRY_DAYS` — days, not `PasswordReset`'s 30 minutes) is
+  threaded through from the actual API response, confirmed against
+  `PortalAuthService.sendInvite`'s return value rather than assumed.
+- **The panel's relative-expiry line goes stale if left open, and a
+  stale "N minutes from now" about a dead link is worse than none** — an
+  admin mid-call with the customer, tab left open, would otherwise read a
+  reassuring number about a link that already died. Fixed with a
+  30-second `setInterval` recomputing "now" (cleared on unmount) plus an
+  unmistakable expired state that replaces the whole panel body once the
+  moment passes — the clock time (`toLocaleTimeString`) never goes stale
+  on its own, but the interval is still needed to flip the panel into
+  that expired state without a manual re-render. 30s chosen as frequent
+  enough to catch a reset link's 30-minute window promptly, negligible
+  overhead against an invite's multi-day one.
+- **Verification note, stated plainly rather than overstated:** `apps/web`
+  typecheck/lint/build are clean, and `apps/api`'s full suite (614/614,
+  zero skipped) still passes since the only backend change was the
+  additive `select`. **Nothing in this feature — staff or portal, Step 1
+  through this UI — has been exercised in a real browser yet.** This
+  file's own primary lesson and its auth/frontend-request-construction
+  standing rules are not yet satisfied for this work; a Playwright pass
+  is the next step, not a formality after the fact.
+
+### Admin reset links verified in a real browser — two real Copy bugs found and fixed (closes Layer One)
+
+- **Real-browser verification is now DONE for both flows, and this file's
+  browser rule is satisfied for this feature.** `apps/e2e/tests/admin-reset-links.spec.ts`
+  drives staff and portal reset end to end: an admin generates the link
+  in the real UI, the spec reads the URL from the DOM (never the
+  clipboard), a fresh logged-out browser context visits it, sets a
+  password, and logs in as that user; the old password is then refused.
+  It also covers supersede (the earlier link is rejected), the
+  portal-user pointer on UserForm, `NO_PORTAL_ACCOUNT`, and the reveal
+  panel. It runs on its own `resetLinks` fixture company because it
+  changes a portal user's password.
+- **Browser testing found two real bugs that every unit and API test
+  missed, both in code that had already passed review** — both in
+  `RevealedResetLink`'s Copy button:
+  - **`navigator.clipboard` is undefined on non-secure origins**, so Copy
+    threw and did nothing, with no feedback, on the DEFAULT native install
+    (plain HTTP on a LAN address). The feature is "copy this link and send
+    it", and copy did not work on the primary deployment target.
+  - **`writeText` was not awaited**, so "Copied" appeared even when the
+    write failed — an admin would then paste whatever was already on
+    their clipboard, possibly a live reset link for a different customer.
+
+  Both fixed: the write is awaited, success is claimed only on success,
+  and a missing API or a refused write both fall back to selecting the URL
+  text and telling the admin to press Ctrl+C (⌘C on Apple devices) — in
+  neutral, non-alarming text, since nothing is wrong with the link itself.
+  The spec covers both paths: `clipboard-write` is granted (write only,
+  never read) for success, and the Clipboard API is removed before page
+  load for the fallback, asserting the message and that the selection is
+  exactly the URL.
+- **This is another instance of this project's dominant bug class:
+  correct components, wrong composition, invisible to review, found only
+  by real execution.** Each line of the Copy handler was fine in isolation;
+  it was wrong only against the environment it actually ships into.
+- **UserForm's Password section now renders only after the user record
+  loads.** Until then `isPortalUser` read false, so a portal user's screen
+  briefly offered "Generate reset link" — which the API refuses with a 400
+  and a red toast. Gated on the loaded record, the same way the form's
+  `reset()` effect already is; the hydration logic itself is unchanged.
+- **A shared one-sentence warning (`ResetLinkSupersedeNote`) tells admins
+  that generating a new reset link cancels any earlier one**, on UserForm,
+  Applicant360 and BrokerDetail. It deliberately says "reset link", not
+  "link": portal invites do NOT supersede each other (`sendInvite` only
+  inserts), so a generic sentence would have been false on screen. The
+  invite asymmetry itself is logged in `docs/todo.md`.
+- **The e2e harness serves staff and portal on separate origins; production
+  serves both from one.** The spec asserts the generated URL's origin, path
+  and query strictly, then rewrites only the origin to reach the portal dev
+  server. So the harness proves the portal link carries the staff origin
+  and the correct `/portal` path — right for the supported single-origin
+  nginx layout, and it would not hold if the portal were ever hosted
+  separately.
+- Verified: `apps/web` typecheck/lint/build clean; the full Playwright
+  suite 47/47 with no retries; the new spec 6/6 on three consecutive runs
+  (the staff reset-confirm throttle — 5 per 300s, Redis-persisted — is
+  spent at exactly 2 per run, so local back-to-back runs clear the test
+  Redis's `throttle:*` keys first, as CI's fresh Redis does implicitly).
+  `user-role-edit.spec.ts` now waits for the form to populate before
+  typing — a pre-existing `reset()` race this spec's extra worker load
+  surfaced, worked around in the spec and logged in `docs/todo.md`.
+
 ### Uploaded documents plan: owner decisions (2026-09-14)
 
 Plan: `docs/plans/uploaded-documents-plan.md` (revision 2). Documentation
@@ -6753,3 +7025,71 @@ accidental 12-digit entry — layer (a) narrowed to the three Aadhaar-specific
 words is enough to keep it a true zero-known-false-positive layer, which
 was the property the previous entry claimed for it but didn't actually
 have while `uid` was still in the rule.
+
+### Admin reset links: review fixes (before merge)
+
+A review of this branch found one leak that blocked the merge and three
+gaps. All fixed on the branch, each staff and portal together.
+
+- **Admin-issued staff reset tokens no longer go through
+  `CommunicationProvider.send()`.** The portal half of this branch had
+  already dropped the send, because `ConsoleCommunicationProvider` logs
+  message bodies in plaintext, but the staff half still sent the raw token
+  through it. `UsersService.forcePasswordReset` now follows the portal
+  rule and never sends; the token reaches only the admin, in the response.
+  Nothing real was lost: `ConsoleCommunicationProvider` is the only
+  implementation, bound unconditionally in `QueuesModule` with no setting
+  to swap it, and no messaging plugin exists. Scope, stated precisely: this
+  covers **admin-issued staff reset tokens only**. The portal self-service
+  reset (`PortalPasswordResetProcessor`) still sends its raw token through
+  the console provider, so reset tokens do still reach server logs through
+  that path — see `docs/todo.md`.
+- **Every other way a user's password gets set now consumes that user's
+  outstanding reset links.** Before this, a stale admin-issued link could
+  overwrite a password the user had just chosen — proven on all four paths
+  by tests that failed before the fix. The four: staff change-password,
+  staff force-change-password (first login), portal change-password, and
+  portal invite consumption for an existing account (which also
+  reactivates it). Each batches an `updateMany` on its own reset table into
+  the same transaction as the password write, after it. The user-row update
+  waits on the `FOR UPDATE` lock admin issuance takes, so a link issued at
+  the same moment is either consumed or created after the new password.
+  Uniform on all four paths. The only variation is that invite consumption
+  does it only when the account already exists (a new account can't hold
+  links). No new column: `consumedAt` now also covers "invalidated by a
+  password change", which widens the existing used-vs-superseded ambiguity
+  already logged in `docs/todo.md`. Not changed: `reset-admin-password.sh`
+  (changing it means redoing its VM verification; logged in
+  `docs/todo.md`) and redemption itself, which still doesn't consume a
+  portal user's other live link (disclosed, left as-is by ruling).
+- **A deactivated account can no longer use a reset link, and
+  reactivation doesn't revive one.** Two layers, staff and portal:
+  `UsersService.deactivate()` now consumes the user's live links in both
+  reset tables (that endpoint deactivates staff and portal users alike),
+  and both `confirmPasswordReset` methods refuse an inactive account with
+  the same 401. The refusal is a conditional `updateMany` (`isActive:
+  true`) after the link is claimed, so the refused link is used up and a
+  concurrent deactivation can't slip between a check and the write.
+  Checked before building it: no onboarding or invite path redeems a reset
+  token. The only code that sets `isActive = false` is
+  `deactivate()`, every reset-link creator refuses inactive users, and
+  invite consumption (which does reactivate) uses `PortalInvite`, not a
+  reset token. The consume in `deactivate()` runs through the system
+  client after the tenant transaction, because the staff reset table isn't
+  tenant-scoped. The redemption check covers the moment between those two
+  writes. One narrower race remains, logged in `docs/todo.md`: issuance
+  checks `isActive` before taking the user-row lock, so a link created
+  just after deactivation's consume survives a quick reactivation if
+  nobody tried it in between.
+- **Verified locally** against the same `postgres:16-alpine` and
+  `redis:7-alpine` containers CI uses (throwaway test infrastructure, not
+  added to the repo). Every new test file failed against the code before
+  its fix, for the reason the fix addresses, and passed after it. The
+  cross-surface binding test passed against the branch before any code
+  change, as a regression guard. Full `apps/api` suite with all four fixes
+  in place (`PROPERTY_NUM_RUNS=500`): 100 files, 672 tests, 672 passed,
+  0 failed, 0 skipped. Playwright `admin-reset-links.spec.ts` in real
+  Chromium: 6/6. The staff and portal redemption scenarios in it are the
+  browser proof that active accounts still redeem after the new
+  inactive-account check. No new Playwright scenarios: none of the four
+  fixes changes what the browser sends or shows.

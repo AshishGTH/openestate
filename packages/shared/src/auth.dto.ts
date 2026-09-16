@@ -50,6 +50,15 @@ export const passwordResetConfirmSchema = z
 
 export type PasswordResetConfirmDto = z.infer<typeof passwordResetConfirmSchema>;
 
+// POST /users/:id/force-password-reset. The raw token appears here once and is
+// never retrievable again; the client builds `${origin}/reset-password?token=`.
+export const forcePasswordResetResponseSchema = z.object({
+  token: z.string(),
+  expiresAt: z.string().datetime(),
+});
+
+export type ForcePasswordResetResponse = z.infer<typeof forcePasswordResetResponseSchema>;
+
 export const tokenResponseSchema = z.object({
   accessToken: z.string(),
   expiresIn: z.number(),

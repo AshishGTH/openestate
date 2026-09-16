@@ -9,6 +9,7 @@ interface AllFixtures {
   plcBooking: E2eFixture;
   ticketReply: E2eFixture;
   portalTwoFactor: E2eFixture;
+  resetLinks: E2eFixture;
 }
 
 /** Reads the named fixture global-setup.ts wrote before any spec ran. */

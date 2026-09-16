@@ -8,14 +8,14 @@
  *    behavior revoked everything, including the session that just
  *    changed its own password), and is rate-limited.
  *  - POST /users/:id/force-password-reset (admin-triggered, for another
- *    user): staff targets get a new PasswordReset row + confirm via
- *    /auth/password-reset/confirm; portal targets reuse the existing
- *    PortalPasswordReset row + the existing /portal/auth/password-reset/
- *    confirm unchanged. Never sets/reveals a password directly.
+ *    STAFF user): returns a one-time token for manual out-of-band delivery,
+ *    confirmed via /auth/password-reset/confirm. A new token supersedes any
+ *    live one; portal users (400) and deactivated users (409) are refused.
+ *    Never sets/reveals a password directly.
  *
  * Requires the compiled dist/ — see e2e-portal.test.ts for why.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import request from 'supertest';
@@ -25,7 +25,12 @@ import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
 import * as argon2 from '@node-rs/argon2';
-import { ALL_PERMISSIONS, ROLE_PERMISSIONS, SYSTEM_ROLES } from '@openestate/shared';
+import {
+  ALL_PERMISSIONS,
+  ROLE_PERMISSIONS,
+  SYSTEM_ROLES,
+  forcePasswordResetResponseSchema,
+} from '@openestate/shared';
 import {
   makeClients,
   seedCompany,
@@ -306,92 +311,113 @@ describeIf('e2e password-change + admin force-password-reset', () => {
   });
 
   describe('admin force-password-reset for another user', () => {
-    it('staff target: issues a reset link (never a password) and the confirm flow works end-to-end', async () => {
-      const admin = await createStaffUser('AdminPass111');
-      const target = await createStaffUser('TargetOldPass111');
-      const { agent, token, csrf } = await staffLogin(admin.email, 'AdminPass111');
+    // Every confirm call here is unauthenticated, so PasswordChangeThrottlerGuard
+    // tracks it by IP: keep this block at <= 5 confirm calls (currently 4), or
+    // the 'password-change' bucket starts answering 429.
 
-      await agent
-        .post(`/api/v1/users/${target.id}/force-password-reset`)
+    // Takes the expected status rather than returning the request: a supertest
+    // Test is thenable, so returning it from an async function would send it
+    // unasserted and hand back a Response with no .expect().
+    async function forceReset(adminEmail: string, adminPassword: string, targetId: string, status: number) {
+      const { agent, token, csrf } = await staffLogin(adminEmail, adminPassword);
+      return agent
+        .post(`/api/v1/users/${targetId}/force-password-reset`)
         .set('Authorization', `Bearer ${token}`)
         .set('X-CSRF-Token', csrf)
-        .expect(204);
+        .expect(status);
+    }
 
-      const reset = await systemPrisma.passwordReset.findFirst({
-        where: { userId: target.id },
-        orderBy: { createdAt: 'desc' },
-      });
-      expect(reset).toBeTruthy();
-      expect(reset.consumedAt).toBeNull();
-      expect(reset.expiresAt.getTime()).toBeGreaterThan(Date.now());
-
-      // The raw token only ever crosses the (simulated) notification
-      // channel — reconstruct a request with a token we control instead of
-      // trying to intercept ConsoleCommunicationProvider's console.log, to
-      // test the real confirm endpoint's guard chain and single-use logic.
-      // Unique per run — a fixed literal here previously collided with an
-      // already-consumed row left by an earlier run against this same
-      // persistent test DB (findFirst with no ordering picked the stale,
-      // already-consumed row instead of this test's fresh one, a false
-      // "Invalid or expired reset token"; not a bug in the confirm
-      // endpoint itself, which only ever sees real, cryptographically
-      // random tokens in production).
-      const raw = `e2e-known-staff-reset-token-${TAG}`;
-      await systemPrisma.passwordReset.update({
-        where: { id: reset.id },
-        data: { tokenHash: createHash('sha256').update(raw).digest('hex') },
-      });
-
-      await request(app.getHttpServer())
+    function confirm(token: string, newPassword: string) {
+      return request(app.getHttpServer())
         .post('/api/v1/auth/password-reset/confirm')
-        .send({ token: raw, newPassword: 'ResetViaAdmin123' })
-        .expect(204);
+        .send({ token, newPassword });
+    }
 
+    it('returns 200 with a one-time token, stores only its hash, and audits the issue', async () => {
+      const admin = await createStaffUser('AdminPass111');
+      const target = await createStaffUser('TargetOldPass111');
+
+      const res = await forceReset(admin.email, 'AdminPass111', target.id, 200);
+      const body = forcePasswordResetResponseSchema.parse(res.body);
+      expect(new Date(body.expiresAt).getTime()).toBeGreaterThan(Date.now());
+
+      const reset = await systemPrisma.passwordReset.findFirstOrThrow({ where: { userId: target.id } });
+      expect(reset.tokenHash).toBe(createHash('sha256').update(body.token).digest('hex'));
+      expect(reset.consumedAt).toBeNull();
+      expect(reset.createdById).toBe(admin.id);
+
+      const audit = await systemPrisma.auditLog.findFirstOrThrow({
+        where: { entityId: target.id, action: 'RESET_LINK_ISSUED' },
+      });
+      expect(audit.userId).toBe(admin.id);
+      expect(JSON.stringify(audit.after)).not.toContain(body.token);
+    });
+
+    it('the returned token completes /auth/password-reset/confirm, exactly once', async () => {
+      const admin = await createStaffUser('AdminPass111');
+      const target = await createStaffUser('TargetOldPass111');
+      const { body } = await forceReset(admin.email, 'AdminPass111', target.id, 200);
+
+      await confirm(body.token, 'ResetViaAdmin123').expect(204);
       await request(app.getHttpServer())
         .post('/api/v1/auth/login')
         .send({ email: target.email, password: 'ResetViaAdmin123' })
         .expect(200);
-
-      // Single-use: the same token can't be replayed.
-      await request(app.getHttpServer())
-        .post('/api/v1/auth/password-reset/confirm')
-        .send({ token: raw, newPassword: 'SomethingElse456' })
-        .expect(401);
+      await confirm(body.token, 'SomethingElse456').expect(401);
     });
 
-    it('portal target: reuses the existing self-service PortalPasswordReset model and confirm endpoint', async () => {
+    it('issuing a second link invalidates the first', async () => {
+      const admin = await createStaffUser('AdminPass111');
+      const target = await createStaffUser('TargetOldPass111');
+      const first = (await forceReset(admin.email, 'AdminPass111', target.id, 200)).body.token;
+      const second = (await forceReset(admin.email, 'AdminPass111', target.id, 200)).body.token;
+
+      await confirm(first, 'FromFirstLink123').expect(401);
+      await confirm(second, 'FromSecondLink123').expect(204);
+    });
+
+    it('returns 409 for a deactivated user and issues nothing', async () => {
+      const admin = await createStaffUser('AdminPass111');
+      const target = await createStaffUser('TargetOldPass111');
+      await systemPrisma.user.update({ where: { id: target.id }, data: { isActive: false } });
+
+      await forceReset(admin.email, 'AdminPass111', target.id, 409);
+      expect(await systemPrisma.passwordReset.count({ where: { userId: target.id } })).toBe(0);
+    });
+
+    it('returns 400 for a portal user and issues nothing', async () => {
       const admin = await createStaffUser('AdminPass111');
       const target = await createCustomerUser('TargetOldPortal111');
-      const { agent, token, csrf } = await staffLogin(admin.email, 'AdminPass111');
 
-      await agent
-        .post(`/api/v1/users/${target.id}/force-password-reset`)
-        .set('Authorization', `Bearer ${token}`)
-        .set('X-CSRF-Token', csrf)
-        .expect(204);
+      await forceReset(admin.email, 'AdminPass111', target.id, 400);
+      expect(await systemPrisma.passwordReset.count({ where: { userId: target.id } })).toBe(0);
+      expect(await systemPrisma.portalPasswordReset.count({ where: { userId: target.id } })).toBe(0);
+    });
 
-      const reset = await systemPrisma.portalPasswordReset.findFirst({
-        where: { userId: target.id },
-        orderBy: { createdAt: 'desc' },
-      });
-      expect(reset).toBeTruthy();
+    it('returns 404 for a user in a different company', async () => {
+      const admin = await createStaffUser('AdminPass111');
+      const other = await seedCompany(systemPrisma);
+      try {
+        await forceReset(admin.email, 'AdminPass111', other.userId, 404);
+        expect(await systemPrisma.passwordReset.count({ where: { userId: other.userId } })).toBe(0);
+      } finally {
+        await cleanupCompany(systemPrisma, other.companyId);
+      }
+    });
 
-      const raw = `e2e-known-portal-reset-token-${TAG}`;
-      await systemPrisma.portalPasswordReset.update({
-        where: { id: reset.id },
-        data: { tokenHash: createHash('sha256').update(raw).digest('hex') },
-      });
+    it('never calls CommunicationProvider.send', async () => {
+      const { COMMUNICATION_PROVIDER } = createRequire(import.meta.url)('../dist/queues/communication-provider');
+      const provider = app.get(COMMUNICATION_PROVIDER);
+      const send = vi.spyOn(provider, 'send');
+      try {
+        const admin = await createStaffUser('AdminPass111');
+        const target = await createStaffUser('TargetOldPass111');
 
-      await request(app.getHttpServer())
-        .post('/api/v1/portal/auth/password-reset/confirm')
-        .send({ token: raw, newPassword: 'ResetViaAdminPortal123' })
-        .expect(204);
-
-      // Verified directly, not via another real portal login — see the
-      // login-count accounting note in the portal change-password tests
-      // above (this file shares the portal-auth bucket's own 5/5min budget).
-      const updated = await systemPrisma.user.findFirst({ where: { id: target.id } });
-      expect(await argon2.verify(updated.passwordHash, 'ResetViaAdminPortal123')).toBe(true);
+        await forceReset(admin.email, 'AdminPass111', target.id, 200);
+        expect(send).not.toHaveBeenCalled();
+      } finally {
+        send.mockRestore();
+      }
     });
 
     it('rejects a non-admin caller (permission-gated)', async () => {

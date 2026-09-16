@@ -1,23 +1,26 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { randomUUID, createHash } from 'node:crypto';
 import * as argon2 from '@node-rs/argon2';
-import { PrismaClient } from '@openestate/db';
+import { PrismaClient, getCurrentIpAddress } from '@openestate/db';
 import { SYSTEM_PRISMA } from '../database/database.module';
 import { TokenService } from '../auth/token.service';
 import { TotpService } from '../auth/totp.service';
 import { reserveTotpAttempt, TOTP_ATTEMPTS_CLEARED } from '../auth/totp-lockout';
 import { PORTAL_QUEUE } from '../queues/queues.module';
 import { PROCESS_PASSWORD_RESET_JOB } from './portal-password-reset.processor';
-import { SYSTEM_ROLES } from '@openestate/shared';
+import { SYSTEM_ROLES, NO_PORTAL_ACCOUNT_ERROR } from '@openestate/shared';
 import type {
+  AdminPortalPasswordResetDto,
   PortalLoginDto,
   PortalInviteConsumeDto,
   PortalPasswordResetRequestDto,
@@ -29,6 +32,7 @@ const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MINUTES = 15;
 const INVITE_WRONG_ATTEMPT_CAP = 3;
 const INVITE_EXPIRY_DAYS = 7;
+const RESET_EXPIRY_MS = 30 * 60 * 1000;
 
 interface PortalLoginResult {
   requiresTwoFactor: boolean;
@@ -220,7 +224,10 @@ export class PortalAuthService {
     if (!valid) throw new UnauthorizedException('Current password is incorrect');
 
     const hash = await argon2.hash(newPassword, { algorithm: argon2.Algorithm.Argon2id });
-    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } });
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } }),
+      this.consumeResetLinks(userId),
+    ]);
 
     // Leaves the session that made this request alone — mirrors the
     // staff-side fix in AuthService.changePassword (see CLAUDE.md's
@@ -346,12 +353,18 @@ export class PortalAuthService {
       where: invite.applicantId ? { applicantId: invite.applicantId } : { brokerId: invite.brokerId },
     });
 
+    // An existing account can hold reset links; a brand-new one can't.
     const user = existingUser
-      ? await this.prisma.user.update({
-          where: { id: existingUser.id },
-          data: { passwordHash, isActive: true, forcePasswordChange: false },
-          include: { role: { include: { permissions: { include: { permission: true } } } } },
-        })
+      ? (
+          await this.prisma.$transaction([
+            this.prisma.user.update({
+              where: { id: existingUser.id },
+              data: { passwordHash, isActive: true, forcePasswordChange: false },
+              include: { role: { include: { permissions: { include: { permission: true } } } } },
+            }),
+            this.consumeResetLinks(existingUser.id),
+          ])
+        )[0]
       : await this.prisma.user.create({
           data: {
             companyId: invite.companyId,
@@ -408,11 +421,119 @@ export class PortalAuthService {
     if (claimed.length === 0) throw new UnauthorizedException('Invalid or expired reset token');
 
     const passwordHash = await argon2.hash(dto.newPassword, { algorithm: argon2.Algorithm.Argon2id });
-    await this.prisma.user.update({
-      where: { id: reset.userId },
+    // Same inactive-account refusal as AuthService.confirmPasswordReset: the
+    // link is already claimed, and the conditional write can't race a
+    // deactivation.
+    const { count } = await this.prisma.user.updateMany({
+      where: { id: reset.userId, isActive: true },
       data: { passwordHash, failedLoginAttempts: 0, lockedUntil: null },
     });
+    if (count === 0) throw new UnauthorizedException('Invalid or expired reset token');
     await this.tokenService.revokeAllForUser(reset.userId);
+  }
+
+  /**
+   * Staff-triggered reset for an applicant's or broker's EXISTING portal
+   * account — the portal counterpart of UsersService.forcePasswordReset.
+   * Returns a one-time token for the admin to deliver out-of-band; only the
+   * SHA-256 hash is stored, and the existing confirmPasswordReset accepts it
+   * unchanged. Issuing a token consumes any still-live one for that account
+   * (self-service ones included), so at most one link is in circulation.
+   *
+   * Deliberately never calls CommunicationProvider.send: this install has no
+   * mailer, and ConsoleCommunicationProvider logs message bodies in plaintext
+   * (docs/todo.md) — a send here would only add a log line holding a live
+   * token. Delivery is entirely the admin's job.
+   */
+  async issueAdminPasswordReset(
+    companyId: string,
+    adminUserId: string,
+    dto: AdminPortalPasswordResetDto,
+  ): Promise<{ token: string; expiresAt: Date }> {
+    // The zod schema already enforces this at the API boundary; repeated here
+    // because an absent id would otherwise become Prisma's "no filter".
+    if (!dto.applicantId === !dto.brokerId) {
+      throw new BadRequestException('Exactly one of applicantId or brokerId is required');
+    }
+    const principal = dto.applicantId ? { applicantId: dto.applicantId } : { brokerId: dto.brokerId };
+
+    const exists = dto.applicantId
+      ? await this.prisma.applicant.findFirst({ where: { id: dto.applicantId, companyId }, select: { id: true } })
+      : await this.prisma.broker.findFirst({ where: { id: dto.brokerId, companyId }, select: { id: true } });
+    if (!exists) throw new NotFoundException(dto.applicantId ? 'Applicant not found' : 'Broker not found');
+
+    const user = await this.prisma.user.findFirst({
+      where: { companyId, ...principal },
+      select: { id: true, isActive: true },
+    });
+    if (!user) {
+      throw new ConflictException({
+        message: 'This person has no portal account yet — send them a portal invite instead.',
+        code: NO_PORTAL_ACCOUNT_ERROR,
+      });
+    }
+    if (!user.isActive) {
+      throw new ConflictException(
+        'Cannot reset the password of a deactivated portal account. Reactivate it first.',
+      );
+    }
+
+    const token = randomUUID();
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const expiresAt = new Date(Date.now() + RESET_EXPIRY_MS);
+    const ipAddress = getCurrentIpAddress();
+
+    await this.prisma.$transaction(async (tx) => {
+      // Raw SQL because Prisma has no SELECT ... FOR UPDATE. Locking the user
+      // row serializes concurrent issuances for one account, so the supersede
+      // below cannot miss a token another request is creating at that moment.
+      await tx.$queryRaw`SELECT 1 FROM users WHERE id = ${user.id}::uuid FOR UPDATE`;
+      const now = new Date();
+      await tx.portalPasswordReset.updateMany({
+        where: { companyId, userId: user.id, consumedAt: null, expiresAt: { gt: now } },
+        data: { consumedAt: now },
+      });
+      const reset = await tx.portalPasswordReset.create({
+        data: { companyId, userId: user.id, tokenHash, expiresAt, createdById: adminUserId },
+      });
+      // SYSTEM_PRISMA carries no audit extension, so this auth event is written
+      // explicitly — same direct insert as the staff path. The token is never
+      // recorded.
+      await tx.auditLog.create({
+        data: {
+          companyId,
+          userId: adminUserId,
+          entityType: 'User',
+          entityId: user.id,
+          action: 'PORTAL_RESET_ISSUED',
+          after: {
+            portalPasswordResetId: reset.id,
+            applicantId: dto.applicantId ?? null,
+            brokerId: dto.brokerId ?? null,
+            expiresAt: expiresAt.toISOString(),
+          },
+          ipAddress,
+        },
+      });
+    });
+
+    return { token, expiresAt };
+  }
+
+  /**
+   * A reset link still live when the user sets their password another way
+   * predates that password, so it must not be able to overwrite it. Always
+   * batched after the password write, in the same transaction: that update
+   * waits on the row lock issueAdminPasswordReset takes, so a link issued at
+   * the same moment is either consumed here or created after the change.
+   * Mirrors AuthService.consumeResetLinks.
+   */
+  private consumeResetLinks(userId: string) {
+    const now = new Date();
+    return this.prisma.portalPasswordReset.updateMany({
+      where: { userId, consumedAt: null, expiresAt: { gt: now } },
+      data: { consumedAt: now },
+    });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

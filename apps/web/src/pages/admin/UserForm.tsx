@@ -1,11 +1,22 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useForm, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQuery } from '@tanstack/react-query';
-import { createUserSchema, updateUserSchema, pickForSchema, type CreateUserDto, type UpdateUserDto } from '@openestate/shared';
+import {
+  createUserSchema,
+  updateUserSchema,
+  pickForSchema,
+  forcePasswordResetResponseSchema,
+  PERMISSIONS,
+  type CreateUserDto,
+  type UpdateUserDto,
+  type ForcePasswordResetResponse,
+} from '@openestate/shared';
 import { api } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
+import { useAuth } from '../../lib/auth';
+import RevealedResetLink, { ResetLinkSupersedeNote } from '../../components/RevealedResetLink';
 
 interface Role {
   id: string;
@@ -22,6 +33,7 @@ export default function UserForm() {
   const { id } = useParams<{ id: string }>();
   const isEdit = id && id !== 'new';
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
   const [error, setError] = useState('');
 
   // GET /roles returns a plain array, not {data, meta} — see Roles.tsx's
@@ -45,6 +57,9 @@ export default function UserForm() {
     queryFn: () => api<Record<string, unknown>>(`/users/${id}`),
     enabled: !!isEdit,
   });
+  const applicantId = existingUser?.applicantId as string | null | undefined;
+  const brokerId = existingUser?.brokerId as string | null | undefined;
+  const isPortalUser = !!applicantId || !!brokerId;
 
   const {
     register,
@@ -110,8 +125,11 @@ export default function UserForm() {
     [['users'], ['user', id!]],
   );
 
-  const forceResetMutation = useApiMutation<unknown, void>('POST', `/users/${id}/force-password-reset`);
-  const [resetSent, setResetSent] = useState(false);
+  const forceResetMutation = useApiMutation<ForcePasswordResetResponse, void>(
+    'POST',
+    `/users/${id}/force-password-reset`,
+  );
+  const [resetLink, setResetLink] = useState<{ url: string; expiresAt: string } | null>(null);
 
   const onSubmit = async (data: CreateUserDto) => {
     setError('');
@@ -260,27 +278,61 @@ export default function UserForm() {
         </div>
       </form>
 
-      {isEdit && (
+      {/* Gated on the loaded record, like the reset() effect above: until it
+          arrives isPortalUser reads false, so a portal user's screen would
+          briefly offer the staff button — which the API refuses with a 400. */}
+      {isEdit && existingUser && hasPermission(PERMISSIONS.ADMIN_USER_UPDATE) && (
         <div className="mt-8 rounded-md border border-slate-200 p-4">
           <h2 className="text-sm font-medium text-slate-900">Password</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            Sends this user a reset link. Their current password stays valid until they use it —
-            you never see or set their password directly.
-          </p>
-          {resetSent && (
-            <p className="mt-2 text-xs text-green-700">Reset link sent.</p>
+          {isPortalUser ? (
+            <p className="mt-1 text-xs text-slate-500">
+              This is a portal user. Reset their password from the{' '}
+              {applicantId ? (
+                <Link to={`/postsales/applicants/${applicantId}`} className="text-blue-600 hover:underline">
+                  customer record
+                </Link>
+              ) : (
+                <Link to={`/postsales/brokers/${brokerId}`} className="text-blue-600 hover:underline">
+                  broker record
+                </Link>
+              )}
+              , not here.
+            </p>
+          ) : (
+            <>
+              <p className="mt-1 text-xs text-slate-500">
+                Generates a one-time reset link for you to send this user directly. Their current
+                password stays valid until they use it — you never see or set their password directly.
+              </p>
+              <ResetLinkSupersedeNote />
+              <button
+                type="button"
+                onClick={() => {
+                  setResetLink(null);
+                  forceResetMutation.mutate(undefined, {
+                    onSuccess: (data) => {
+                      const parsed = forcePasswordResetResponseSchema.parse(data);
+                      setResetLink({
+                        url: `${window.location.origin}/reset-password?token=${parsed.token}`,
+                        expiresAt: parsed.expiresAt,
+                      });
+                    },
+                  });
+                }}
+                disabled={forceResetMutation.isPending}
+                className="mt-3 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                {forceResetMutation.isPending ? 'Generating…' : 'Generate reset link'}
+              </button>
+              {resetLink && (
+                <RevealedResetLink
+                  url={resetLink.url}
+                  expiresAt={resetLink.expiresAt}
+                  onDismiss={() => setResetLink(null)}
+                />
+              )}
+            </>
           )}
-          <button
-            type="button"
-            onClick={() => {
-              setResetSent(false);
-              forceResetMutation.mutate(undefined, { onSuccess: () => setResetSent(true) });
-            }}
-            disabled={forceResetMutation.isPending}
-            className="mt-3 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-          >
-            {forceResetMutation.isPending ? 'Sending…' : 'Force password reset'}
-          </button>
         </div>
       )}
     </div>

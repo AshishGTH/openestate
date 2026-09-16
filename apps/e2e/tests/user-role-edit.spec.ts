@@ -75,6 +75,11 @@ test('editing a user (name + role) persists, through the real form submit', asyn
     await expect(row).toBeVisible();
     await row.getByRole('link', { name: 'Edit' }).click();
     await expect(page).toHaveURL(/\/admin\/users\/.+/);
+    // Wait for the form to be populated before typing. UserForm's reset()
+    // fills every field once the user, roles and users list have all
+    // loaded, and overwrites anything typed before then — a pre-existing
+    // app race (docs/todo.md), worked around here rather than fixed.
+    await expect(controlAfterLabel(page, 'Name')).toHaveValue(targetName);
 
     const editedName = `${targetName} Edited`;
     await controlAfterLabel(page, 'Name').fill(editedName);
