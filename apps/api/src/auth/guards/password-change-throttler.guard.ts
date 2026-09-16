@@ -4,11 +4,13 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 export const PASSWORD_CHANGE_THROTTLER = 'password-change';
 
 /**
- * Shared across staff change-password, portal change-password, and the
- * staff password-reset confirm endpoint (mirrors PortalReadThrottlerGuard's
- * shape/tracker). Tracked by user id when authenticated (change-password),
- * falling back to IP for the public, unauthenticated confirm endpoint —
- * one bucket, one guard, reused by all three rather than a guard per route.
+ * Applied to staff change-password, portal change-password, and the staff
+ * password-reset confirm endpoint (mirrors PortalReadThrottlerGuard's
+ * shape/tracker). The 'password-change' limit (5 per 300s) is one configured
+ * setting, but @nestjs/throttler keys every counter by controller, handler,
+ * throttler name and tracker — so each route handler keeps its own counter,
+ * per user id when authenticated (change-password) or per IP for the public
+ * confirm endpoint. One guard class, not one bucket shared across the routes.
  */
 @Injectable()
 export class PasswordChangeThrottlerGuard extends ThrottlerGuard {

@@ -37,6 +37,11 @@ export default async function globalSetup() {
     // set, so the marginal cost of the ticket/land-booking rows this spec
     // doesn't use is small next to a second seed.ts code path to maintain.
     portalTwoFactor: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
+    // Its own company and portal user, for the same reason as the two
+    // above: admin-reset-links.spec.ts resets this portal user's password
+    // through a generated link, which would break every other spec that
+    // logs in as a shared fixture's portal user with the original one.
+    resetLinks: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
   };
   writeFileSync(path.join(__dirname, '.fixture-state.json'), JSON.stringify(fixtures, null, 2));
 }

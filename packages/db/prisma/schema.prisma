@@ -2623,17 +2623,20 @@ model PortalInvite {
   @@map("portal_invites")
 }
 
-/// Self-service password reset — same hashed/single-use/expiring shape
-/// as PortalInvite. Rows are created by PortalPasswordResetProcessor
-/// (async, off the request path), never by the request handler itself.
+/// Portal password reset — same hashed/single-use/expiring shape as
+/// PortalInvite. Two creators: PortalPasswordResetProcessor for a
+/// self-service request (async, off the request path; createdById NULL),
+/// and PortalAuthService.issueAdminPasswordReset when an admin issues a
+/// link (createdById = that admin). Scalar FK, no Prisma relation.
 model PortalPasswordReset {
-  id         String    @id @default(uuid()) @db.Uuid
-  companyId  String    @map("company_id") @db.Uuid
-  userId     String    @map("user_id") @db.Uuid
-  tokenHash  String    @map("token_hash") @db.VarChar(64)
-  expiresAt  DateTime  @map("expires_at")
-  consumedAt DateTime? @map("consumed_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  id          String    @id @default(uuid()) @db.Uuid
+  companyId   String    @map("company_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tokenHash   String    @map("token_hash") @db.VarChar(64)
+  expiresAt   DateTime  @map("expires_at")
+  consumedAt  DateTime? @map("consumed_at")
+  createdById String?   @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
 
   company Company @relation(fields: [companyId], references: [id])
 

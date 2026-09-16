@@ -264,13 +264,16 @@ export class AuthService {
     }
 
     const hash = await argon2.hash(newPassword, { algorithm: argon2.Algorithm.Argon2id });
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        passwordHash: hash,
-        forcePasswordChange: false,
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          passwordHash: hash,
+          forcePasswordChange: false,
+        },
+      }),
+      this.consumeResetLinks(userId),
+    ]);
 
     // Leaves the session that made this request alone — only OTHER
     // sessions are revoked (see TokenService.revokeAllForUserExceptToken).
@@ -282,9 +285,9 @@ export class AuthService {
   }
 
   /**
-   * Confirms an admin-triggered reset link (see UsersService.forcePasswordReset
-   * — staff-target branch only; portal targets reuse PortalAuthService's own
-   * confirmPasswordReset against PortalPasswordReset instead). Public route,
+   * Confirms a staff reset link issued by UsersService.forcePasswordReset,
+   * which serves staff users only — it refuses portal users, whose passwords
+   * reset through the portal's own PortalPasswordReset flow. Public route,
    * no auth — the token itself is the credential.
    */
   async confirmPasswordReset(dto: PasswordResetConfirmDto): Promise<void> {
@@ -303,23 +306,47 @@ export class AuthService {
     if (claimed.length === 0) throw new UnauthorizedException('Invalid or expired reset token');
 
     const passwordHash = await argon2.hash(dto.newPassword, { algorithm: argon2.Algorithm.Argon2id });
-    await this.prisma.user.update({
-      where: { id: reset.userId },
+    // A deactivated account is refused. The link was claimed above, so it
+    // stays dead if the account is reactivated later. Conditional write, not
+    // check-then-write, so a deactivation at the same moment can't slip
+    // between the two.
+    const { count } = await this.prisma.user.updateMany({
+      where: { id: reset.userId, isActive: true },
       data: { passwordHash, forcePasswordChange: false, failedLoginAttempts: 0, lockedUntil: null },
     });
+    if (count === 0) throw new UnauthorizedException('Invalid or expired reset token');
     await this.tokenService.revokeAllForUser(reset.userId);
   }
 
   async forceChangePassword(userId: string, newPassword: string) {
     const hash = await argon2.hash(newPassword, { algorithm: argon2.Algorithm.Argon2id });
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        passwordHash: hash,
-        forcePasswordChange: false,
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          passwordHash: hash,
+          forcePasswordChange: false,
+        },
+      }),
+      this.consumeResetLinks(userId),
+    ]);
     await this.tokenService.revokeAllForUser(userId);
+  }
+
+  /**
+   * A reset link still live when the user sets their own password predates
+   * that password, so it must not be able to overwrite it. Always batched
+   * after the password write, in the same transaction: that update waits on
+   * the row lock UsersService.forcePasswordReset takes, so a link issued at
+   * the same moment is either consumed here or created after the change.
+   * Mirrors PortalAuthService.consumeResetLinks.
+   */
+  private consumeResetLinks(userId: string) {
+    const now = new Date();
+    return this.prisma.passwordReset.updateMany({
+      where: { userId, consumedAt: null, expiresAt: { gt: now } },
+      data: { consumedAt: now },
+    });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

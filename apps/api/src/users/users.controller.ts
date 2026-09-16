@@ -10,7 +10,7 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
@@ -115,9 +115,19 @@ export class UsersController {
   }
 
   @Post(':id/force-password-reset')
-  @HttpCode(HttpStatus.NO_CONTENT)
+  @HttpCode(HttpStatus.OK)
   @RequirePermissions(PERMISSIONS.ADMIN_USER_UPDATE)
-  @ApiOperation({ summary: "Force a password reset for another user (issues a reset link, never sets one directly)" })
+  @ApiOperation({
+    summary: 'Issue a one-time password-reset link for a staff user',
+    description:
+      'Returns the raw reset token to the caller exactly once, for manual out-of-band delivery ' +
+      '(WhatsApp, phone, in person) — it is stored only as a hash and cannot be retrieved again. ' +
+      'Issuing a new token invalidates any outstanding one. Never sets or reveals a password. ' +
+      'Portal users are rejected (400; they reset through the portal); deactivated users are rejected (409).',
+  })
+  @ApiOkResponse({
+    description: '`{ token, expiresAt }` — the reset URL is `<staff app origin>/reset-password?token=<token>`.',
+  })
   forcePasswordReset(@Param('id') id: string, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.usersService.forcePasswordReset(user.companyId, id, user.sub);

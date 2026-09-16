@@ -1,14 +1,14 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import * as argon2 from '@node-rs/argon2';
 import { randomUUID, createHash } from 'node:crypto';
-import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
+import { PrismaClient, withTenantTx, runWithTenant, getCurrentIpAddress } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
-import { COMMUNICATION_PROVIDER, type CommunicationProvider } from '../queues/communication-provider';
 import { TokenService } from '../auth/token.service';
 import type {
   CreateUserDto,
@@ -37,8 +37,6 @@ export class UsersService {
     private readonly tenantPrisma: any,
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
-    @Inject(COMMUNICATION_PROVIDER)
-    private readonly provider: CommunicationProvider,
     private readonly tokenService: TokenService,
   ) {}
 
@@ -72,6 +70,13 @@ export class UsersService {
           lastLoginAt: true,
           createdAt: true,
           managerId: true,
+          // Portal-linked (customer/broker) users are created via invite-
+          // consume and never through this table's own create/edit forms —
+          // apps/web's Users/UserForm screens use these to redirect a
+          // staff admin to the applicant/broker record instead of a dead
+          // "force password reset" action that the backend would 400 on.
+          applicantId: true,
+          brokerId: true,
           role: { select: { id: true, name: true, slug: true } },
         },
       }),
@@ -186,6 +191,9 @@ export class UsersService {
         createdAt: true,
         updatedAt: true,
         managerId: true,
+        // See the identical comment on findAll's select.
+        applicantId: true,
+        brokerId: true,
         role: { select: { id: true, name: true, slug: true } },
       },
     });
@@ -323,6 +331,18 @@ export class UsersService {
     // outside the tenant transaction (TokenService uses SYSTEM_PRISMA).
     await this.tokenService.revokeAllForUser(userId);
 
+    // Outstanding reset links die too, staff and portal tables both (this
+    // endpoint deactivates either kind of user), so reactivation can't bring
+    // one back. Separate from the tenant transaction above: the staff reset
+    // table isn't tenant-scoped. confirmPasswordReset's isActive check covers
+    // the gap between the two writes.
+    const now = new Date();
+    const live = { userId, consumedAt: null, expiresAt: { gt: now } };
+    await this.systemPrisma.$transaction([
+      this.systemPrisma.passwordReset.updateMany({ where: live, data: { consumedAt: now } }),
+      this.systemPrisma.portalPasswordReset.updateMany({ where: live, data: { consumedAt: now } }),
+    ]);
+
     return result;
   }
 
@@ -341,42 +361,72 @@ export class UsersService {
   }
 
   /**
-   * Admin-triggered — issues a reset link, never sets or reveals a
-   * password directly. Portal-linked targets (applicantId/brokerId set)
-   * reuse the existing self-service PortalPasswordReset model and its
-   * existing confirm endpoint unchanged; staff targets use the new
-   * PasswordReset model + AuthController's confirm endpoint (staff had no
-   * reset-link mechanism at all before this). Sent synchronously, not via
-   * the queue — unlike self-service requestPasswordReset, there's no
-   * identifier-guessing/timing concern here: the admin already knows this
-   * is a real user by id.
+   * Admin-triggered reset for a STAFF user. Returns a one-time token for the
+   * admin to deliver out-of-band (WhatsApp, phone, in person); never sets or
+   * reveals a password. Only the SHA-256 hash is stored, so this return value
+   * is the one place the raw token ever exists. Issuing a token consumes any
+   * still-live one — links are handed around manually now, so at most one may
+   * be in circulation per user. Portal users are refused: they reset through
+   * the portal path.
+   *
+   * Deliberately never calls CommunicationProvider.send: this install has no
+   * mailer, and ConsoleCommunicationProvider logs message bodies in plaintext
+   * (docs/todo.md) — a send here would only add a log line holding a live
+   * token. Delivery is entirely the admin's job. Same rule as
+   * PortalAuthService.issueAdminPasswordReset.
    */
-  async forcePasswordReset(companyId: string, userId: string, adminUserId: string): Promise<void> {
+  async forcePasswordReset(
+    companyId: string,
+    userId: string,
+    adminUserId: string,
+  ): Promise<{ token: string; expiresAt: Date }> {
     const user = await this.systemPrisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException('User not found');
-
-    const raw = randomUUID();
-    const tokenHash = createHash('sha256').update(raw).digest('hex');
-    const expiresAt = new Date(Date.now() + RESET_EXPIRY_MS);
-
+    if (!user.isActive) {
+      throw new ConflictException(
+        'Cannot reset the password of a deactivated user. Reactivate the account first.',
+      );
+    }
     if (user.applicantId || user.brokerId) {
-      await this.systemPrisma.portalPasswordReset.create({
-        data: { companyId, userId, tokenHash, expiresAt },
-      });
-    } else {
-      await this.systemPrisma.passwordReset.create({
-        data: { companyId, userId, tokenHash, expiresAt, createdById: adminUserId },
-      });
+      throw new BadRequestException(
+        'This is a portal user — portal passwords are reset through the portal, not here.',
+      );
     }
 
-    const toAddress = user.email ?? user.phone;
-    if (!toAddress) return;
+    const token = randomUUID();
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const expiresAt = new Date(Date.now() + RESET_EXPIRY_MS);
+    const ipAddress = getCurrentIpAddress();
 
-    await this.provider.send({
-      channel: user.email ? 'EMAIL' : 'SMS',
-      toAddress,
-      subject: 'Your OpenEstate password has been reset by an administrator',
-      body: `Use this code to set a new password: ${raw} (valid for 30 minutes). If you didn't expect this, contact your administrator.`,
+    await this.systemPrisma.$transaction(async (tx) => {
+      // Raw SQL because Prisma has no SELECT ... FOR UPDATE. Locking the user
+      // row serializes concurrent issuances for one user, so the supersede
+      // below cannot miss a token another request is creating at that moment.
+      await tx.$queryRaw`SELECT 1 FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
+      const now = new Date();
+      await tx.passwordReset.updateMany({
+        where: { companyId, userId, consumedAt: null, expiresAt: { gt: now } },
+        data: { consumedAt: now },
+      });
+      const reset = await tx.passwordReset.create({
+        data: { companyId, userId, tokenHash, expiresAt, createdById: adminUserId },
+      });
+      // SYSTEM_PRISMA carries no audit extension, so this auth event is written
+      // explicitly — same direct insert as CustomFieldsService's purge. The
+      // token itself is never recorded.
+      await tx.auditLog.create({
+        data: {
+          companyId,
+          userId: adminUserId,
+          entityType: 'User',
+          entityId: userId,
+          action: 'RESET_LINK_ISSUED',
+          after: { passwordResetId: reset.id, expiresAt: expiresAt.toISOString() },
+          ipAddress,
+        },
+      });
     });
+
+    return { token, expiresAt };
   }
 }
