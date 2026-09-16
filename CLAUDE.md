@@ -7062,3 +7062,34 @@ gaps. All fixed on the branch, each staff and portal together.
   (changing it means redoing its VM verification; logged in
   `docs/todo.md`) and redemption itself, which still doesn't consume a
   portal user's other live link (disclosed, left as-is by ruling).
+- **A deactivated account can no longer use a reset link, and
+  reactivation doesn't revive one.** Two layers, staff and portal:
+  `UsersService.deactivate()` now consumes the user's live links in both
+  reset tables (that endpoint deactivates staff and portal users alike),
+  and both `confirmPasswordReset` methods refuse an inactive account with
+  the same 401. The refusal is a conditional `updateMany` (`isActive:
+  true`) after the link is claimed, so the refused link is used up and a
+  concurrent deactivation can't slip between a check and the write.
+  Checked before building it: no onboarding or invite path redeems a reset
+  token. The only code that sets `isActive = false` is
+  `deactivate()`, every reset-link creator refuses inactive users, and
+  invite consumption (which does reactivate) uses `PortalInvite`, not a
+  reset token. The consume in `deactivate()` runs through the system
+  client after the tenant transaction, because the staff reset table isn't
+  tenant-scoped. The redemption check covers the moment between those two
+  writes. One narrower race remains, logged in `docs/todo.md`: issuance
+  checks `isActive` before taking the user-row lock, so a link created
+  just after deactivation's consume survives a quick reactivation if
+  nobody tried it in between.
+- **Verified locally** against the same `postgres:16-alpine` and
+  `redis:7-alpine` containers CI uses (throwaway test infrastructure, not
+  added to the repo). Every new test file failed against the code before
+  its fix, for the reason the fix addresses, and passed after it. The
+  cross-surface binding test passed against the branch before any code
+  change, as a regression guard. Full `apps/api` suite with all four fixes
+  in place (`PROPERTY_NUM_RUNS=500`): 100 files, 672 tests, 672 passed,
+  0 failed, 0 skipped. Playwright `admin-reset-links.spec.ts` in real
+  Chromium: 6/6. The staff and portal redemption scenarios in it are the
+  browser proof that active accounts still redeem after the new
+  inactive-account check. No new Playwright scenarios: none of the four
+  fixes changes what the browser sends or shows.

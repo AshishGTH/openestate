@@ -421,10 +421,14 @@ export class PortalAuthService {
     if (claimed.length === 0) throw new UnauthorizedException('Invalid or expired reset token');
 
     const passwordHash = await argon2.hash(dto.newPassword, { algorithm: argon2.Algorithm.Argon2id });
-    await this.prisma.user.update({
-      where: { id: reset.userId },
+    // Same inactive-account refusal as AuthService.confirmPasswordReset: the
+    // link is already claimed, and the conditional write can't race a
+    // deactivation.
+    const { count } = await this.prisma.user.updateMany({
+      where: { id: reset.userId, isActive: true },
       data: { passwordHash, failedLoginAttempts: 0, lockedUntil: null },
     });
+    if (count === 0) throw new UnauthorizedException('Invalid or expired reset token');
     await this.tokenService.revokeAllForUser(reset.userId);
   }
 

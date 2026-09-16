@@ -331,6 +331,18 @@ export class UsersService {
     // outside the tenant transaction (TokenService uses SYSTEM_PRISMA).
     await this.tokenService.revokeAllForUser(userId);
 
+    // Outstanding reset links die too, staff and portal tables both (this
+    // endpoint deactivates either kind of user), so reactivation can't bring
+    // one back. Separate from the tenant transaction above: the staff reset
+    // table isn't tenant-scoped. confirmPasswordReset's isActive check covers
+    // the gap between the two writes.
+    const now = new Date();
+    const live = { userId, consumedAt: null, expiresAt: { gt: now } };
+    await this.systemPrisma.$transaction([
+      this.systemPrisma.passwordReset.updateMany({ where: live, data: { consumedAt: now } }),
+      this.systemPrisma.portalPasswordReset.updateMany({ where: live, data: { consumedAt: now } }),
+    ]);
+
     return result;
   }
 

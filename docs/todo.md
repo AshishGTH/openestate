@@ -483,15 +483,45 @@ this note once it has a real, tested effect.
   the provider at all. Not a simple redaction: on an install with no
   SMS/email provider, that log line is today the only delivery path for
   portal self-service reset — decide alongside the portal reset design.
-- **Deactivating a user doesn't consume their outstanding password-reset
-  tokens.** Limited impact: login separately refuses inactive accounts.
-- **`PasswordReset.consumedAt` now means either "used" or "superseded by a
-  newer link"** — the table can't tell them apart; needs a `supersededAt` column.
+- **A reset link issued at the same moment its user is deactivated can
+  survive a later reactivation.** Deactivation consumes outstanding links,
+  and redemption refuses an inactive account and uses the link up, so the
+  ordinary deactivate→reactivate case is closed. The race that remains:
+  admin issuance (`UsersService.forcePasswordReset`,
+  `PortalAuthService.issueAdminPasswordReset`) and the self-service
+  processor check `isActive` before their transaction, not under the
+  user-row lock. So a link can be created just after `deactivate()` has
+  consumed the existing ones. If nobody tries that link while the account
+  is inactive and an admin reactivates it within 30 minutes, the link
+  works. Needs two admins acting on the same user at once. Fix: re-check
+  `isActive` inside the locked transaction on each issuance path.
+- **`PasswordReset.consumedAt` now means "used", "superseded by a newer
+  link", or "invalidated by a password change or deactivation"** — the
+  table can't tell them apart; needs a `supersededAt`-style column.
 - **A used, an expired, and a superseded reset token all produce the same
   "Invalid or expired reset token" message**, so an admin can't tell a
   customer why their link failed. Distinguishing them needs the
   `supersededAt` column above.
-- **`AuthService.confirmPasswordReset` doesn't check `User.isActive`.**
+- **Known exposure, not new: reset and invite tokens travel in the URL
+  query string, so nginx's access log records them.** Staff
+  (`/reset-password?token=`), portal (`/portal/reset-password?token=`) and
+  portal invite links (`/portal/invite/:id?token=`) all load a page with
+  the raw token in the query, and nginx's default log format writes the
+  full request line. Anyone who can read the access log can read live
+  tokens, and on Ubuntu that can include the `adm` group, who may not have
+  database access. What limits it today: reset tokens expire in 30 minutes
+  and work once; invites expire in days. The reset and invite pages load
+  nothing from other sites, so no `Referer` leaks the token (that changes
+  if either page ever loads an external asset). Options, not taken: carry
+  the token in the URL fragment (`#token=`, never sent to the server),
+  which needs a change on every page that reads it; or drop query strings
+  from the nginx log format for those paths.
+- **No test drives two concurrent redemptions of the same reset token.**
+  Coverage gap only. The single-use claim is one atomic statement
+  (`UPDATE ... WHERE consumed_at IS NULL RETURNING id`), so by inspection
+  only one caller can win. A test would fire two confirms with
+  `Promise.all` and expect exactly one 204; each file's IP-keyed confirm
+  budget is 5 per 5 minutes, so it needs room for 2.
 - **`password_resets.created_by_id` has no foreign key to `users`**, while
   `portal_password_resets.created_by_id` (added for admin-issued portal
   resets) does. Give the staff table a matching FK when a migration touches

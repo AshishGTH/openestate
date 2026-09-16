@@ -306,10 +306,15 @@ export class AuthService {
     if (claimed.length === 0) throw new UnauthorizedException('Invalid or expired reset token');
 
     const passwordHash = await argon2.hash(dto.newPassword, { algorithm: argon2.Algorithm.Argon2id });
-    await this.prisma.user.update({
-      where: { id: reset.userId },
+    // A deactivated account is refused. The link was claimed above, so it
+    // stays dead if the account is reactivated later. Conditional write, not
+    // check-then-write, so a deactivation at the same moment can't slip
+    // between the two.
+    const { count } = await this.prisma.user.updateMany({
+      where: { id: reset.userId, isActive: true },
       data: { passwordHash, forcePasswordChange: false, failedLoginAttempts: 0, lockedUntil: null },
     });
+    if (count === 0) throw new UnauthorizedException('Invalid or expired reset token');
     await this.tokenService.revokeAllForUser(reset.userId);
   }
 
