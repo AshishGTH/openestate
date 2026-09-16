@@ -500,6 +500,14 @@ this note once it has a real, tested effect.
   reset links**, though an admin-issued link does supersede pending
   self-service ones. Asymmetric by omission, not design: the processor was
   deliberately left unmodified when admin-issued portal links were added.
+- **`deploy/native/reset-admin-password.sh` sets a staff password without
+  consuming that user's outstanding reset links.** Every in-app way a
+  password gets set now consumes them, so a stale link can't overwrite the
+  new password. This break-glass CLI doesn't: a link issued before the CLI
+  reset stays usable until it expires (30 minutes). The fix is one more
+  `UPDATE password_resets SET consumed_at = now() WHERE user_id = ... AND
+  consumed_at IS NULL` in its SQL block. Deferred because changing the
+  script means redoing its VM verification.
 - **Portal invites don't supersede each other**: re-sending an invite
   leaves every earlier invite link live for its full multi-day expiry
   (`INVITE_EXPIRY_DAYS`). Reset links supersede; invites don't.

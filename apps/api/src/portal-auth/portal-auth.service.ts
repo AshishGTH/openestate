@@ -224,7 +224,10 @@ export class PortalAuthService {
     if (!valid) throw new UnauthorizedException('Current password is incorrect');
 
     const hash = await argon2.hash(newPassword, { algorithm: argon2.Algorithm.Argon2id });
-    await this.prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } });
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } }),
+      this.consumeResetLinks(userId),
+    ]);
 
     // Leaves the session that made this request alone — mirrors the
     // staff-side fix in AuthService.changePassword (see CLAUDE.md's
@@ -350,12 +353,18 @@ export class PortalAuthService {
       where: invite.applicantId ? { applicantId: invite.applicantId } : { brokerId: invite.brokerId },
     });
 
+    // An existing account can hold reset links; a brand-new one can't.
     const user = existingUser
-      ? await this.prisma.user.update({
-          where: { id: existingUser.id },
-          data: { passwordHash, isActive: true, forcePasswordChange: false },
-          include: { role: { include: { permissions: { include: { permission: true } } } } },
-        })
+      ? (
+          await this.prisma.$transaction([
+            this.prisma.user.update({
+              where: { id: existingUser.id },
+              data: { passwordHash, isActive: true, forcePasswordChange: false },
+              include: { role: { include: { permissions: { include: { permission: true } } } } },
+            }),
+            this.consumeResetLinks(existingUser.id),
+          ])
+        )[0]
       : await this.prisma.user.create({
           data: {
             companyId: invite.companyId,
@@ -505,6 +514,22 @@ export class PortalAuthService {
     });
 
     return { token, expiresAt };
+  }
+
+  /**
+   * A reset link still live when the user sets their password another way
+   * predates that password, so it must not be able to overwrite it. Always
+   * batched after the password write, in the same transaction: that update
+   * waits on the row lock issueAdminPasswordReset takes, so a link issued at
+   * the same moment is either consumed here or created after the change.
+   * Mirrors AuthService.consumeResetLinks.
+   */
+  private consumeResetLinks(userId: string) {
+    const now = new Date();
+    return this.prisma.portalPasswordReset.updateMany({
+      where: { userId, consumedAt: null, expiresAt: { gt: now } },
+      data: { consumedAt: now },
+    });
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

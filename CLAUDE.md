@@ -7044,3 +7044,21 @@ gaps. All fixed on the branch, each staff and portal together.
   reset (`PortalPasswordResetProcessor`) still sends its raw token through
   the console provider, so reset tokens do still reach server logs through
   that path — see `docs/todo.md`.
+- **Every other way a user's password gets set now consumes that user's
+  outstanding reset links.** Before this, a stale admin-issued link could
+  overwrite a password the user had just chosen — proven on all four paths
+  by tests that failed before the fix. The four: staff change-password,
+  staff force-change-password (first login), portal change-password, and
+  portal invite consumption for an existing account (which also
+  reactivates it). Each batches an `updateMany` on its own reset table into
+  the same transaction as the password write, after it. The user-row update
+  waits on the `FOR UPDATE` lock admin issuance takes, so a link issued at
+  the same moment is either consumed or created after the new password.
+  Uniform on all four paths. The only variation is that invite consumption
+  does it only when the account already exists (a new account can't hold
+  links). No new column: `consumedAt` now also covers "invalidated by a
+  password change", which widens the existing used-vs-superseded ambiguity
+  already logged in `docs/todo.md`. Not changed: `reset-admin-password.sh`
+  (changing it means redoing its VM verification; logged in
+  `docs/todo.md`) and redemption itself, which still doesn't consume a
+  portal user's other live link (disclosed, left as-is by ruling).
