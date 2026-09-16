@@ -339,5 +339,6 @@ test('reveal panel: shows the expiry clock time, Copy confirms or falls back to 
   await expect(fallback).not.toHaveClass(/red/);
   await expect(fallbackPanel.getByRole('button', { name: 'Copied', exact: true })).toHaveCount(0);
   // The URL itself is what's selected, ready for the admin's Ctrl+C.
-  expect(await page.evaluate(() => window.getSelection()?.toString())).toBe(second.url);
+  // String form: apps/e2e typechecks without DOM types, so `window` can't appear as code here.
+  expect(await page.evaluate('window.getSelection()?.toString()')).toBe(second.url);
 });
