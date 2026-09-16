@@ -405,27 +405,16 @@ describeIf('e2e password-change + admin force-password-reset', () => {
       }
     });
 
-    it('returns 200 for a user with no email or phone — delivery is best-effort', async () => {
-      const admin = await createStaffUser('AdminPass111');
-      const target = await systemPrisma.user.create({
-        data: { companyId: fx.companyId, name: 'No Contact', passwordHash: 'x', roleId: staffRoleId },
-      });
-
-      const res = await forceReset(admin.email, 'AdminPass111', target.id, 200);
-      expect(res.body.token).toBeTruthy();
-    });
-
-    it('still returns the token when the delivery provider throws', async () => {
+    it('never calls CommunicationProvider.send', async () => {
       const { COMMUNICATION_PROVIDER } = createRequire(import.meta.url)('../dist/queues/communication-provider');
       const provider = app.get(COMMUNICATION_PROVIDER);
-      const send = vi.spyOn(provider, 'send').mockRejectedValueOnce(new Error('gateway down'));
+      const send = vi.spyOn(provider, 'send');
       try {
         const admin = await createStaffUser('AdminPass111');
         const target = await createStaffUser('TargetOldPass111');
 
-        const res = await forceReset(admin.email, 'AdminPass111', target.id, 200);
-        expect(res.body.token).toBeTruthy();
-        expect(send).toHaveBeenCalledTimes(1);
+        await forceReset(admin.email, 'AdminPass111', target.id, 200);
+        expect(send).not.toHaveBeenCalled();
       } finally {
         send.mockRestore();
       }

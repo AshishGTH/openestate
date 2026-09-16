@@ -3,14 +3,12 @@ import {
   ConflictException,
   Inject,
   Injectable,
-  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import * as argon2 from '@node-rs/argon2';
 import { randomUUID, createHash } from 'node:crypto';
 import { PrismaClient, withTenantTx, runWithTenant, getCurrentIpAddress } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
-import { COMMUNICATION_PROVIDER, type CommunicationProvider } from '../queues/communication-provider';
 import { TokenService } from '../auth/token.service';
 import type {
   CreateUserDto,
@@ -33,16 +31,12 @@ export interface HierarchyNode {
 
 @Injectable()
 export class UsersService {
-  private readonly logger = new Logger(UsersService.name);
-
   constructor(
     @Inject(TENANT_PRISMA)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     private readonly tenantPrisma: any,
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
-    @Inject(COMMUNICATION_PROVIDER)
-    private readonly provider: CommunicationProvider,
     private readonly tokenService: TokenService,
   ) {}
 
@@ -361,8 +355,13 @@ export class UsersService {
    * is the one place the raw token ever exists. Issuing a token consumes any
    * still-live one — links are handed around manually now, so at most one may
    * be in circulation per user. Portal users are refused: they reset through
-   * the portal path. Provider delivery is best-effort only (this install has no
-   * mailer by design) and can never stop the token reaching the admin.
+   * the portal path.
+   *
+   * Deliberately never calls CommunicationProvider.send: this install has no
+   * mailer, and ConsoleCommunicationProvider logs message bodies in plaintext
+   * (docs/todo.md) — a send here would only add a log line holding a live
+   * token. Delivery is entirely the admin's job. Same rule as
+   * PortalAuthService.issueAdminPasswordReset.
    */
   async forcePasswordReset(
     companyId: string,
@@ -415,22 +414,6 @@ export class UsersService {
         },
       });
     });
-
-    const toAddress = user.email ?? user.phone;
-    if (!toAddress) {
-      this.logger.log(`Reset link for user ${userId} issued with no email or phone on file; manual delivery only`);
-    } else {
-      try {
-        await this.provider.send({
-          channel: user.email ? 'EMAIL' : 'SMS',
-          toAddress,
-          subject: 'Your OpenEstate password has been reset by an administrator',
-          body: `Use this code to set a new password: ${token} (valid for 30 minutes). If you didn't expect this, contact your administrator.`,
-        });
-      } catch (err) {
-        this.logger.warn(`Reset link for user ${userId}: best-effort delivery failed — ${(err as Error).message}`);
-      }
-    }
 
     return { token, expiresAt };
   }

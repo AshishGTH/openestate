@@ -6598,6 +6598,8 @@ fields including IP) checked out against the code as written.
   so the response is the one place the raw token exists. The best-effort
   `provider.send()` stays, but a missing address or a provider error is
   logged and swallowed — it can never stop the token reaching the admin.
+  **Superseded by the "Admin reset links: review fixes" entry below** —
+  the staff path no longer calls `provider.send()` at all.
 - **URL assembly is client-side, from `window.location.origin`**
   (`<origin>/reset-password?token=<token>`), matching the portal-invite
   precedent (`Applicant360.tsx`/`BrokerDetail.tsx` build
@@ -6711,6 +6713,8 @@ fields including IP) checked out against the code as written.
   bodies in plaintext (`docs/todo.md`); adding a new plaintext-token log
   line for a customer account would be a regression. The staff path keeps
   its best-effort send only because it already had one.
+  **Superseded by the "Admin reset links: review fixes" entry below** —
+  the staff path now follows this same rule.
 - **Verified locally against the same `postgres:16-alpine`/`redis:7-alpine`
   test containers as the staff entry:** `apps/api` 614/614 and
   `packages/db` 65/65 with zero skipped, and the new test file (10 tests)
@@ -7021,3 +7025,22 @@ accidental 12-digit entry — layer (a) narrowed to the three Aadhaar-specific
 words is enough to keep it a true zero-known-false-positive layer, which
 was the property the previous entry claimed for it but didn't actually
 have while `uid` was still in the rule.
+
+### Admin reset links: review fixes (before merge)
+
+A review of this branch found one leak that blocked the merge and three
+gaps. All fixed on the branch, each staff and portal together.
+
+- **Admin-issued staff reset tokens no longer go through
+  `CommunicationProvider.send()`.** The portal half of this branch had
+  already dropped the send, because `ConsoleCommunicationProvider` logs
+  message bodies in plaintext, but the staff half still sent the raw token
+  through it. `UsersService.forcePasswordReset` now follows the portal
+  rule and never sends; the token reaches only the admin, in the response.
+  Nothing real was lost: `ConsoleCommunicationProvider` is the only
+  implementation, bound unconditionally in `QueuesModule` with no setting
+  to swap it, and no messaging plugin exists. Scope, stated precisely: this
+  covers **admin-issued staff reset tokens only**. The portal self-service
+  reset (`PortalPasswordResetProcessor`) still sends its raw token through
+  the console provider, so reset tokens do still reach server logs through
+  that path — see `docs/todo.md`.
