@@ -278,7 +278,7 @@ journalctl -u openestate-api -n 200    # last 200 lines
 
 ```bash
 cd /opt/openestate-src/deploy/native
-sudo ./upgrade-native.sh --ref v0.6.0
+sudo ./upgrade-native.sh --ref v0.6.1
 ```
 
 This: takes an automatic backup first (same as `backup-native.sh`, unless

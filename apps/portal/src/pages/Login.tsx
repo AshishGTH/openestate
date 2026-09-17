@@ -11,6 +11,9 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [needsTotp, setNeedsTotp] = useState(false);
   const [tempToken, setTempToken] = useState('');
+  // Mirrors apps/web's TotpVerify.tsx: only the keyboard and wording change;
+  // the field accepts either kind of code in either mode.
+  const [recoveryMode, setRecoveryMode] = useState(false);
 
   if (isLoading) {
     return (
@@ -47,6 +50,12 @@ export default function Login() {
     }
   };
 
+  const switchMode = () => {
+    setRecoveryMode((on) => !on);
+    setTotpCode('');
+    setError('');
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50 px-4">
       <div className="w-full max-w-sm">
@@ -64,16 +73,23 @@ export default function Login() {
             {needsTotp ? (
               <div>
                 <label htmlFor="totp" className="block text-sm font-medium text-slate-700">
-                  6-digit code
+                  {recoveryMode ? 'Recovery code' : '6-digit code'}
                 </label>
                 <input
                   id="totp"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
+                  inputMode={recoveryMode ? 'text' : 'numeric'}
+                  autoComplete={recoveryMode ? 'off' : 'one-time-code'}
+                  autoCapitalize={recoveryMode ? 'characters' : undefined}
+                  spellCheck={recoveryMode ? false : undefined}
                   value={totpCode}
                   onChange={(e) => setTotpCode(e.target.value)}
                   className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2.5 text-base shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
+                <p className="mt-1 text-xs text-slate-500">
+                  {recoveryMode
+                    ? 'Enter one of your recovery codes (XXXXX-XXXXX)'
+                    : 'Enter the 6-digit code from your authenticator app'}
+                </p>
               </div>
             ) : (
               <>
@@ -113,6 +129,16 @@ export default function Login() {
               {submitting ? 'Please wait…' : needsTotp ? 'Verify' : 'Sign in'}
             </button>
           </form>
+
+          {needsTotp && (
+            <button
+              type="button"
+              onClick={switchMode}
+              className="mt-4 block w-full text-center text-sm text-blue-600"
+            >
+              {recoveryMode ? 'Use your authenticator app instead' : 'Lost your phone? Use a recovery code'}
+            </button>
+          )}
 
           {!needsTotp && (
             <>

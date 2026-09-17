@@ -245,5 +245,20 @@ describeIf('e2e TOTP 2FA: real HTTP through the full guard pipeline', () => {
         .send({ code })
         .expect(401);
     });
+
+    // This is the 5th totp/verify call for this user in the describe block,
+    // exactly the default per-user limit (TOTP_VERIFY_THROTTLE_LIMIT=5). A
+    // 6th verify call here needs that limit raised for this file.
+    it('accepts a recovery code typed in lowercase with surrounding whitespace', async () => {
+      const { agent, res } = await passwordLogin();
+      const csrf = extractCookie(res.headers['set-cookie'], 'openestate_csrf')!;
+      const verify = await agent
+        .post('/api/v1/auth/totp/verify')
+        .set('Authorization', `Bearer ${res.body.tempToken}`)
+        .set('X-CSRF-Token', csrf)
+        .send({ code: `  ${recoveryCodes[1].toLowerCase()} ` });
+      expect(verify.status, JSON.stringify(verify.body)).toBe(200);
+      expect(verify.body.accessToken).toBeTruthy();
+    });
   });
 });

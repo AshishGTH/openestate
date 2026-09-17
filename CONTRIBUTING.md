@@ -1,6 +1,6 @@
 # Contributing to OpenEstate
 
-Thanks for considering a contribution. OpenEstate is on v0.6.0 — the core
+Thanks for considering a contribution. OpenEstate is on v0.6.1 — the core
 architecture (auth/RBAC, multi-tenancy, the ledger model, the plugin
 boundary) is settled, but still evolving; read CLAUDE.md's decisions log
 before assuming a pattern is fixed in stone.

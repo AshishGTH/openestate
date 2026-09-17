@@ -17,11 +17,8 @@ import { PORTAL_URL } from '../playwright.config';
 //
 // Adds one scenario auth-2fa.spec.ts doesn't cover on either side: Disable
 // 2FA, and a login afterward proving no code is asked for — genuinely new
-// coverage, not just a mirror. Recovery-code login stays out of this spec
-// (tracked separately) — the shared totpVerifySchema and TotpService make
-// it very likely to behave the same as staff's untested-either-side path,
-// but "very likely" isn't "verified," and it needs its own sequencing to
-// consume a code safely.
+// coverage, not just a mirror. Recovery-code login is covered by
+// portal-recovery-code.spec.ts, on its own fixture account.
 //
 // Exactly two full page.goto() navigations (the initial /portal/login, and
 // the first /portal/security visit) — matching auth-2fa.spec.ts's own
@@ -54,7 +51,7 @@ test('portal: 2FA enrollment → login with a TOTP code → disable → login ne
   await expect(page.locator('img[src^="data:image/svg+xml"]')).toBeVisible();
   await expect(page.getByText(secret)).toBeVisible();
 
-  await page.locator('input[inputmode="numeric"]').fill(currentTotpCode(secret));
+  await page.locator('input[inputmode="numeric"]').pressSequentially(currentTotpCode(secret));
   await page.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByText('Save these recovery codes — shown once')).toBeVisible();
   await page.getByRole('button', { name: 'Done' }).click();
@@ -72,7 +69,7 @@ test('portal: 2FA enrollment → login with a TOTP code → disable → login ne
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   await expect(page.locator('#totp')).toBeVisible();
-  await page.locator('#totp').fill(currentTotpCode(secret));
+  await page.locator('#totp').pressSequentially(currentTotpCode(secret));
   await page.getByRole('button', { name: 'Verify' }).click();
   await expect(page).toHaveURL(/\/portal\/profile$/);
 
