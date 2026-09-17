@@ -10,7 +10,7 @@ import { PrismaClient } from '@openestate/db';
 import { SYSTEM_PRISMA } from '../database/database.module';
 import { TokenService } from './token.service';
 import { TotpService } from './totp.service';
-import { reserveTotpAttempt, TOTP_ATTEMPTS_CLEARED } from './totp-lockout';
+import { reserveTotpAttempt, TOTP_ATTEMPTS_CLEARED, TOTP_CLEARED } from './totp-lockout';
 import type { LoginDto, PasswordResetConfirmDto } from '@openestate/shared';
 
 const MAX_FAILED_ATTEMPTS = 5;
@@ -189,11 +189,7 @@ export class AuthService {
   async disableTotp(userId: string) {
     await this.prisma.user.update({
       where: { id: userId },
-      data: {
-        totpEnabled: false,
-        totpSecret: null,
-        recoveryCodes: [],
-      },
+      data: TOTP_CLEARED,
     });
   }
 

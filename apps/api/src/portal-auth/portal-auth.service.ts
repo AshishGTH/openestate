@@ -15,7 +15,7 @@ import { PrismaClient, getCurrentIpAddress } from '@openestate/db';
 import { SYSTEM_PRISMA } from '../database/database.module';
 import { TokenService } from '../auth/token.service';
 import { TotpService } from '../auth/totp.service';
-import { reserveTotpAttempt, TOTP_ATTEMPTS_CLEARED } from '../auth/totp-lockout';
+import { reserveTotpAttempt, TOTP_ATTEMPTS_CLEARED, TOTP_CLEARED } from '../auth/totp-lockout';
 import { PORTAL_QUEUE } from '../queues/queues.module';
 import { PROCESS_PASSWORD_RESET_JOB } from './portal-password-reset.processor';
 import { SYSTEM_ROLES, NO_PORTAL_ACCOUNT_ERROR } from '@openestate/shared';
@@ -176,7 +176,7 @@ export class PortalAuthService {
   async disableTotp(userId: string) {
     await this.prisma.user.update({
       where: { id: userId },
-      data: { totpEnabled: false, totpSecret: null, recoveryCodes: [] },
+      data: TOTP_CLEARED,
     });
   }
 
