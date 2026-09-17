@@ -7120,3 +7120,50 @@ gaps. All fixed on the branch, each staff and portal together.
   browser proof that active accounts still redeem after the new
   inactive-account check. No new Playwright scenarios: none of the four
   fixes changes what the browser sends or shows.
+
+### v0.6.0 released — merges admin-generated reset links and login cross-links
+
+`feat/admin-generated-reset-links` (PR #46) and `fix/login-cross-links`
+(PR #47, stacked on #46) both squash-merged onto `master`, matching the
+existing convention there (checked empirically: 11 of the last 14
+PR-sourced commits on `master` are single-parent squash-merges, the
+current pattern; only 3 older two-parent merge commits predate it).
+PR #47's base had to be manually retargeted from `feat/…` to `master`
+after #46 merged (GitHub only auto-retargets a stacked PR when its base
+branch is *deleted*, not merely merged) and `fix/login-cross-links` then
+needed rebasing (`git rebase --onto`, not a plain `git rebase`, to avoid
+replaying #46's already-squashed commits a second time) — squash-merging
+a base PR breaks the ancestry a stacked PR's own merge computation relies
+on; this is a mechanical consequence of squash-merging, not a defect in
+either branch. Post-merge: master builds and typechecks clean, CI on
+`master`'s merge commit (run `35185028166`) passed all 5 required jobs,
+and both branches were force-deleted locally and on the remote after
+confirming their unique content was fully captured in the squash commits
+(a plain `git branch -d` correctly refuses a squash-merged branch since
+its commits aren't literally ancestors of `master` — verified via
+`git diff <branch> <squash-commit>` showing zero unique content on either
+branch before force-deleting, rather than trusting the refusal to mean
+"unmerged").
+
+Version bumped 0.5.0 → 0.6.0 in all 11 workspace `package.json` files
+(the API's health endpoint and Swagger spec both already read the
+version from `package.json` at runtime, so neither needed a separate
+edit) and in every doc making a *current-status* claim (`README.md`'s
+status banner and roadmap tally, `CONTRIBUTING.md`, `docs/docs/intro.md`,
+`docs/docs/features-and-usage.md`'s "As of vX" line,
+`docs/docs/installation.md`'s example upgrade command). Historical
+references to v0.5.0 as a past, specific release — this file's own
+decisions log, `SECURITY.md`'s advisory, `docs/docs/security/asvs-
+checklist.md`, `docs/releases/v0.5.0-release-notes.md`, and
+`CHANGELOG.md`'s existing `[0.5.0]` entry — are deliberately left
+untouched; changing them would make a true historical claim false.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
