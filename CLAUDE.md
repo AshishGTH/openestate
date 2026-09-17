@@ -7166,6 +7166,54 @@ it anyway. Git then flagged the untouched file as modified for a whole day,
 because its cached timestamp went stale. That needed a separate investigation
 to rule out a real lockfile change.
 
+### v0.6.1 — staff recovery-code input
+
+- **Root cause: a coverage gap, not Playwright bypassing `maxlength`.** The
+  staff code field (`TotpVerify.tsx`) had `maxLength={6}` since Phase 1, and
+  recovery codes are 11 characters (`XXXXX-XXXXX`). It survived because no
+  spec, staff or portal, had ever signed in with a recovery code.
+  `portal-2fa.spec.ts` said so in its own header and deferred it.
+  `e2e-totp.test.ts` covered recovery codes only at the API, where the
+  request is built by hand. Found on the v0.6.0 VM by typing a real code.
+- **Checked, not assumed: in Playwright 1.62.1 with Chromium 151, `fill()`
+  and `pressSequentially()` both respect `maxlength`.** `FA897-AF930`
+  became `FA897-` in both; only a scripted `el.value = …` kept the whole
+  string. So the existing 2FA specs would have caught this if any had typed
+  a recovery code. `harness-input-fidelity.spec.ts` pins that behaviour so
+  a Playwright or Chromium upgrade that changes it fails loudly instead of
+  quietly weakening every spec that types into a limited field.
+- **The new recovery-code specs assert the field's value before
+  submitting** (`toHaveValue(fullCode)`). Without that, a truncated field
+  shows up as a generic "login failed" rather than a named cause. They type
+  with `pressSequentially()`, the existing 2FA specs now do too, and each
+  new spec gets its own fixture account because it enables 2FA and uses up
+  codes.
+- **A recovery-mode toggle, not a permanently text-mode field.** The toggle
+  only changes keyboard hints (`inputMode`, `autoComplete`,
+  `autoCapitalize`, `spellCheck`) and wording. The field accepts either
+  kind of code in either mode, so a desktop user who ignores the toggle
+  still gets in. Dropping `inputMode="numeric"` outright was rejected
+  because it gives a worse keyboard for the 6-digit code every 2FA user
+  types at every sign-in, just to serve a rare path. Switching mode clears
+  the field and the error. Mirrored on the portal per the mirrored-auth
+  rule, although the portal had no `maxLength`.
+- **Normalisation lives in `totpVerifySchema` (`.trim().toUpperCase()`
+  before the regex), not in either form.** One place covers the staff and
+  portal API boundary (nestjs-zod's pipe passes the parsed value to the
+  handler) and the staff form (`zodResolver` hands parsed values to
+  `onSubmit`). Stored recovery codes are uppercase hex, so this changes no
+  accepted code, only its spelling. Before this, a lowercase code was
+  refused with 400 on both surfaces.
+- **Audit (plan item d):** the only other `maxLength` in `apps/web` or
+  `apps/portal` is BookingWizard's PAN field, set to 10, which matches a
+  PAN's length.
+- **Verification, and its limits.** Playwright sends real key events, so
+  under the automated-browser clarification above it satisfies the auth
+  click-through rule. No human has looked at the toggle yet; a manual pass
+  is due after the VM upgrade. The keyboard each mode brings up on a phone
+  is reasoned from `inputMode`, not checked on a device. Both limits are
+  stated in the CHANGELOG and the release notes.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

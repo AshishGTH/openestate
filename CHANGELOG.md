@@ -3,6 +3,64 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.1]
+
+A bug-fix release. Staff users could not sign in with a two-factor recovery
+code: the code field stopped accepting input after six characters, and
+recovery codes are eleven. Separately, a recovery code typed in lowercase
+was rejected on both staff and portal. No migration, no new environment
+variable.
+
+### Fixed
+
+- **Staff recovery-code sign-in works.** The staff two-factor code field
+  (`apps/web/src/pages/TotpVerify.tsx`) had a hardcoded `maxLength={6}`, so
+  typing a recovery code (`XXXXX-XXXXX`) cut it off at `XXXXX-` and the form
+  refused it before sending anything. A staff user who had lost their
+  authenticator therefore had no way back in, because there is also no
+  admin-side 2FA reset yet. The limit dates from Phase 1, when the screen
+  was built; the portal field never had it. Found while verifying v0.6.0
+  on a real install.
+- **Recovery codes are accepted in lowercase and with surrounding spaces.**
+  `totpVerifySchema`, shared by the staff and portal verify endpoints and
+  the staff form, now trims and uppercases the code before checking its
+  format. A phone keyboard that doesn't capitalise, or a code copied with a
+  trailing space, no longer fails. The accepted codes, the rate limit and
+  the lockout are unchanged.
+
+### Added
+
+- **A "Lost your phone? Use a recovery code" toggle on the staff and portal
+  two-factor screens.** It changes the field's keyboard hint (`inputMode`
+  from `numeric` to `text`, plus `autoCapitalize="characters"`,
+  `autoComplete="off"` and spell-check off) and its label and help text.
+  The field accepts a 6-digit code or a recovery code in either mode.
+  Switching clears the field and any error.
+
+### Not yet verified
+
+- **The mobile keyboard behaviour is reasoned from `inputMode`, not
+  verified on a real device.** The intent is a numeric keypad for the
+  6-digit code and a full keyboard, able to type letters and the dash, in
+  recovery mode. Each phone's browser decides which keyboard to show, and
+  no real phone has been checked yet.
+- **The recovery toggle has been exercised by Playwright but not looked at
+  by a human.** The automated specs press real keys, check the wording and
+  the keyboard hint, and sign in end to end on both surfaces. A manual pass
+  is planned after the verification VM is upgraded to this release.
+
+### Tests
+
+- New Playwright specs sign in with a recovery code on staff and portal,
+  typed with real key presses, and assert the field holds the whole code
+  before submitting. They also cover lowercase input, the toggle, and a
+  reused code being refused.
+- A harness spec pins that Playwright's `fill()` and `pressSequentially()`
+  respect `maxlength` in this Chromium, so a truncating field can't pass
+  unnoticed after a browser upgrade.
+- Schema unit tests, and an API test for a lowercase, space-padded
+  recovery code.
+
 ## [0.6.0]
 
 Two features: admins can now issue copyable, one-time password-reset links

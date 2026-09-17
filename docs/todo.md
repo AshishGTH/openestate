@@ -59,6 +59,16 @@ click-throughs via `claude-in-chrome`, disposable test accounts:
   the real, rendered staff `/login` form — the strictest possible signal,
   confirming the historical basename bug does not recur.
 
+- **v0.6.1's staff recovery-code fix — NOT YET DONE, due after the VM is
+  upgraded to v0.6.1.** Playwright covers it end to end, but no human has
+  looked at it. On 192.168.1.20: sign in to a 2FA-enabled staff account
+  whose recovery codes you hold, with a full recovery code typed on a real
+  keyboard; check the "Lost your
+  phone? Use a recovery code" toggle's wording on staff and portal, and on
+  a real phone confirm the keyboard each mode brings up (number pad for the
+  6-digit code, full keyboard with letters and a dash in recovery mode).
+  The keyboard part is reasoned from `inputMode`, not verified.
+
 **Not yet restored**: the claim removed from `docs/docs/installation.md`
 (see the "User-facing docs had drifted from this log" entry in
 CLAUDE.md's decisions log for why it was removed) — the NOC item above
@@ -639,9 +649,18 @@ this note once it has a real, tested effect.
 
 ## Auth / rate limiting (Phase 1, widened in Phase 6)
 
-- **SECURITY-RELEVANT (staff-only): the staff TOTP-verify code input has a
+- **FIXED in v0.6.1 (code and automated tests; not yet on a VM) —
+  SECURITY-RELEVANT (staff-only): the staff TOTP-verify code input has a
   hardcoded `maxLength={6}`, which makes recovery-code login through the
-  real UI impossible.** `apps/web/src/pages/TotpVerify.tsx`'s `code` input
+  real UI impossible.** v0.6.1 removed the limit, added a recovery-code
+  toggle on both surfaces, and made `totpVerifySchema` trim and uppercase
+  the code; see CLAUDE.md's "v0.6.1 — staff recovery-code input" entry.
+  Still owed: a manual pass after the VM is upgraded (see "Verify on VM at
+  next deployment" above), and a check on a real phone of the keyboard each
+  mode brings up. A staff user who has lost **both** their authenticator
+  and their recovery codes still has no path back in until the admin-side
+  2FA reset exists. The original report follows, unedited.
+  `apps/web/src/pages/TotpVerify.tsx`'s `code` input
   sets `maxLength={6}`, but a real recovery code
   (`TotpService.generateRecoveryCodes()`) is `XXXXX-XXXXX` — 11 characters.
   Typing a full recovery code with real keystrokes truncates it to 6
