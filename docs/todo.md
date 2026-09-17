@@ -4,12 +4,24 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
-## 2FA/TOTP enrolment and the broker NOC → cancel → clawback → statement flow have never been exercised on a native-install VM
+## Verify on VM at next deployment
 
-2FA/TOTP enrolment and the broker NOC → cancel → clawback → statement flow
-have never been exercised on a native-install VM. Run them during the
-v0.5.0 VM deployment, then restore the claim to installation.md if they
-pass.
+Items deferred to real-hardware testing — none has ever been exercised on
+a native-install VM, only against dev servers or Playwright's harness:
+
+- **2FA/TOTP enrolment and recovery codes**, on a native install.
+- **Broker NOC → cancel → clawback → statement PDF**, on a native
+  install.
+- **The live cross-origin click between the staff and portal login
+  screens** (v0.6.0's login cross-links) — Playwright asserts the
+  generated `href` only, since the dev-server harness runs the two apps
+  on separate origins where the links legitimately 404; a real native
+  install serves both from one origin behind nginx, which is the one
+  environment where actually clicking the link is possible to verify.
+
+Once the first two are verified, restore the claim removed from
+`docs/docs/installation.md` (see the "User-facing docs had drifted from
+this log" entry in CLAUDE.md's decisions log for why it was removed).
 
 ## Nightly property test now takes ~32min at 2000 runs — consider sharding across matrix jobs instead of one long job
 
