@@ -3,6 +3,62 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0]
+
+Two features: admins can now issue copyable, one-time password-reset links
+for staff and portal users with no mail server required, and the staff and
+portal login screens link to each other. Also closes four security gaps
+found reviewing the reset-links work before merge.
+
+### Added
+
+- **Admins can generate a one-time password-reset link for a staff user**
+  (`POST /users/:id/force-password-reset`, `ADMIN_USER_UPDATE`) or for a
+  portal user — customer or broker — (`POST /admin/portal-password-resets`,
+  `ADMIN_PORTAL_INVITE_SEND`). Both answer with a complete, ready-to-share
+  URL and a 30-minute expiry, shown once on the Admin → Users, Applicant
+  360, and Broker Detail screens with a Copy button. There is no mailer in
+  this project by design, so delivery is the admin's job — WhatsApp, phone,
+  in person — the same way portal invite links already work. A portal
+  target with no portal account yet gets a clear "no portal account, send
+  an invite instead" message rather than an error; a deactivated target is
+  refused with 409. Issuing a new link for the same user immediately
+  supersedes any earlier unused one for that user.
+- **The staff and portal login screens now link to each other.** Staff
+  login links to `/portal/`; portal login links back to `/`. Both are
+  plain anchor tags, not client-side router links — the portal app is
+  mounted under a `/portal` router basename, so a router-aware link from
+  inside it would resolve back to itself. Correct in production, where
+  both apps share one origin behind nginx; the two links 404 under
+  `pnpm dev`'s separate dev-server ports, which is expected and not worth
+  working around.
+
+### Security
+
+- **Admin-issued STAFF password-reset tokens no longer pass through
+  `CommunicationProvider`.** This project's only communication provider
+  logs message bodies in plaintext, so an admin-issued staff reset token
+  previously reached the server log the moment it was issued. It now
+  reaches only the admin who requested it, in the API response. **This is
+  narrower than "reset tokens no longer reach logs":** admin-issued portal
+  reset links never went through the provider to begin with, but the
+  separate, self-service portal password-reset flow (a portal user
+  requesting their own reset, with no admin involved) still sends its raw
+  token through the same logging provider — that path is unchanged by
+  this release.
+- **Every other way a user's password gets set now consumes that user's
+  outstanding reset links**, so a stale admin-issued link can no longer
+  overwrite a password the user has since changed themselves. Covers
+  staff change-password, staff force-change-password (first login), portal
+  change-password, and portal invite consumption for an existing account.
+- **A deactivated account can no longer redeem a password-reset link.**
+  Both the staff and portal confirm endpoints now refuse an inactive
+  account, and deactivating a user immediately consumes any outstanding
+  reset link for them.
+- **Reactivating a deactivated account does not revive a reset link that
+  was consumed when the account was deactivated** — a link killed by
+  deactivation stays dead even if the account is later reactivated.
+
 ## [0.5.0]
 
 A security release. It closes a two-factor authentication bypass and makes
