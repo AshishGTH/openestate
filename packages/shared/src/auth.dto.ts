@@ -18,7 +18,14 @@ export const totpVerifySchema = z
     // before AuthService.verifyTotp()'s recovery-code check (which
     // already handles this format correctly) ever ran, making the
     // whole recovery path unusable through the real API.
-    code: z.string().regex(/^(\d{6}|[0-9A-F]{5}-[0-9A-F]{5})$/, 'Invalid code format'),
+    // Trimmed and uppercased first: stored codes are uppercase, and a
+    // phone keyboard or a copied line can add lowercase or spaces. Both the
+    // API pipe and zodResolver pass the parsed value on.
+    code: z
+      .string()
+      .trim()
+      .toUpperCase()
+      .regex(/^(\d{6}|[0-9A-F]{5}-[0-9A-F]{5})$/, 'Invalid code format'),
   })
   .strict();
 

@@ -11,15 +11,16 @@ a decision was made, see CLAUDE.md's Decisions log — this file is only
 IPs on this project drift session to session — always confirm current
 before trusting this table, but as of 2026-08-29:
 
-**Only one VM is currently live.** The previous second box (fresh-install,
-last seen at `10.50.132.78`) and an earlier walkthrough-box address
-(`192.168.1.21`, from before it moved to the IP below) have both been
-destroyed by the user and are gone for good — do not attempt to reach
+**Two VMs are currently live**, as of 2026-09-17. The previous second box
+(fresh-install, last seen at `10.50.132.78`) and an earlier walkthrough-box
+address (`192.168.1.21`, from before it moved to the IP below) have both
+been destroyed by the user and are gone for good — do not attempt to reach
 them, and do not carry their addresses forward into future notes.
 
 | Box | IP | User | Role |
 |---|---|---|---|
 | Upgraded / walkthrough | 192.168.1.100 | `newopen` | Long-lived, carries real demo data + upgrade history. Password-auth only via plink (no working key for this session) — see the credentials note below for where the password lives. Currently v0.4.0, health endpoint reconfirmed live (`{"status":"ok","db":"ok","redis":"ok","version":"0.4.0"}`) on 2026-08-29. |
+| v0.6.0 deployment target | 192.168.1.20 | `textopen` | Ubuntu 24.04.5 LTS. Password-auth only via plink; `sudo` genuinely requires a password for `textopen` (confirmed, not passwordless). Host key fingerprint: `SHA256:yxr46xNP2TBAqStNsfNyyGhVaF34/bY7xRPDmcBahsE` (ed25519). **Upgraded to v0.6.0 (commit `924e55f`, tag `v0.6.0`) by the project owner directly, confirmed on 2026-09-17** — `textopen`'s own shell history shows a deliberate `install-native.sh`/`upgrade-native.sh` session (branch fetched via a git bundle, real backups taken, health checked). This was flagged and investigated during a recon pass and is resolved: it is expected prior activity by the project owner, not stray/unexplained access — do not re-flag it as a mystery in a future session. Health endpoint confirmed live (`{"status":"ok","db":"ok","redis":"ok","version":"0.6.0"}`) on 2026-09-17. **A real `backup-native.sh` bundle exists at `/var/backups/openestate/20260917-074728`** (taken immediately before this session's test-data creation — `db.sql` 416K, `openestate.env`, `uploads.tar.gz`). **Real-browser verification done this same day (see docs/todo.md's "Verify on VM at next deployment" for full detail): staff+portal 2FA/TOTP/recovery-codes (done, one real bug found — staff recovery-code input truncates at 6 chars), the staff↔portal login cross-links (done, both directions), and the broker NOC→cancel→clawback→statement flow (partially verified — everything but the NOC-request step itself, which has no UI anywhere and needs a workaround; see docs/todo.md).** Test artifacts left on the box from this session: staff user `totp-test-admin@openestate.local` (2FA-enabled), company config now has a real GSTIN/GST state code (`09ABCDE1234F1Z5`/`09`, previously unset), project "NOC Test Project" (NOCT) with Tower A / 2 units, applicant "NOC Test Applicant", a cancelled booking (`BKG/2026-27/000002`), and broker "Portal 2FA Test Broker" (2FA-enabled portal account, phone `9900011122`) — none deleted, left for audit trail per this project's own precedent of leaving prior sessions' walkthrough data in place. |
 
 **VM credentials (SSH login password, demo-admin app password) are kept
 outside this repo — ask a maintainer for the current values rather than
@@ -32,12 +33,12 @@ forward — a placeholder like `<password>` (already used in the plink
 example below) is correct; a real value is not, even for a low-stakes
 demo/test box.
 
-Only one box is currently known-reachable. The previous 192.168.0.0/24
-pair (192.168.0.117/118) went fully unreachable before this address was
-given, and the two boxes named above (10.50.132.78, and 192.168.1.21
-from before this box's IP changed) have since been destroyed outright.
-If a second (fresh-install) box reappears, add it back as its own row
-rather than overwriting this one.
+Both boxes in the table above are currently known-reachable. The previous
+192.168.0.0/24 pair (192.168.0.117/118) went fully unreachable before
+192.168.1.100 was given, and the two boxes named above (10.50.132.78, and
+192.168.1.21 from before this box's IP changed) have since been destroyed
+outright. If a third box reappears, add it back as its own row rather than
+overwriting either of these.
 
 No SSH key is installed on 192.168.1.100 — it is password-auth only via
 `plink` (see the credentials note above for where the password lives).
@@ -123,6 +124,25 @@ isolated per-file runs; see CLAUDE.md's `scripts/test-setup.sh`
 verification entry (2026-08-23) for the full read on which failures are
 contention vs. real bugs, before assuming a full-suite red run here means
 a regression.
+
+**192.168.1.20 has an open, unconfirmed clock discrepancy — different from
+192.168.1.100's (that one is a confirmed, unfixed drift; this one is a
+puzzle, not yet explained).** `timedatectl status` on 2026-09-17 reported
+the clock correctly synchronized (NTP active, correct IST time) — the
+clock is fine *right now*. But `systemctl status openestate-api` reported
+`Active: ... since Fri 2026-09-11 23:12:09 IST; 5 days ago`, while `uptime`
+on the same box, same moment, showed the kernel itself has only been up
+**2h35m** — i.e. a much more recent reboot than the service's own claimed
+start time, which is a contradiction (a service cannot outlive the
+machine's last boot). The most likely account, given 192.168.1.100's own
+precedent: the clock was wrong (reading something like "Sep 11") at the
+moment of the last reboot/service-start and was corrected by NTP sometime
+between then and this check — which would also explain why
+`/opt/openestate/releases/20260911173714-924e55f` is folder-named "Sep 11"
+despite containing a commit that didn't exist until Sep 17. **Not
+independently confirmed** (no NTP correction history or reboot log was
+checked) — recorded here so a future session starts from this hypothesis
+instead of re-deriving it from the same raw numbers.
 
 Browser automation against these VMs: the Browser pane's per-site
 approval gate has repeatedly blocked real-browser checks here across

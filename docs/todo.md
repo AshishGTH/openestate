@@ -6,22 +6,233 @@ they're expected to land. Each entry should say *what*, *why deferred*, and
 
 ## Verify on VM at next deployment
 
-Items deferred to real-hardware testing — none has ever been exercised on
-a native-install VM, only against dev servers or Playwright's harness:
+Items deferred to real-hardware testing. **Status as of the v0.6.0
+verification session on 192.168.1.20 (2026-09-17)**, real browser
+click-throughs via `claude-in-chrome`, disposable test accounts:
 
-- **2FA/TOTP enrolment and recovery codes**, on a native install.
-- **Broker NOC → cancel → clawback → statement PDF**, on a native
-  install.
+- **2FA/TOTP enrolment and recovery codes — DONE, staff and portal,
+  with one real bug found (logged separately, see "SECURITY-RELEVANT
+  (staff-only): the staff TOTP-verify code input has a hardcoded
+  `maxLength={6}`" above).** Staff: enrollment, TOTP-code login, and
+  forced-password-change all verified with real outcomes (a disposable
+  `company_admin` user). Portal: enrollment, TOTP-code login, and — this
+  is the one genuinely new information the portal pass produced —
+  full-recovery-code login **succeeded** (typed with real keystrokes,
+  landed on the real broker dashboard) and the same code was correctly
+  **rejected on reuse**, confirming the portal field has no equivalent
+  `maxLength` bug and one-time consumption works on both surfaces.
+- **Broker NOC → cancel → clawback → statement PDF — PARTIALLY
+  VERIFIED, not fully verified.** Every step that has real UI was
+  exercised and passed with real, cross-checked outcomes: broker
+  creation, a `FLAT_PERCENT` commission rule, a booking with the broker
+  attached (via `BookingWizard`'s confirm-step broker select), commission
+  accrual (₹10,500 on a ₹5,25,000 GST-inclusive booking), a partial
+  ₹4,000 payment (request → approve → pay), cancellation correctly
+  **blocked** with the exact expected error before an NOC existed,
+  the broker portal's real Approve click, cancellation **succeeding**
+  after approval, the resulting Outstanding balance flipping to exactly
+  **−₹4,000.00** (matching the hand-derived clawback formula:
+  `CLAWBACK_REVERSAL = -(accrued-paid)` then `CLAWBACK_RECOVERY = -paid`
+  under the default `RECOVER` policy — not ₹0, not still positive), and
+  the downloaded broker statement PDF matching that figure exactly,
+  row-for-row (ACCRUAL → PAYMENT → CLAWBACK_REVERSAL →
+  CLAWBACK_RECOVERY). **The one step NOT exercised through real UI:
+  requesting the NOC itself** — see the new entry below, "Staff has no
+  UI to call `POST /bookings/:id/noc/request`" — which was done via an
+  authenticated in-page `fetch()` (the real access token captured from
+  the app's own outgoing request, not fabricated) because no button for
+  it exists anywhere in `apps/web`. Because of that one substitution,
+  this item is not a full "verified in a real browser" claim per this
+  file's own primary lesson — everything downstream of the NOC existing
+  (approve, cancel, clawback, statement) is fully real-browser-verified;
+  the request step itself is not.
 - **The live cross-origin click between the staff and portal login
-  screens** (v0.6.0's login cross-links) — Playwright asserts the
-  generated `href` only, since the dev-server harness runs the two apps
-  on separate origins where the links legitimately 404; a real native
-  install serves both from one origin behind nginx, which is the one
-  environment where actually clicking the link is possible to verify.
+  screens — DONE, both directions, from genuinely logged-out state.**
+  Staff `/login` (unauthenticated) → "Customer or broker? Go to the
+  portal" → landed on the real portal (in this case the already-
+  authenticated broker's own dashboard, since a portal session was
+  still live from the 2FA pass — a valid pass per the code's own
+  documented "authenticated visitor skips the redirect" behavior, not
+  the blank-page/404 the link was built to catch). Then, after
+  explicitly signing out of the portal too: portal `/portal/login`
+  (unauthenticated) → "Staff member? Go to the staff login" → landed on
+  the real, rendered staff `/login` form — the strictest possible signal,
+  confirming the historical basename bug does not recur.
 
-Once the first two are verified, restore the claim removed from
-`docs/docs/installation.md` (see the "User-facing docs had drifted from
-this log" entry in CLAUDE.md's decisions log for why it was removed).
+- **v0.6.1's staff recovery-code fix — NOT YET DONE, due after the VM is
+  upgraded to v0.6.1.** Playwright covers it end to end, but no human has
+  looked at it. On 192.168.1.20: sign in to a 2FA-enabled staff account
+  whose recovery codes you hold, with a full recovery code typed on a real
+  keyboard; check the "Lost your
+  phone? Use a recovery code" toggle's wording on staff and portal, and on
+  a real phone confirm the keyboard each mode brings up (number pad for the
+  6-digit code, full keyboard with letters and a dash in recovery mode).
+  The keyboard part is reasoned from `inputMode`, not verified.
+
+**Not yet restored**: the claim removed from `docs/docs/installation.md`
+(see the "User-facing docs had drifted from this log" entry in
+CLAUDE.md's decisions log for why it was removed) — the NOC item above
+is only partially verified, so this stays deferred until a session
+either builds the missing "Request NOC" UI and re-verifies through it,
+or makes a deliberate, documented decision that the `fetch()` substitution
+is an acceptable permanent verification method for a UI-less endpoint.
+
+## Staff has no UI to call `POST /bookings/:id/noc/request` — a genuine gap, not a "look elsewhere" case
+
+Found during the v0.6.0 VM verification session (2026-09-17), while
+trying to exercise the broker NOC → cancel → clawback flow through real
+UI clicks only. Confirmed by grep, not assumption: `apps/web/src`
+contains zero references to `/nocs`, `noc/request`, or any caller of
+`POST /bookings/:id/noc/request` anywhere. NOC **approve/reject** has
+real UI, but only on the **broker portal**
+(`apps/portal/src/pages/BrokerNocs.tsx` → `/portal/broker/nocs/:id/approve`
+`/reject`) — there is no staff-side equivalent either (`NocController`'s
+`/nocs/:id/approve`/`/reject` also have zero `apps/web` callers).
+
+**This is a genuine product gap, not a case of "the trigger is meant to
+live somewhere else."** Reasoned from the code, not guessed: `NocService
+.request()` is documented in its own file as "staff-only" (`noc.service.ts`'s
+class-level comment); the permission gating it, `POSTSALES_NOC_REQUEST`,
+is staff-only in `roles.ts`; and the domain logic itself only makes sense
+one way — an NOC (No Objection Certificate) is something the **broker**
+grants to the **company**, releasing it to cancel a booking the broker
+sourced without dispute. The company (staff) is necessarily the party
+that has to ask for it; a broker cannot meaningfully "request their own
+NOC" from themselves. There is no other reasonable owner for this
+trigger, so this isn't a case of looking in the wrong place — the button
+simply doesn't exist. Same shape as every other "backend built and
+tested, UI never wired up" gap this project's history is full of
+(construction updates, project edit, the base-line GST rate picker,
+before each was eventually fixed).
+
+**Reachable today only via**: a raw authenticated request. The
+verification session used an in-page `fetch()` with the real access
+token captured from the already-logged-in app's own outgoing request
+(monkey-patching `window.fetch` briefly to read the `Authorization`
+header off a real client-side navigation, then restoring it) plus the
+real CSRF cookie — not a fabricated token, not a bypass of the guard
+chain, just filling in for a missing button using the same credentials
+the button would have used. This is not a substitute for a real "Request
+NOC" button and should not be treated as sufficient verification going
+forward.
+
+**Unblocked by**: adding a "Request NOC" action somewhere reachable from
+a broker-sourced booking — `InstallmentSchedule.tsx` (next to the
+existing "Accrue Broker Commission"/"Cancel Booking" buttons, which
+already know the booking's `brokerId`) is the obvious home, mirroring
+how "Accrue Broker Commission" itself was added there. A staff-side
+NOC approve/reject UI (mirroring `BrokerNocs.tsx`) is a separate,
+lower-priority gap — cancellation only needs the broker's own approval,
+not a staff mirror of it.
+
+## `upgrade-native.sh` produces no persistent log — fix before v0.8.0
+
+Confirmed by reading `deploy/native/upgrade-native.sh` and `deploy/native/lib.sh`
+directly. `log()`/`warn()`/`die()` (`lib.sh`) are plain `printf` to stdout/
+stderr — no file, no `logger`, no journald wiring for the script itself (only
+the *deployed* `openestate-api` service gets journald, via its own systemd
+unit, which is a separate thing). The one place the script deliberately
+captures output to a file — `MIGRATE_LOG` and `SYNC_LOG`, both
+`mktemp`+`tee`'d during the migration and sync-permissions steps — gets
+`rm -f`'d in **every** code path immediately after use (`upgrade-native.sh`
+lines ~139/142/145 for `MIGRATE_LOG`, ~195 for `SYNC_LOG`), success or
+failure alike. So the entire run's output — every step, not just
+migrate/sync — exists nowhere but the invoking terminal's own scrollback.
+If that terminal disconnects (a dropped SSH session, a closed screen/tmux
+pane, a CI runner that doesn't capture stdout to an artifact) mid-upgrade
+or right after a failure, there is nothing left to diagnose from — not even
+which step it got to.
+
+**Fix before v0.8.0**, not after — v0.8.0 exists specifically to prove the
+upgrade mechanism itself (a boot-required-setting rollout, gated on the
+healthcheck), and the whole point of that release is to be trustworthy
+evidence for self-hosters running it unattended on their own infrastructure.
+A failure on someone else's server, with this gap unfixed, leaves them
+with nothing to send back except "it didn't work." Straightforward fix:
+tee the whole script's output (not just the two steps that already tee) to
+a real, timestamped file under something like `/var/log/openestate/` or
+`/opt/openestate/releases/<timestamp>/upgrade.log`, and don't delete it —
+`backup-native.sh`'s bundles already establish the precedent of leaving an
+artifact behind under `/var/backups/openestate/`; this needs the same
+treatment for upgrade runs specifically, not just backups.
+
+## For v0.7.0: branch protection on `master` was bypassed by the v0.6.0 release
+
+**Found by accident** while investigating why `pnpm-lock.yaml` showed as
+modified (during v0.6.1 prep, 2026-09-17). The v0.6.0 release session's
+transcript shows it pushed the release commit `924e55f` and the `v0.6.0` tag
+straight to `master`, with no PR. GitHub replied: "Bypassed rule violations for
+refs/heads/master: 5 of 5 required status checks are expected." The push
+went through anyway.
+
+**The tagged release commit has never passed CI.** The CI run on `924e55f`
+(run `35186063739`) was cancelled, probably because the next push to
+`master` replaced it. `aa0849e`, the release-notes commit on top, passed.
+So `master` is green, but that doesn't show `924e55f` itself is. The
+`v0.6.0` tag points at a commit with no successful CI run of its own.
+
+**Why this matters more than the one push:** the project rule "open a PR for
+every branch, CI must be green, squash-merge" only protects anything if
+GitHub actually enforces the protection. This push shows it doesn't for
+whoever is pushing, most likely because the account is an admin and "do not
+allow bypassing" is off.
+
+**What would close it:**
+- Check the `master` protection settings: enforce for administrators,
+  disallow bypassing required checks, and consider requiring a PR.
+- Decide whether release commits also go through a PR. Nothing
+  explains why the v0.6.0 release was pushed directly.
+- Optionally, re-run CI on `924e55f` (e.g. `gh workflow run` against that
+  SHA) so the tagged commit has a result of its own.
+
+## For v0.7.0: API e2e tests don't use the app's own validation pipe
+
+**Found during v0.6.1 red-first testing** (2026-09-17). All 40
+`apps/api/test/e2e-*.test.ts` files bootstrap with nestjs-zod's stock
+pipe (`import { ZodValidationPipe } from 'nestjs-zod'`). `apps/api/src/main.ts`
+uses the app's own pipe in `apps/api/src/common/pipes/zod-validation.pipe.ts`
+instead, which reports what failed (e.g. `code: Invalid code format`) rather
+than a generic `Validation failed` (see CLAUDE.md's toast-audit entry).
+The same bad recovery code showed both:
+- the API test got `"message":"Validation failed"`
+- the Playwright harness, which runs the real `main.ts`, got
+  `"message":"code: Invalid code format"`
+
+**Impact today:** validation results match. Both pipes run the same schema
+and pass the parsed value on. But no API test checks the error message users
+actually see, and any test that asserts on a 400's `message` checks a string
+production never sends.
+
+**Fix:** have the API e2e tests share one bootstrap helper that registers
+the app's own pipe (or call the same setup function `main.ts` uses). That
+brings in `main.ts`'s other global setup too, not just the pipe. Do it on
+its own branch; it touches every e2e test file.
+
+## For v0.7.0: no `.gitattributes`, so line endings depend on each machine's git config
+
+The repo has no `.gitattributes`. So how git handles line endings comes
+entirely from each contributor's own git config. On this Windows machine
+that's `core.autocrlf=true` from `C:/Program Files/Git/etc/gitconfig`. The
+committed files and the working copies both use LF, so every
+`git add`/`git diff` warns "LF will be replaced by CRLF the next time Git
+touches it."
+
+**This is behind the stale lockfile flag** (same investigation as the entry
+above). After the v0.6.0 release rewrote `pnpm-lock.yaml` with identical
+bytes (see CLAUDE.md's note under "v0.6.0 released" on why
+`pnpm install --lockfile-only` is a no-op here), the file kept showing as
+modified until its cached timestamp was refreshed with
+`git update-index --refresh`. Every hash and size matched, and `git diff` was
+empty. Our working explanation is that `autocrlf` stops a normal
+`git status` from refreshing the timestamp, because a checkout would write
+different bytes (CRLF) from what's on disk (LF). That fits everything we saw,
+but hasn't been proven.
+
+**Fix:** add a `.gitattributes`, most likely `* text=auto eol=lf` plus
+explicit `binary` entries as needed, then run `git add --renormalize .`
+once. After that, line endings no longer depend on each machine's settings.
+Needs its own branch: renormalizing can touch many files, and the diff needs
+reviewing on its own, not mixed into a feature change.
 
 ## Nightly property test now takes ~32min at 2000 runs — consider sharding across matrix jobs instead of one long job
 
@@ -438,6 +649,53 @@ this note once it has a real, tested effect.
 
 ## Auth / rate limiting (Phase 1, widened in Phase 6)
 
+- **FIXED in v0.6.1 (code and automated tests; not yet on a VM) —
+  SECURITY-RELEVANT (staff-only): the staff TOTP-verify code input has a
+  hardcoded `maxLength={6}`, which makes recovery-code login through the
+  real UI impossible.** v0.6.1 removed the limit, added a recovery-code
+  toggle on both surfaces, and made `totpVerifySchema` trim and uppercase
+  the code; see CLAUDE.md's "v0.6.1 — staff recovery-code input" entry.
+  Still owed: a manual pass after the VM is upgraded (see "Verify on VM at
+  next deployment" above), and a check on a real phone of the keyboard each
+  mode brings up. A staff user who has lost **both** their authenticator
+  and their recovery codes still has no path back in until the admin-side
+  2FA reset exists. The original report follows, unedited.
+  `apps/web/src/pages/TotpVerify.tsx`'s `code` input
+  sets `maxLength={6}`, but a real recovery code
+  (`TotpService.generateRecoveryCodes()`) is `XXXXX-XXXXX` — 11 characters.
+  Typing a full recovery code with real keystrokes truncates it to 6
+  (confirmed live on 192.168.1.20's v0.6.0 install: `FA897-AF930` became
+  `FA897-`), which then fails the client-side zod resolver
+  (`totpVerifySchema`'s `code` regex, `^(\d{6}|[0-9A-F]{5}-[0-9A-F]{5})$`)
+  before the request ever reaches the network — the login attempt never
+  even hits `POST /auth/totp/verify`. **The backend is correct and
+  unaffected** — `totpVerifySchema` already accepts both the 6-digit and
+  the 5-5 recovery format (its own code comment records a *previous*
+  incident where a digits-only schema rejected every recovery code, fixed
+  server-side); this is purely a client-side input constraint that
+  contradicts its own backend contract.
+  `apps/portal/src/pages/Login.tsx`'s equivalent TOTP field has **no**
+  `maxLength` at all — so this is staff-only, and is a violation of
+  CLAUDE.md's mirrored-auth standing rule (a defect found on one surface
+  is a question about the other) in one specific direction. **Combined
+  with the "planned admin-side 2FA reset" noted in the next entry below —
+  which doesn't exist yet, confirmed by reading `AuthController`/
+  `AuthService`: `totp/disable` is self-service only
+  (`req.user.sub`), there is no admin-facing endpoint that touches
+  another user's `totpEnabled` — a staff user who loses their
+  authenticator today has NO recovery path at all: not self-service
+  (this bug), not administrative (doesn't exist).** Found during v0.6.0
+  VM verification, specifically by typing the real recovery code with
+  real keystrokes into the field — a scripted `.value=` set (bypassing
+  the DOM's own `maxLength` enforcement) would have silently passed the
+  full value through and never revealed the truncation, exactly the
+  "real typing vs. scripted value-set" gap CLAUDE.md's own "Boundary of
+  browser-automation verification" section warns about. Fix is
+  presumably just removing/widening the `maxLength` (and possibly
+  loosening `inputMode="numeric"`, which some mobile keyboards use as a
+  hint to suppress the `-` character) — not attempted yet, deliberately
+  batched with other fixes after the full v0.6.0 verification sweep
+  finishes, per instruction.
 - **SECURITY-RELEVANT: 2FA and password-change events write no audit
   row.** `AuthService` and `PortalAuthService` use `SYSTEM_PRISMA`, which
   carries no audit extension, so `User`'s `AUDITED_MODELS` registration
@@ -449,7 +707,10 @@ this note once it has a real, tested effect.
   `auditLog.create()`-inside-a-`SYSTEM_PRISMA`-transaction pattern already
   used for `RESET_LINK_ISSUED`/`PORTAL_RESET_ISSUED` applies directly
   here, so this doesn't need a design decision first, just the same
-  treatment applied to a few more call sites.
+  treatment applied to a few more call sites. **See the entry directly
+  above** — until an admin-side 2FA reset actually exists, this "planned"
+  feature is also the only thing that would give a locked-out staff user
+  a way back in, so the two gaps compound.
 - **Redis-backed `ThrottlerStorage` for the default/`portal-auth`/
   `portal-read` buckets.** CLAUDE.md's security rules call for
   `@nestjs/throttler` + a Redis store; `app.module.ts`'s single

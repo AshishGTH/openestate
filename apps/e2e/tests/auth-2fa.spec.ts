@@ -61,7 +61,7 @@ test('login → forced password change → 2FA enrollment → logout → login w
   await expect(page.locator('img[src^="data:image/svg+xml"]')).toBeVisible();
   await expect(page.getByText(secret)).toBeVisible();
 
-  await page.locator('input[inputmode="numeric"]').fill(currentTotpCode(secret));
+  await page.locator('input[inputmode="numeric"]').pressSequentially(currentTotpCode(secret));
   await page.getByRole('button', { name: 'Confirm' }).click();
   await expect(page.getByText('Save these recovery codes — shown once')).toBeVisible();
   await page.getByRole('button', { name: 'Done' }).click();
@@ -77,7 +77,7 @@ test('login → forced password change → 2FA enrollment → logout → login w
   await page.getByRole('button', { name: 'Sign in' }).click();
 
   await expect(page.getByRole('heading', { name: 'Two-Factor Authentication' })).toBeVisible();
-  await page.locator('#code').fill(currentTotpCode(secret));
+  await page.locator('#code').pressSequentially(currentTotpCode(secret));
   await page.getByRole('button', { name: 'Verify' }).click();
 
   await expect(page).toHaveURL(/\/$/);

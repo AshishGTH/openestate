@@ -42,6 +42,11 @@ export default async function globalSetup() {
     // through a generated link, which would break every other spec that
     // logs in as a shared fixture's portal user with the original one.
     resetLinks: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
+    // Separate accounts for the recovery-code specs, for the same reason:
+    // each one enables 2FA and uses up recovery codes on the account it
+    // logs into.
+    staffRecoveryCode: await seedE2eFixture(DATABASE_URL_SYSTEM),
+    portalRecoveryCode: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
   };
   writeFileSync(path.join(__dirname, '.fixture-state.json'), JSON.stringify(fixtures, null, 2));
 }

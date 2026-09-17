@@ -12,10 +12,15 @@ interface Props {
 export default function TotpVerify({ tempToken, onBack }: Props) {
   const { verifyTotp } = useAuth();
   const [error, setError] = useState('');
+  // Only changes the keyboard and wording: the field accepts either kind of
+  // code in either mode. A numeric keypad can't type a recovery code's
+  // letters or dash.
+  const [recoveryMode, setRecoveryMode] = useState(false);
 
   const {
     register,
     handleSubmit,
+    resetField,
     formState: { errors, isSubmitting },
   } = useForm<TotpVerifyDto>({ resolver: zodResolver(totpVerifySchema) });
 
@@ -27,13 +32,21 @@ export default function TotpVerify({ tempToken, onBack }: Props) {
     }
   };
 
+  const switchMode = () => {
+    setRecoveryMode((on) => !on);
+    resetField('code');
+    setError('');
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
       <div className="w-full max-w-sm">
         <div className="rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
           <h1 className="text-xl font-semibold text-slate-900 text-center">Two-Factor Authentication</h1>
           <p className="mt-1 text-sm text-slate-500 text-center">
-            Enter the 6-digit code from your authenticator app
+            {recoveryMode
+              ? 'Enter one of your recovery codes (XXXXX-XXXXX)'
+              : 'Enter the 6-digit code from your authenticator app'}
           </p>
 
           {error && (
@@ -45,14 +58,15 @@ export default function TotpVerify({ tempToken, onBack }: Props) {
           <form onSubmit={handleSubmit(onSubmit)} className="mt-6 space-y-4">
             <div>
               <label htmlFor="code" className="block text-sm font-medium text-slate-700">
-                Code
+                {recoveryMode ? 'Recovery code' : 'Code'}
               </label>
               <input
                 id="code"
                 type="text"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                maxLength={6}
+                inputMode={recoveryMode ? 'text' : 'numeric'}
+                autoComplete={recoveryMode ? 'off' : 'one-time-code'}
+                autoCapitalize={recoveryMode ? 'characters' : undefined}
+                spellCheck={recoveryMode ? false : undefined}
                 {...register('code')}
                 className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-center text-lg tracking-widest shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
               />
@@ -67,6 +81,14 @@ export default function TotpVerify({ tempToken, onBack }: Props) {
               className="w-full rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
             >
               {isSubmitting ? 'Verifying…' : 'Verify'}
+            </button>
+
+            <button
+              type="button"
+              onClick={switchMode}
+              className="w-full text-sm text-blue-600 hover:text-blue-700"
+            >
+              {recoveryMode ? 'Use your authenticator app instead' : 'Lost your phone? Use a recovery code'}
             </button>
 
             <button
