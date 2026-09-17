@@ -7158,6 +7158,14 @@ checklist.md`, `docs/releases/v0.5.0-release-notes.md`, and
 `CHANGELOG.md`'s existing `[0.5.0]` entry — are deliberately left
 untouched; changing them would make a true historical claim false.
 
+**Release step, added afterwards:** don't run `pnpm install --lockfile-only`
+after a version bump. Workspace packages appear in `pnpm-lock.yaml` only as
+`specifier: workspace:*` / `version: link:…`, so their versions never reach
+the lockfile and the command rewrites identical bytes. The v0.6.0 release ran
+it anyway. Git then flagged the untouched file as modified for a whole day,
+because its cached timestamp went stale. That needed a separate investigation
+to rule out a real lockfile change.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
