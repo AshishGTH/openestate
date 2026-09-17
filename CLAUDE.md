@@ -6853,6 +6853,33 @@ fields including IP) checked out against the code as written.
   typing — a pre-existing `reset()` race this spec's extra worker load
   surfaced, worked around in the spec and logged in `docs/todo.md`.
 
+### Cross-links between the staff and portal login screens
+
+- **Added in both directions**, after real use on a test VM showed the
+  portal URL is undiscoverable: a customer who received a portal link once
+  has no way back to it without remembering the address, and the project
+  author himself couldn't find it. Staff login links to `/portal/`; portal
+  login links to `/`.
+- **Plain `<a>` tags, not react-router `<Link>`.** The portal's
+  `BrowserRouter` has `basename="/portal"`, which prefixes every `<Link>` —
+  a `<Link to="/">` from inside the portal would resolve to `/portal/` and
+  silently keep the user right where they already were. This is
+  load-bearing, not a style choice.
+- **Correct in production only.** Staff and portal share one origin there
+  (nginx, portal under `/portal/`); the dev servers run them on separate
+  ports, so both links 404 under `pnpm dev`. Deliberately not worked
+  around — there's no clean way to make a static anchor origin-aware
+  without hardcoding a dev port into production code. Playwright asserts
+  the `href` attribute rather than clicking through, for the same reason.
+- **`/portal/` (not `/portal/login`) verified as the staff→portal target
+  before switching to it**, not assumed: an unauthenticated hit lands on
+  the portal's own `ProtectedRoute`-gated index route, which `<Navigate
+  to="/login" />`s — resolved against the router's own `basename` since
+  it runs inside the mounted app — to `/portal/login` regardless. An
+  already-authenticated visitor skips the redirect entirely and lands on
+  their own tab. Either way, `/portal/` is memorable and always lands
+  somewhere correct, where a deep link teaches a URL nobody will recall.
+
 ### Uploaded documents plan: owner decisions (2026-09-14)
 
 Plan: `docs/plans/uploaded-documents-plan.md` (revision 2). Documentation

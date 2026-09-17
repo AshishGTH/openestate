@@ -97,6 +97,17 @@ export default function Login() {
               {isSubmitting ? 'Signing in…' : 'Sign in'}
             </button>
           </form>
+
+          {/* Plain anchor, not react-router Link: this leaves the staff SPA
+              entirely for the portal app, which is a separate origin in dev
+              (different Vite port) and only shares this origin in production
+              (nginx serves it under /portal/ — see deploy/native/nginx). */}
+          <a
+            href="/portal/"
+            className="mt-4 block text-center text-sm text-slate-500 hover:text-slate-700"
+          >
+            Customer or broker? Go to the portal
+          </a>
         </div>
       </div>
     </div>

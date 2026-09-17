@@ -115,9 +115,23 @@ export default function Login() {
           </form>
 
           {!needsTotp && (
-            <Link to="/forgot-password" className="mt-4 block text-center text-sm text-blue-600">
-              Forgot password?
-            </Link>
+            <>
+              <Link to="/forgot-password" className="mt-4 block text-center text-sm text-blue-600">
+                Forgot password?
+              </Link>
+              {/* Plain anchor, not react-router Link: BrowserRouter's own
+                  basename="/portal" (App.tsx) prefixes every <Link>, which
+                  would resolve to /portal/ and never actually leave the
+                  portal. A plain <a> bypasses the router entirely — a real,
+                  full-page navigation to the staff app, same-origin in
+                  production only (see Login.tsx's staff-side counterpart). */}
+              <a
+                href="/"
+                className="mt-2 block text-center text-sm text-slate-500 hover:text-slate-700"
+              >
+                Staff member? Go to the staff login
+              </a>
+            </>
           )}
         </div>
       </div>
