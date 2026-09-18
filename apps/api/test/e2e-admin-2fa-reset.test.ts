@@ -515,4 +515,113 @@ describeIf('admin 2FA reset, staff and portal', () => {
       expect(s.isActive).toBe(false);
     });
   });
+
+  // ── concurrency ──
+
+  /**
+   * Several admins clicking Reset on the same account at once. Each reset
+   * reads totp_enabled under SELECT ... FOR UPDATE, so the requests serialise
+   * on the row: exactly one sees 2FA on and reports wasEnabled true; the rest
+   * wait for it to commit and see it off. Without the lock, READ COMMITTED
+   * lets several read "on" before any commits, and both the responses and the
+   * audit trail overstate what happened.
+   *
+   * The overlap is forced, not hoped for. Simply firing requests together
+   * proved unreliable: with the lock removed, the staff test still passed
+   * two runs in three, because the requests often happened to run in turn.
+   * So the test takes its own lock on the row, fires the requests, waits
+   * until every one of them is blocked behind that lock, then releases it.
+   * With FOR UPDATE, each request blocks BEFORE its read. Without it, a plain
+   * read is not blocked by a row lock, so every request reads "on" and then
+   * blocks at its UPDATE, and all of them report true. The outcome is fixed
+   * either way.
+   *
+   * 4 requests, not 5: each blocked request holds one of the app's system
+   * pool connections (connection_limit=5 in the test URLs), and a fifth
+   * would wait for a connection instead of the lock, so the barrier would
+   * never fill.
+   */
+  describe('concurrent resets of the same account', () => {
+    const CONCURRENT = 4;
+
+    /** Sessions blocked by `holderPid`, directly or behind other waiters in the queue. */
+    async function blockedBehind(holderPid: number): Promise<number> {
+      const [{ n }] = await systemPrisma.$queryRaw<Array<{ n: number }>>`
+        WITH RECURSIVE blocked(pid) AS (
+          SELECT ${holderPid}::int
+          UNION
+          SELECT a.pid FROM pg_stat_activity a JOIN blocked b ON b.pid = ANY (pg_blocking_pids(a.pid))
+        )
+        SELECT (count(*) - 1)::int AS n FROM blocked
+      `;
+      return n;
+    }
+
+    async function fireWhileRowLocked(userId: string, send: () => request.Test): Promise<request.Response[]> {
+      let responses!: Promise<request.Response[]>;
+      await systemPrisma.$transaction(
+        async (tx: typeof systemPrisma) => {
+          await tx.$queryRaw`SELECT 1 FROM users WHERE id = ${userId}::uuid FOR UPDATE`;
+          const [{ pid }] = await tx.$queryRaw<Array<{ pid: number }>>`SELECT pg_backend_pid() AS pid`;
+          responses = Promise.all(Array.from({ length: CONCURRENT }, () => send().then((r) => r)));
+
+          const deadline = Date.now() + 15_000;
+          let n = 0;
+          while ((n = await blockedBehind(pid)) < CONCURRENT) {
+            if (Date.now() > deadline) throw new Error(`only ${n} of ${CONCURRENT} resets reached the row lock`);
+            await new Promise((r) => setTimeout(r, 50));
+          }
+        },
+        { timeout: 30_000 },
+      );
+      return responses;
+    }
+
+    async function expectExactlyOneWasEnabled(responses: request.Response[], targetUserId: string, surface: 'staff' | 'portal') {
+      expect(responses.map((r) => r.status)).toEqual(Array(CONCURRENT).fill(200));
+      const flags = responses.map((r) => twoFactorResetResponseSchema.parse(r.body).wasEnabled);
+      expect(flags.filter(Boolean)).toHaveLength(1);
+
+      // The audit trail tells the same story as the responses.
+      const audits = await resetAudits(targetUserId);
+      expect(audits).toHaveLength(CONCURRENT);
+      expect(audits.filter((a: { after: { wasEnabled: boolean } }) => a.after.wasEnabled)).toHaveLength(1);
+      for (const a of audits) expect((a.after as { surface: string }).surface).toBe(surface);
+
+      expectCleared(await totpState(targetUserId));
+    }
+
+    it('staff: exactly one of several simultaneous resets reports wasEnabled true', async () => {
+      const admin = await createStaff(adminRoleId);
+      const target = await createStaff(adminRoleId);
+      await enableTotpAndLock(target.id);
+      const s = await staffSession(admin.email);
+
+      const responses = await fireWhileRowLocked(target.id, () =>
+        request(app.getHttpServer())
+          .post(`/api/v1/users/${target.id}/reset-2fa`)
+          .set('Cookie', `openestate_csrf=${s.csrf}`)
+          .set('Authorization', `Bearer ${s.token}`)
+          .set('X-CSRF-Token', s.csrf),
+      );
+      await expectExactlyOneWasEnabled(responses, target.id, 'staff');
+    });
+
+    it('portal: exactly one of several simultaneous resets reports wasEnabled true', async () => {
+      const admin = await createStaff(adminRoleId);
+      const target = await createPortalAccount('broker');
+      await enableTotpAndLock(target.userId);
+      const s = await staffSession(admin.email);
+
+      const responses = await fireWhileRowLocked(target.userId, () =>
+        request(app.getHttpServer())
+          .post('/api/v1/admin/portal-2fa-resets')
+          .set('Cookie', `openestate_csrf=${s.csrf}`)
+          .set('Authorization', `Bearer ${s.token}`)
+          .set('X-CSRF-Token', s.csrf)
+          .send(target.body),
+      );
+      await expectExactlyOneWasEnabled(responses, target.userId, 'portal');
+    });
+  });
 });
