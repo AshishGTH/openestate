@@ -22,6 +22,27 @@ export const TOTP_LOCKED_MESSAGE = 'Too many incorrect codes. Wait a few minutes
 export const TOTP_ATTEMPTS_CLEARED = { failedTotpAttempts: 0, totpLockedUntil: null };
 
 /**
+ * Everything that has to go for a clean re-enrolment — the credentials AND
+ * the lockout state. Shared by self-service disable (staff and portal) and
+ * the admin 2FA reset, so those four call sites cannot drift apart.
+ *
+ * The two lockout fields are the part that is easy to leave out, and leaving
+ * them out is a real defect, not tidiness: a user who burned five codes is
+ * locked for TOTP_LOCKOUT_MINUTES, and that lock outlives a disable. Turn 2FA
+ * off and straight back on inside that window — exactly what someone does
+ * after locking themselves out, and exactly the flow the admin reset exists
+ * for — and the first code from the brand-new authenticator is refused 429 by
+ * a lock belonging to the secret that was just thrown away. Outside the
+ * window it self-heals, which is why it went unnoticed.
+ */
+export const TOTP_CLEARED = {
+  totpEnabled: false,
+  totpSecret: null,
+  recoveryCodes: [] as string[],
+  ...TOTP_ATTEMPTS_CLEARED,
+};
+
+/**
  * Reserves one attempt before the code is checked, or throws 429 if the user
  * is TOTP-locked — the code is never evaluated while locked, so the response
  * can't reveal whether it was right. A successful verify then clears the

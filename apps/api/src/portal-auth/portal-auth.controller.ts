@@ -156,7 +156,7 @@ export class PortalAuthController {
   @ApiOperation({ summary: 'Disable portal TOTP 2FA' })
   async disableTotp(@Req() req: Request) {
     const user = req.user as JwtPayload;
-    await this.portalAuthService.disableTotp(user.sub);
+    await this.portalAuthService.disableTotp(user.sub, user.companyId);
   }
 
   @Public()
@@ -219,9 +219,11 @@ export class PortalAuthController {
   async consumeInvite(
     @Param('inviteId') inviteId: string,
     @Body() dto: PortalInviteConsumeDto,
+    @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const result = await this.portalAuthService.consumeInvite(inviteId, dto);
+    // @Public(): no tenant context, so the audit row's IP is passed explicitly.
+    const result = await this.portalAuthService.consumeInvite(inviteId, dto, req.ip ?? req.socket.remoteAddress);
     setPortalRefreshCookie(res, result.refreshRaw, result.expiresAt);
     setPortalCsrfCookie(res);
     return { accessToken: result.accessToken };
@@ -242,7 +244,8 @@ export class PortalAuthController {
   @Post('password-reset/confirm')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Confirm a portal password reset' })
-  async confirmPasswordReset(@Body() dto: PortalPasswordResetConfirmDto) {
-    await this.portalAuthService.confirmPasswordReset(dto);
+  async confirmPasswordReset(@Body() dto: PortalPasswordResetConfirmDto, @Req() req: Request) {
+    // @Public(): no tenant context, so the audit row's IP is passed explicitly.
+    await this.portalAuthService.confirmPasswordReset(dto, req.ip ?? req.socket.remoteAddress);
   }
 }

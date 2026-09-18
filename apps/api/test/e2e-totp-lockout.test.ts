@@ -120,6 +120,8 @@ const LOGIN = { staff: '/api/v1/auth/login', portal: '/api/v1/portal/auth/login'
 const VERIFY = { staff: '/api/v1/auth/totp/verify', portal: '/api/v1/portal/auth/totp/verify' };
 const CSRF = { staff: 'openestate_csrf', portal: 'openestate_portal_csrf' };
 const GUARDED = { staff: '/api/v1/users', portal: '/api/v1/portal/profile' };
+// Self-service 2FA routes, for the disable-clears-the-lock case below.
+const AUTH = { staff: '/api/v1/auth', portal: '/api/v1/portal/auth' };
 
 interface TestUser {
   id: string;
@@ -367,6 +369,37 @@ describeIf('totp/verify lockout, staff and portal', () => {
         const s = await state(user.id);
         expect(s.failedTotpAttempts).toBe(0);
         expect(s.recoveryCodes).not.toContain(user.recoveryCodes[0]);
+      });
+
+      it('E3h: turning 2FA off clears the lock too, so an immediate re-enrolment is not refused by the old lock', async () => {
+        const user = await makeUser(surface);
+
+        // A live session on one device while a second device gets locked out —
+        // the only way to reach disable at all, since a locked user cannot
+        // complete a login to get there.
+        const session = await pending(user);
+        const ok = await verify(session, totpCode(user.secret)).expect(200);
+        const csrf = cookieValue(ok.headers['set-cookie'], CSRF[surface])!;
+        const withSession = (r: request.Test) =>
+          r.set('Authorization', `Bearer ${ok.body.accessToken}`).set('X-CSRF-Token', csrf);
+
+        await lockOut(await pending(user));
+        expect((await state(user.id)).totpLockedUntil).not.toBeNull();
+
+        await withSession(session.agent.post(`${AUTH[surface]}/totp/disable`)).expect(204);
+        const cleared = await state(user.id);
+        expect(cleared.failedTotpAttempts).toBe(0);
+        expect(cleared.totpLockedUntil).toBeNull();
+
+        // The consequence, not just the columns: a brand-new authenticator
+        // enrolled inside the old lock's window works on its first code.
+        // Before TOTP_CLEARED this returned 429 from a lock belonging to the
+        // secret that was just discarded.
+        const setup = await withSession(session.agent.post(`${AUTH[surface]}/totp/setup`)).expect(200);
+        await withSession(session.agent.post(`${AUTH[surface]}/totp/confirm`))
+          .send({ code: totpCode(setup.body.secret) })
+          .expect(200);
+        await verify(await pending(user), totpCode(setup.body.secret)).expect(200);
       });
 
       it('concurrent wrong codes cannot slip past the lock: exactly 5 of 8 are checked', async () => {
