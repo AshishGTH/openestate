@@ -20,7 +20,7 @@ import { PORTAL_QUEUE } from '../queues/queues.module';
 import { PROCESS_PASSWORD_RESET_JOB } from './portal-password-reset.processor';
 import { SYSTEM_ROLES, NO_PORTAL_ACCOUNT_ERROR } from '@openestate/shared';
 import type {
-  AdminPortalPasswordResetDto,
+  PortalPrincipalRefDto,
   PortalLoginDto,
   PortalInviteConsumeDto,
   PortalPasswordResetRequestDto,
@@ -448,7 +448,7 @@ export class PortalAuthService {
   async issueAdminPasswordReset(
     companyId: string,
     adminUserId: string,
-    dto: AdminPortalPasswordResetDto,
+    dto: PortalPrincipalRefDto,
   ): Promise<{ token: string; expiresAt: Date }> {
     // The zod schema already enforces this at the API boundary; repeated here
     // because an absent id would otherwise become Prisma's "no filter".
