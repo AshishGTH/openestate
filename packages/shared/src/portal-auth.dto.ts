@@ -60,11 +60,12 @@ export const sendPortalInviteSchema = z
   });
 export type SendPortalInviteDto = z.infer<typeof sendPortalInviteSchema>;
 
-// Staff side: issue a one-time password-reset link for an existing portal
-// account (POST /admin/portal-password-resets). The response reuses
+// Identifies one portal account by the applicant or broker it belongs to —
+// exactly one of the two. The body of every staff action on a portal
+// account: POST /admin/portal-password-resets (response reuses
 // forcePasswordResetResponseSchema; the client builds
-// `${origin}/portal/reset-password?token=`.
-export const adminPortalPasswordResetSchema = z
+// `${origin}/portal/reset-password?token=`) and POST /admin/portal-2fa-resets.
+export const portalPrincipalRefSchema = z
   .object({
     applicantId: z.string().uuid().optional(),
     brokerId: z.string().uuid().optional(),
@@ -73,7 +74,7 @@ export const adminPortalPasswordResetSchema = z
   .refine((d) => (d.applicantId ? !d.brokerId : !!d.brokerId), {
     message: 'Exactly one of applicantId or brokerId is required',
   });
-export type AdminPortalPasswordResetDto = z.infer<typeof adminPortalPasswordResetSchema>;
+export type PortalPrincipalRefDto = z.infer<typeof portalPrincipalRefSchema>;
 
 // 409 body `code` when the applicant/broker has never accepted a portal
 // invite, so has no portal account to reset — the remedy is an invite.

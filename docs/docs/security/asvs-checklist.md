@@ -60,8 +60,17 @@ work — read that file for the full reasoning behind any entry here.
   self-hosted install) with a randomly generated one, printed once
   (`packages/db/prisma/seed.ts`).
 - **V2.5 Credential recovery** — Implemented. Password reset via a
-  single-use, time-limited token dispatched through the async queue
-  (`BullMQ`) — never a synchronous email-send in the request path.
+  single-use, time-limited token: portal self-service tokens are dispatched
+  through the async queue (`BullMQ`), never a synchronous send in the
+  request path; admin-issued tokens (staff and portal) are shown once to
+  the admin for out-of-band delivery. Lost second factor: an admin clears a
+  user's 2FA (`POST /users/:id/reset-2fa`, `POST /admin/portal-2fa-resets`,
+  `admin.user.update` only), which revokes every refresh token but never
+  changes the password — so a password-reset token alone never gets past
+  2FA. A sole admin is recovered from the server with
+  `reset-admin-password.sh --clear-2fa`. Limit: access tokens already
+  issued stay valid until they expire (15 minutes by default), because the
+  JWT check does no database lookup.
 - **V2.8 One-time verifier (2FA)** — Implemented, with a real bypass
   history worth stating plainly rather than glossing over. TOTP
   (RFC 6238), encrypted-at-rest secret (`TOTP_ENCRYPTION_KEY`, AES-256-GCM,
@@ -163,6 +172,13 @@ work — read that file for the full reasoning behind any entry here.
   explicit redaction list (`apps/api/src/common/logger/redaction.ts`) —
   PAN, passwords, tokens, and (this phase) plugin/webhook secret paths
   are redacted before a log line is ever emitted, not after.
+- **V7.2 Log processing (security events)** — Implemented for
+  authentication changes. 2FA enrolment, disable and admin reset, password
+  changes and reset-link redemption each write an audit row in the same
+  transaction as the change, staff and portal, with the actor and IP and
+  no secret (`apps/api/src/auth/auth-audit.ts`). Not covered: failed
+  sign-in and failed 2FA attempts are counted for lockout but not logged
+  as audit rows.
 - **V7.4 Error handling** — Implemented. Nest's global exception handling
   returns structured, non-leaking error responses; stack traces never
   reach the client in production (`NODE_ENV=production` gates verbose

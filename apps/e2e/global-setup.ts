@@ -47,6 +47,10 @@ export default async function globalSetup() {
     // logs into.
     staffRecoveryCode: await seedE2eFixture(DATABASE_URL_SYSTEM),
     portalRecoveryCode: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
+    // Separate accounts for the admin 2FA reset specs, for the same reason:
+    // each turns 2FA on for an account and then has an admin clear it.
+    staffTotpReset: await seedE2eFixture(DATABASE_URL_SYSTEM),
+    portalTotpReset: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
   };
   writeFileSync(path.join(__dirname, '.fixture-state.json'), JSON.stringify(fixtures, null, 2));
 }

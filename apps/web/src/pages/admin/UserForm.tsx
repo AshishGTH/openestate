@@ -8,10 +8,12 @@ import {
   updateUserSchema,
   pickForSchema,
   forcePasswordResetResponseSchema,
+  twoFactorResetResponseSchema,
   PERMISSIONS,
   type CreateUserDto,
   type UpdateUserDto,
   type ForcePasswordResetResponse,
+  type TwoFactorResetResponse,
 } from '@openestate/shared';
 import { api } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
@@ -33,7 +35,7 @@ export default function UserForm() {
   const { id } = useParams<{ id: string }>();
   const isEdit = id && id !== 'new';
   const navigate = useNavigate();
-  const { hasPermission } = useAuth();
+  const { hasPermission, user: currentUser } = useAuth();
   const [error, setError] = useState('');
 
   // GET /roles returns a plain array, not {data, meta} — see Roles.tsx's
@@ -130,6 +132,14 @@ export default function UserForm() {
     `/users/${id}/force-password-reset`,
   );
   const [resetLink, setResetLink] = useState<{ url: string; expiresAt: string } | null>(null);
+
+  const resetTotpMutation = useApiMutation<TwoFactorResetResponse, void>(
+    'POST',
+    `/users/${id}/reset-2fa`,
+    [['users'], ['user', id!]],
+  );
+  const [totpResetMessage, setTotpResetMessage] = useState('');
+  const isSelf = !!currentUser && currentUser.sub === id;
 
   const onSubmit = async (data: CreateUserDto) => {
     setError('');
@@ -286,7 +296,7 @@ export default function UserForm() {
           <h2 className="text-sm font-medium text-slate-900">Password</h2>
           {isPortalUser ? (
             <p className="mt-1 text-xs text-slate-500">
-              This is a portal user. Reset their password from the{' '}
+              This is a portal user. Reset their password or 2FA from the{' '}
               {applicantId ? (
                 <Link to={`/postsales/applicants/${applicantId}`} className="text-blue-600 hover:underline">
                   customer record
@@ -330,6 +340,68 @@ export default function UserForm() {
                   expiresAt={resetLink.expiresAt}
                   onDismiss={() => setResetLink(null)}
                 />
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Same gate as the Password block above, for the same reason: until
+          the record loads, totpEnabled reads undefined — and undefined keeps
+          the button disabled, the safe direction. */}
+      {/* Not rendered for portal users: the Password section's pointer
+          above already sends them to the customer/broker record for both. */}
+      {isEdit && existingUser && !isPortalUser && hasPermission(PERMISSIONS.ADMIN_USER_UPDATE) && (
+        <div className="mt-4 rounded-md border border-slate-200 p-4">
+          <h2 className="text-sm font-medium text-slate-900">Two-factor authentication</h2>
+          {isSelf ? (
+            <p className="mt-1 text-xs text-slate-500">
+              To turn off your own 2FA, use{' '}
+              <Link to="/settings" className="text-blue-600 hover:underline">
+                Settings
+              </Link>
+              .
+            </p>
+          ) : (
+            <>
+              <p className="mt-1 text-xs text-slate-500">
+                {existingUser.totpEnabled
+                  ? '2FA is on. Reset it if this user has lost both their authenticator and their recovery codes — they will sign in with their password and can set it up again.'
+                  : '2FA is not enabled on this account.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (
+                    !window.confirm(
+                      `Reset two-factor authentication for ${existingUser.name as string}?\n\n` +
+                        'They will sign in with their password alone and can set up 2FA again. ' +
+                        'Any device they are signed in on is signed out within 15 minutes. ' +
+                        'Their password does not change.',
+                    )
+                  ) {
+                    return;
+                  }
+                  setTotpResetMessage('');
+                  resetTotpMutation.mutate(undefined, {
+                    onSuccess: (data) => {
+                      setTotpResetMessage(
+                        twoFactorResetResponseSchema.parse(data).wasEnabled
+                          ? 'Two-factor authentication cleared. They can sign in with their password and set it up again.'
+                          : 'Two-factor authentication was already off — nothing to clear.',
+                      );
+                    },
+                  });
+                }}
+                disabled={!existingUser.totpEnabled || resetTotpMutation.isPending}
+                className="mt-3 rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
+              >
+                {resetTotpMutation.isPending ? 'Resetting…' : 'Reset 2FA'}
+              </button>
+              {totpResetMessage && (
+                <p role="status" className="mt-2 text-xs text-slate-700">
+                  {totpResetMessage}
+                </p>
               )}
             </>
           )}

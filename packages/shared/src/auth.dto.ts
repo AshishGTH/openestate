@@ -66,6 +66,15 @@ export const forcePasswordResetResponseSchema = z.object({
 
 export type ForcePasswordResetResponse = z.infer<typeof forcePasswordResetResponseSchema>;
 
+// Admin 2FA reset, staff (POST /users/:id/reset-2fa) and portal
+// (POST /admin/portal-2fa-resets). wasEnabled is false when there was
+// nothing to clear — the reset is still performed and audited.
+export const twoFactorResetResponseSchema = z.object({
+  wasEnabled: z.boolean(),
+});
+
+export type TwoFactorResetResponse = z.infer<typeof twoFactorResetResponseSchema>;
+
 export const tokenResponseSchema = z.object({
   accessToken: z.string(),
   expiresIn: z.number(),

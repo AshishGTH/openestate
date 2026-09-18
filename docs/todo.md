@@ -69,6 +69,15 @@ click-throughs via `claude-in-chrome`, disposable test accounts:
   6-digit code, full keyboard with letters and a dash in recovery mode).
   The keyboard part is reasoned from `inputMode`, not verified.
 
+- **v0.7.0's admin 2FA reset and `--clear-2fa` — NOT YET DONE.** CI's
+  native-install job runs the script on a fresh install, and Playwright
+  covers both in-app resets, but neither has been run on a real, upgraded
+  install. On the VM: turn 2FA on for a disposable staff user and a
+  portal user; reset each from the staff app and sign in with the
+  password alone; confirm the audit rows on Admin → Audit Log; run
+  `reset-admin-password.sh` without the flag on a 2FA account and read the
+  warning, then with `--clear-2fa`.
+
 **Not yet restored**: the claim removed from `docs/docs/installation.md`
 (see the "User-facing docs had drifted from this log" entry in
 CLAUDE.md's decisions log for why it was removed) — the NOC item above
@@ -328,6 +337,28 @@ not matching `POSTGRES_PASSWORD` on the service container (verified
 identical by direct comparison of both hardcoded values, but worth
 re-checking first) or (b) `$GITHUB_ENV` not receiving the three
 `DATABASE_URL_TEST*`/`REDIS_TEST_URL` lines from `.test-env` correctly.
+
+## Local test containers: two pairs claim the same ports
+
+This development machine has two Postgres+Redis container pairs that both
+bind 5432 and 6379: `oe-test-pg`/`oe-test-redis` (the throwaway test
+infrastructure `.test-env` points at) and `openestate-manual-pg`/
+`openestate-manual-redis`. Only one pair can run at a time. After Docker
+Desktop restarts, neither is running, and starting the wrong pair means the
+tests connect to a database that isn't the provisioned test database —
+failures there look like application bugs. Start `oe-test-pg` and
+`oe-test-redis` explicitly. Either rename the manual pair's ports or delete
+it; the repo itself uses no containers (see CLAUDE.md), so this is a
+machine setup issue, not a repo one.
+
+## `docs/plans/uploaded-documents-plan.md` still uses the old version numbers
+
+The release sequence moved (CLAUDE.md, "Release sequence moved: v0.7.0 is
+the admin 2FA reset"): Aadhaar guard + booking custom fields is now v0.8.0,
+deploy plumbing v0.9.0, documents v1.0.0, and the deferred drop presumably
+v1.1.0. The plan doc names its releases about 30 times and was not
+renumbered in v0.7.0. Renumber from the highest version down so no two
+collide, and add a note at the top.
 
 ## Test-infra flakiness from `syncLeadStages`' unscoped scan — timeboxed, root cause not fixed
 
@@ -658,8 +689,8 @@ this note once it has a real, tested effect.
   Still owed: a manual pass after the VM is upgraded (see "Verify on VM at
   next deployment" above), and a check on a real phone of the keyboard each
   mode brings up. A staff user who has lost **both** their authenticator
-  and their recovery codes still has no path back in until the admin-side
-  2FA reset exists. The original report follows, unedited.
+  and their recovery codes now has a way back in: the admin 2FA reset
+  (v0.7.0). The original report follows, unedited.
   `apps/web/src/pages/TotpVerify.tsx`'s `code` input
   sets `maxLength={6}`, but a real recovery code
   (`TotpService.generateRecoveryCodes()`) is `XXXXX-XXXXX` — 11 characters.
@@ -696,8 +727,13 @@ this note once it has a real, tested effect.
   hint to suppress the `-` character) — not attempted yet, deliberately
   batched with other fixes after the full v0.6.0 verification sweep
   finishes, per instruction.
-- **SECURITY-RELEVANT: 2FA and password-change events write no audit
-  row.** `AuthService` and `PortalAuthService` use `SYSTEM_PRISMA`, which
+- **FIXED in v0.7.0 (automated tests; not yet on a VM) — SECURITY-RELEVANT:
+  2FA and password-change events write no audit row.** Every 2FA and
+  password event on both surfaces now writes one row through
+  `authAuditData` (`apps/api/src/auth/auth-audit.ts`) in the transaction
+  that makes the change; the admin 2FA reset shipped with it. See CLAUDE.md's
+  v0.7.0 entries. The original report follows, unedited.
+  `AuthService` and `PortalAuthService` use `SYSTEM_PRISMA`, which
   carries no audit extension, so `User`'s `AUDITED_MODELS` registration
   never fires for these calls. Affects both staff and portal surfaces.
   Means no operator can determine whether a 2FA compromise occurred.
@@ -822,7 +858,30 @@ this note once it has a real, tested effect.
   reset stays usable until it expires (30 minutes). The fix is one more
   `UPDATE password_resets SET consumed_at = now() WHERE user_id = ... AND
   consumed_at IS NULL` in its SQL block. Deferred because changing the
-  script means redoing its VM verification.
+  script means redoing its VM verification. v0.7.0 changed the script
+  anyway (`--clear-2fa`) and kept this out only because that release's
+  scope was frozen, so the next VM pass has to cover the script regardless
+  and this one-line fix costs no extra verification.
+- **`reset-admin-password.sh` has no way to clear 2FA without also
+  resetting the password.** The common sole-admin case is "lost my phone,
+  still know my password"; today `--clear-2fa` always sets a new password
+  too. A `--keep-password` option would skip the hash-and-write step.
+- **`reset-admin-password.sh` hasn't been through shellcheck since
+  `--clear-2fa` was added.** `bash -n` passes, the generated SQL was
+  executed against a real Postgres, the flag's branches were run under the
+  script's own `set -euo pipefail`, and CI's native-install job now runs
+  the script for real — but shellcheck isn't installed on the development
+  machine and no CI job runs it. Adding
+  `sudo apt-get install -y shellcheck && shellcheck deploy/native/*.sh` to
+  CI would cover every deploy script, not just this one.
+- **Self-service `totp/disable` asks for no re-authentication**, staff and
+  portal. A stolen signed-in session can turn 2FA off without the password
+  or a code. Pre-existing; the admin reset doesn't change it.
+- **The Audit Log page shows every action other than CREATE and UPDATE in
+  red**, the colour it uses for deletions. `RESET_LINK_ISSUED`,
+  `TOTP_ENABLED`, `PASSWORD_CHANGED` and the rest all look like deletions
+  (`apps/web/src/pages/admin/AuditLog.tsx`). Cosmetic, but an admin
+  scanning for destructive changes will misread them.
 - **Portal invites don't supersede each other**: re-sending an invite
   leaves every earlier invite link live for its full multi-day expiry
   (`INVITE_EXPIRY_DAYS`). Reset links supersede; invites don't.

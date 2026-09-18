@@ -14,6 +14,7 @@ import { api, downloadFile, type ApiError } from '../../lib/api';
 import { useApiMutation } from '../../lib/hooks';
 import { useAuth } from '../../lib/auth';
 import RevealedResetLink, { ResetLinkSupersedeNote } from '../../components/RevealedResetLink';
+import PortalTwoFactorReset from '../../components/PortalTwoFactorReset';
 
 interface Broker {
   id: string;
@@ -369,6 +370,10 @@ export default function BrokerDetail() {
           )}
           {portalResetError && <p className="mt-1 text-xs text-red-600">{portalResetError}</p>}
         </div>
+      )}
+      {/* Its own gate, not inside the portal-access block above — see PortalTwoFactorReset. */}
+      {hasPermission(PERMISSIONS.ADMIN_USER_UPDATE) && brokerId && (
+        <PortalTwoFactorReset principal={{ brokerId }} name={broker.name} />
       )}
 
       {error && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}

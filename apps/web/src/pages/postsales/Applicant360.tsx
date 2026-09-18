@@ -5,6 +5,7 @@ import { formatInr, forcePasswordResetResponseSchema, NO_PORTAL_ACCOUNT_ERROR, P
 import { api, downloadFile, type ApiError } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import RevealedResetLink, { ResetLinkSupersedeNote } from '../../components/RevealedResetLink';
+import PortalTwoFactorReset from '../../components/PortalTwoFactorReset';
 
 interface Applicant {
   id: string;
@@ -275,6 +276,10 @@ export default function Applicant360() {
           )}
           {portalResetError && <p className="mt-1 text-xs text-red-600">{portalResetError}</p>}
         </div>
+      )}
+      {/* Its own gate, not inside the invite block above — see PortalTwoFactorReset. */}
+      {hasPermission(PERMISSIONS.ADMIN_USER_UPDATE) && applicantId && (
+        <PortalTwoFactorReset principal={{ applicantId }} name={applicant.name} />
       )}
 
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">

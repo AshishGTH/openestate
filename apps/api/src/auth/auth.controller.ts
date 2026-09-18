@@ -162,7 +162,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Disable TOTP 2FA' })
   async disableTotp(@Req() req: Request) {
     const user = req.user as JwtPayload;
-    await this.authService.disableTotp(user.sub);
+    await this.authService.disableTotp(user.sub, user.companyId);
   }
 
   @Public()
@@ -235,8 +235,9 @@ export class AuthController {
   @Post('password-reset/confirm')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Confirm an admin-issued password reset link' })
-  async confirmPasswordReset(@Body() dto: PasswordResetConfirmDto) {
-    await this.authService.confirmPasswordReset(dto);
+  async confirmPasswordReset(@Body() dto: PasswordResetConfirmDto, @Req() req: Request) {
+    // @Public(): no tenant context, so the audit row's IP is passed explicitly.
+    await this.authService.confirmPasswordReset(dto, req.ip ?? req.socket.remoteAddress);
   }
 
   @Post('force-change-password')
@@ -247,6 +248,6 @@ export class AuthController {
     @Req() req: Request,
   ) {
     const user = req.user as JwtPayload;
-    await this.authService.forceChangePassword(user.sub, dto.newPassword);
+    await this.authService.forceChangePassword(user.sub, user.companyId, dto.newPassword);
   }
 }

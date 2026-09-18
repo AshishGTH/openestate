@@ -3,6 +3,7 @@ import { BullModule } from '@nestjs/bullmq';
 import { PortalAuthController } from './portal-auth.controller';
 import { PortalInviteAdminController } from './portal-invite-admin.controller';
 import { PortalPasswordResetAdminController } from './portal-password-reset-admin.controller';
+import { PortalTwoFactorResetAdminController } from './portal-two-factor-reset-admin.controller';
 import { PortalBrandingController } from './portal-branding.controller';
 import { PortalAuthService } from './portal-auth.service';
 import { PortalPasswordResetProcessor } from './portal-password-reset.processor';
@@ -28,6 +29,7 @@ import { AuthModule } from '../auth/auth.module';
     PortalAuthController,
     PortalInviteAdminController,
     PortalPasswordResetAdminController,
+    PortalTwoFactorResetAdminController,
     PortalBrandingController,
   ],
   providers: [

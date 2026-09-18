@@ -2,12 +2,12 @@ import { Body, Controller, HttpCode, HttpStatus, Post, Req } from '@nestjs/commo
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { createZodDto } from 'nestjs-zod';
-import { adminPortalPasswordResetSchema, PERMISSIONS } from '@openestate/shared';
+import { portalPrincipalRefSchema, PERMISSIONS } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
 import { PortalAuthService } from './portal-auth.service';
 import { RequirePermissions } from '../auth/guards/permissions.guard';
 
-class AdminPortalPasswordResetDto extends createZodDto(adminPortalPasswordResetSchema) {}
+class PortalPrincipalRefDto extends createZodDto(portalPrincipalRefSchema) {}
 
 /**
  * Staff-facing: issue a one-time password-reset link for an applicant's or
@@ -36,7 +36,7 @@ export class PortalPasswordResetAdminController {
   @ApiOkResponse({
     description: '`{ token, expiresAt }` — the reset URL is `<origin>/portal/reset-password?token=<token>`.',
   })
-  issue(@Body() dto: AdminPortalPasswordResetDto, @Req() req: Request) {
+  issue(@Body() dto: PortalPrincipalRefDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.portalAuthService.issueAdminPasswordReset(user.companyId, user.sub, dto);
   }

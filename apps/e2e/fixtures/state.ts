@@ -12,6 +12,8 @@ interface AllFixtures {
   resetLinks: E2eFixture;
   staffRecoveryCode: E2eFixture;
   portalRecoveryCode: E2eFixture;
+  staffTotpReset: E2eFixture;
+  portalTotpReset: E2eFixture;
 }
 
 /** Reads the named fixture global-setup.ts wrote before any spec ran. */

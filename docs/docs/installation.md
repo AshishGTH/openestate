@@ -336,7 +336,7 @@ money.
 
 ---
 
-## 8. Recovering a lost admin password
+## 8. Recovering a lost admin password or 2FA
 
 ```bash
 cd /opt/openestate-src/deploy/native
@@ -355,25 +355,32 @@ other than the seeded default; it refuses portal-linked accounts
 — this is intentional (nobody, including us, can reset your password
 remotely; your data is yours).
 
-> **This does not clear two-factor authentication.** If the account also
-> has 2FA enabled, this script's own header says it "bypasses login and
-> 2FA entirely" — that's true of the login step, but the TOTP prompt still
-> comes right after. **An admin who has lost both their password and their
-> authenticator device will get a working password back and then be stuck
-> at the 2FA screen with no way past it.** There is no admin-side "clear
-> this user's 2FA" tool yet, self-service or otherwise. If that's your
-> situation, know it before you run the command above, not after: your
-> only recovery path today is a direct database update by someone
-> comfortable clearing `totp_enabled`/`totp_secret`/`recovery_codes` on
-> the `users` table themselves. Plan to enable 2FA on more than one admin
-> account, or keep a recovery code somewhere safe, so this never becomes
-> your only way in.
+**Two-factor authentication stays on unless you ask for it to be cleared.**
+If the account has 2FA on, the script resets the password, then warns you
+(on stderr) that this alone won't get them back in if they've lost their
+authenticator and recovery codes. To clear 2FA as well:
+
+```bash
+sudo ./reset-admin-password.sh --email admin@demo-realty.com --clear-2fa
+```
+
+That clears the 2FA secret, recovery codes and 2FA lockout along with
+resetting the password, in one transaction, and records it in the audit
+log as `TOTP_RESET_BY_ADMIN` with no user attached (`surface: cli`). The
+user signs in with the new password alone and can set 2FA up again. It is a
+separate flag on purpose: clearing 2FA on every password reset would make a
+password reset a way round 2FA. Re-running the script with `--clear-2fa`
+sets a new password again; there is no option to clear 2FA alone yet.
+
+If there is another admin who can still sign in, you don't need the
+server: they can clear a staff user's 2FA from Admin → Users → the user →
+*Reset 2FA*.
 
 For a locked-out **portal** user (customer or broker), this script won't
-help — it explicitly excludes them. Use the portal's own self-service
-"forgot password" flow, or the admin "Force password reset" action
-(on the Admin → Users page — this works for portal-linked accounts too,
-not just staff) or "Send Portal Invite" in the staff app instead.
+help — it explicitly excludes them. An admin can do both from the
+customer's or broker's record in the staff app: *Reset portal password*
+issues a one-time link to send them, and *Reset portal 2FA* clears their
+2FA. The customer can also use the portal's own "forgot password" link.
 
 ---
 

@@ -531,6 +531,53 @@ jobs:
           echo "$RESPONSE" | grep -q '"accessToken"' || { echo "::error::login response had no accessToken: $RESPONSE"; exit 1; }
           echo "Login over HTTP succeeded."
 
+      # The sole-admin-lost-their-phone case. reset-admin-password.sh is the
+      # only way back in when no second admin exists, and until --clear-2fa
+      # it reset the password but left 2FA on — so the admin signed in and
+      # hit a code prompt they could not answer. Asserted by outcome, not by
+      # exit code: does login still demand a code, does the warning reach
+      # stderr, does a session come back, is it audited.
+      # totp_secret is a placeholder: login returns the 2FA-pending response
+      # on (totp_enabled AND totp_secret IS NOT NULL) without decrypting it.
+      - name: Break-glass reset-admin-password.sh clears 2FA only with --clear-2fa
+        working-directory: deploy/native
+        run: |
+          set -o pipefail
+          ADMIN=admin@demo-realty.com
+          psql_db() { sudo -u postgres psql -d openestate -v ON_ERROR_STOP=1 -tAc "$1"; }
+          login() {
+            curl -fsS -X POST http://localhost/api/v1/auth/login \
+              -H 'Content-Type: application/json' \
+              -d "{\"email\":\"${ADMIN}\",\"password\":\"$1\"}"
+          }
+
+          psql_db "UPDATE users SET totp_enabled = true, totp_secret = 'x' WHERE email = '${ADMIN}'"
+          ADMIN_ID="$(psql_db "SELECT id FROM users WHERE email = '${ADMIN}'")"
+
+          # 1. Without the flag: password changes, 2FA stays, warning on stderr, exit 0.
+          sudo ./reset-admin-password.sh --email "$ADMIN" --password 'BreakGlassNoFlag123' \
+            >/tmp/bg-noflag.out 2>/tmp/bg-noflag.err \
+            || { echo "::error::reset-admin-password.sh without --clear-2fa exited non-zero"; cat /tmp/bg-noflag.out /tmp/bg-noflag.err; exit 1; }
+          grep -q 'will NOT restore access' /tmp/bg-noflag.err || { echo "::error::no 2FA warning on stderr"; cat /tmp/bg-noflag.err; exit 1; }
+          grep -q -- '--clear-2fa' /tmp/bg-noflag.err || { echo "::error::warning does not tell the operator to re-run with --clear-2fa"; exit 1; }
+          if grep -q 'will NOT restore access' /tmp/bg-noflag.out; then echo "::error::2FA warning went to stdout, not stderr"; exit 1; fi
+          login 'BreakGlassNoFlag123' | grep -q '"requiresTwoFactor":true' \
+            || { echo "::error::without --clear-2fa, login should still demand a 2FA code"; exit 1; }
+          [ "$(psql_db "SELECT count(*) FROM audit_logs WHERE action = 'TOTP_RESET_BY_ADMIN' AND entity_id = '${ADMIN_ID}'")" = "0" ] \
+            || { echo "::error::a password-only reset wrote a 2FA reset audit row"; exit 1; }
+
+          # 2. With the flag: 2FA cleared, the password alone signs in, one audit row.
+          sudo ./reset-admin-password.sh --email "$ADMIN" --password 'BreakGlassWithFlag123' --clear-2fa \
+            || { echo "::error::reset-admin-password.sh --clear-2fa failed"; exit 1; }
+          RESPONSE="$(login 'BreakGlassWithFlag123')"
+          echo "$RESPONSE" | grep -q '"accessToken"' || { echo "::error::after --clear-2fa, login returned no session: $RESPONSE"; exit 1; }
+          if echo "$RESPONSE" | grep -q 'requiresTwoFactor'; then echo "::error::after --clear-2fa, login still asks for a code"; exit 1; fi
+          [ "$(psql_db "SELECT totp_enabled OR totp_secret IS NOT NULL OR cardinality(recovery_codes) > 0 OR failed_totp_attempts <> 0 OR totp_locked_until IS NOT NULL FROM users WHERE id = '${ADMIN_ID}'")" = "f" ] \
+            || { echo "::error::--clear-2fa left 2FA state behind"; exit 1; }
+          AUDIT="$(psql_db "SELECT count(*) FROM audit_logs WHERE action = 'TOTP_RESET_BY_ADMIN' AND entity_id = '${ADMIN_ID}' AND user_id IS NULL AND after->>'surface' = 'cli' AND (after->>'wasEnabled')::boolean AND abs(extract(epoch FROM created_at - (now() AT TIME ZONE 'UTC'))) < 600")"
+          [ "$AUDIT" = "1" ] || { echo "::error::expected exactly one CLI TOTP_RESET_BY_ADMIN audit row, found ${AUDIT}"; psql_db "SELECT action, user_id, after, created_at FROM audit_logs WHERE entity_id = '${ADMIN_ID}'"; exit 1; }
+          echo "Break-glass --clear-2fa verified."
+
       - name: Dump journalctl on failure
         if: failure()
         run: |

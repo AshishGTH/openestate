@@ -10,7 +10,8 @@ import { PrismaClient } from '@openestate/db';
 import { SYSTEM_PRISMA } from '../database/database.module';
 import { TokenService } from './token.service';
 import { TotpService } from './totp.service';
-import { reserveTotpAttempt, TOTP_ATTEMPTS_CLEARED } from './totp-lockout';
+import { reserveTotpAttempt, TOTP_ATTEMPTS_CLEARED, TOTP_CLEARED } from './totp-lockout';
+import { authAuditData } from './auth-audit';
 import type { LoginDto, PasswordResetConfirmDto } from '@openestate/shared';
 
 const MAX_FAILED_ATTEMPTS = 5;
@@ -178,23 +179,35 @@ export class AuthService {
 
     const recoveryCodes = this.totpService.generateRecoveryCodes();
 
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { totpEnabled: true, recoveryCodes },
-    });
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: { totpEnabled: true, recoveryCodes },
+      }),
+      this.prisma.auditLog.create({
+        data: authAuditData({
+          companyId: user.companyId, actorId: userId, targetUserId: userId,
+          action: 'TOTP_ENABLED', after: { surface: 'staff' },
+        }),
+      }),
+    ]);
 
     return { recoveryCodes };
   }
 
-  async disableTotp(userId: string) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        totpEnabled: false,
-        totpSecret: null,
-        recoveryCodes: [],
-      },
-    });
+  async disableTotp(userId: string, companyId: string) {
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: TOTP_CLEARED,
+      }),
+      this.prisma.auditLog.create({
+        data: authAuditData({
+          companyId, actorId: userId, targetUserId: userId,
+          action: 'TOTP_DISABLED', after: { surface: 'staff' },
+        }),
+      }),
+    ]);
   }
 
   async refreshTokens(
@@ -273,6 +286,12 @@ export class AuthService {
         },
       }),
       this.consumeResetLinks(userId),
+      this.prisma.auditLog.create({
+        data: authAuditData({
+          companyId: user.companyId, actorId: userId, targetUserId: userId,
+          action: 'PASSWORD_CHANGED', after: { surface: 'staff', via: 'self' },
+        }),
+      }),
     ]);
 
     // Leaves the session that made this request alone — only OTHER
@@ -290,7 +309,7 @@ export class AuthService {
    * reset through the portal's own PortalPasswordReset flow. Public route,
    * no auth — the token itself is the credential.
    */
-  async confirmPasswordReset(dto: PasswordResetConfirmDto): Promise<void> {
+  async confirmPasswordReset(dto: PasswordResetConfirmDto, ipAddress?: string): Promise<void> {
     const tokenHash = createHash('sha256').update(dto.token).digest('hex');
     const reset = await this.prisma.passwordReset.findFirst({ where: { tokenHash } });
 
@@ -306,19 +325,31 @@ export class AuthService {
     if (claimed.length === 0) throw new UnauthorizedException('Invalid or expired reset token');
 
     const passwordHash = await argon2.hash(dto.newPassword, { algorithm: argon2.Algorithm.Argon2id });
-    // A deactivated account is refused. The link was claimed above, so it
-    // stays dead if the account is reactivated later. Conditional write, not
-    // check-then-write, so a deactivation at the same moment can't slip
-    // between the two.
-    const { count } = await this.prisma.user.updateMany({
-      where: { id: reset.userId, isActive: true },
-      data: { passwordHash, forcePasswordChange: false, failedLoginAttempts: 0, lockedUntil: null },
+    // A deactivated account is refused. The link was claimed above, OUTSIDE
+    // this transaction on purpose, so it stays dead if the account is
+    // reactivated later — rolling the claim back with the refusal would
+    // revive it. Conditional write, not check-then-write, so a deactivation
+    // at the same moment can't slip between the two. The audit row commits
+    // with the password or not at all. The route is @Public(), so the IP
+    // comes from the controller, not the request's tenant context.
+    await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.user.updateMany({
+        where: { id: reset.userId, isActive: true },
+        data: { passwordHash, forcePasswordChange: false, failedLoginAttempts: 0, lockedUntil: null },
+      });
+      if (count === 0) throw new UnauthorizedException('Invalid or expired reset token');
+      await tx.auditLog.create({
+        data: authAuditData({
+          companyId: reset.companyId, actorId: reset.userId, targetUserId: reset.userId,
+          action: 'PASSWORD_RESET_USED', after: { surface: 'staff', passwordResetId: reset.id },
+          ipAddress,
+        }),
+      });
     });
-    if (count === 0) throw new UnauthorizedException('Invalid or expired reset token');
     await this.tokenService.revokeAllForUser(reset.userId);
   }
 
-  async forceChangePassword(userId: string, newPassword: string) {
+  async forceChangePassword(userId: string, companyId: string, newPassword: string) {
     const hash = await argon2.hash(newPassword, { algorithm: argon2.Algorithm.Argon2id });
     await this.prisma.$transaction([
       this.prisma.user.update({
@@ -329,6 +360,12 @@ export class AuthService {
         },
       }),
       this.consumeResetLinks(userId),
+      this.prisma.auditLog.create({
+        data: authAuditData({
+          companyId, actorId: userId, targetUserId: userId,
+          action: 'PASSWORD_CHANGED', after: { surface: 'staff', via: 'first-login' },
+        }),
+      }),
     ]);
     await this.tokenService.revokeAllForUser(userId);
   }
