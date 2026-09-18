@@ -16,6 +16,7 @@ import { SYSTEM_PRISMA } from '../database/database.module';
 import { TokenService } from '../auth/token.service';
 import { TotpService } from '../auth/totp.service';
 import { reserveTotpAttempt, TOTP_ATTEMPTS_CLEARED, TOTP_CLEARED } from '../auth/totp-lockout';
+import { authAuditData } from '../auth/auth-audit';
 import { PORTAL_QUEUE } from '../queues/queues.module';
 import { PROCESS_PASSWORD_RESET_JOB } from './portal-password-reset.processor';
 import { SYSTEM_ROLES, NO_PORTAL_ACCOUNT_ERROR } from '@openestate/shared';
@@ -518,6 +519,79 @@ export class PortalAuthService {
     });
 
     return { token, expiresAt };
+  }
+
+  /**
+   * Admin-side 2FA reset for a customer's or broker's portal account — the
+   * portal mirror of UsersService.resetTotp, which has the full reasoning.
+   * Same fields cleared (TOTP_CLEARED), same audit action, same session
+   * revocation and the same stale-access-token limit: an access token already
+   * issued stays valid up to JWT_ACCESS_EXPIRES_IN (15 minutes by default),
+   * since JwtStrategy does no database lookup.
+   *
+   * Lookups match issueAdminPasswordReset — 404 outside the company, 409
+   * NO_PORTAL_ACCOUNT when there is no portal user — except that deactivated
+   * accounts are ALLOWED here: this issues no credential, and a deactivated
+   * account cannot sign in either way.
+   *
+   * Gated on ADMIN_USER_UPDATE by its controller, not the
+   * ADMIN_PORTAL_INVITE_SEND that gates the password-reset link. Sales
+   * managers hold the latter; holding both would let them take over a broker
+   * account and approve NOCs as that broker.
+   */
+  async adminResetTotp(
+    companyId: string,
+    adminUserId: string,
+    dto: PortalPrincipalRefDto,
+  ): Promise<{ wasEnabled: boolean }> {
+    // The zod schema enforces this at the boundary; repeated because an
+    // absent id would otherwise become Prisma's "no filter".
+    if (!dto.applicantId === !dto.brokerId) {
+      throw new BadRequestException('Exactly one of applicantId or brokerId is required');
+    }
+    const principal = dto.applicantId ? { applicantId: dto.applicantId } : { brokerId: dto.brokerId };
+
+    const exists = dto.applicantId
+      ? await this.prisma.applicant.findFirst({ where: { id: dto.applicantId, companyId }, select: { id: true } })
+      : await this.prisma.broker.findFirst({ where: { id: dto.brokerId, companyId }, select: { id: true } });
+    if (!exists) throw new NotFoundException(dto.applicantId ? 'Applicant not found' : 'Broker not found');
+
+    const user = await this.prisma.user.findFirst({
+      where: { companyId, ...principal },
+      select: { id: true },
+    });
+    if (!user) {
+      throw new ConflictException({
+        message: 'This person has no portal account yet, so there is no 2FA to reset.',
+        code: NO_PORTAL_ACCOUNT_ERROR,
+      });
+    }
+
+    const wasEnabled = await this.prisma.$transaction(async (tx) => {
+      // Locked so wasEnabled is accurate when two admins reset at once.
+      const [row] = await tx.$queryRaw<Array<{ totp_enabled: boolean }>>`
+        SELECT totp_enabled FROM users WHERE id = ${user.id}::uuid FOR UPDATE
+      `;
+      await tx.user.update({ where: { id: user.id }, data: TOTP_CLEARED });
+      await tx.auditLog.create({
+        data: authAuditData({
+          companyId,
+          actorId: adminUserId,
+          targetUserId: user.id,
+          action: 'TOTP_RESET_BY_ADMIN',
+          after: {
+            surface: 'portal',
+            wasEnabled: row.totp_enabled,
+            applicantId: dto.applicantId ?? null,
+            brokerId: dto.brokerId ?? null,
+          },
+        }),
+      });
+      return row.totp_enabled;
+    });
+
+    await this.tokenService.revokeAllForUser(user.id);
+    return { wasEnabled };
   }
 
   /**

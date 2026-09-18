@@ -132,4 +132,22 @@ export class UsersController {
     const user = req.user as JwtPayload;
     return this.usersService.forcePasswordReset(user.companyId, id, user.sub);
   }
+
+  @Post(':id/reset-2fa')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions(PERMISSIONS.ADMIN_USER_UPDATE)
+  @ApiOperation({
+    summary: "Clear a staff user's two-factor authentication",
+    description:
+      'For a user who has lost both their authenticator and their recovery codes. Clears the ' +
+      'TOTP secret, recovery codes and 2FA lockout, and revokes every refresh token; the password ' +
+      'is unchanged. An access token already issued stays valid until it expires (up to 15 minutes ' +
+      'by default). Audited as TOTP_RESET_BY_ADMIN, including when 2FA was already off. ' +
+      'Deactivated users are allowed. 400 for a portal user or for your own account; 404 if not in your company.',
+  })
+  @ApiOkResponse({ description: '`{ wasEnabled }` — whether 2FA was on before the reset.' })
+  resetTotp(@Param('id') id: string, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.usersService.resetTotp(user.companyId, id, user.sub);
+  }
 }

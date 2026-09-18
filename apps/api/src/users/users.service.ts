@@ -10,6 +10,8 @@ import { randomUUID, createHash } from 'node:crypto';
 import { PrismaClient, withTenantTx, runWithTenant, getCurrentIpAddress } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import { TokenService } from '../auth/token.service';
+import { TOTP_CLEARED } from '../auth/totp-lockout';
+import { authAuditData } from '../auth/auth-audit';
 import type {
   CreateUserDto,
   UpdateUserDto,
@@ -428,5 +430,78 @@ export class UsersService {
     });
 
     return { token, expiresAt };
+  }
+
+  /**
+   * Admin-side 2FA reset for a STAFF user who has lost both their
+   * authenticator and their recovery codes. Clears the secret, the recovery
+   * codes and the TOTP lockout (TOTP_CLEARED — the same fields self-service
+   * disable clears), audits it, and revokes every session. The user signs in
+   * with their password alone and can enrol again. Their password is not
+   * touched: coupling the two would make a password-reset link a 2FA bypass.
+   *
+   * Portal users are refused: their 2FA resets through
+   * PortalAuthService.adminResetTotp, which takes the applicant or broker.
+   * Resetting yourself is refused too — Settings → Disable 2FA does that
+   * without logging you out.
+   *
+   * Deactivated users are ALLOWED, unlike forcePasswordReset's 409. That 409
+   * exists because a reset link is a live credential; this issues nothing,
+   * and a deactivated account still cannot sign in (login refuses it, and
+   * reset-link redemption refuses it since v0.6.0). Requiring reactivation
+   * first would add an ordering step with no security gain.
+   *
+   * Sessions: revokeAllForUser stops every refresh token from renewing, but
+   * an access token already issued stays valid until it expires — up to
+   * JWT_ACCESS_EXPIRES_IN, 15 minutes by default — because JwtStrategy
+   * checks only the signature and expiry, with no database lookup.
+   *
+   * The audit row is written even when 2FA was already off (wasEnabled:
+   * false): the admin's action is itself worth recording.
+   */
+  async resetTotp(
+    companyId: string,
+    userId: string,
+    adminUserId: string,
+  ): Promise<{ wasEnabled: boolean }> {
+    if (userId === adminUserId) {
+      throw new BadRequestException(
+        'You cannot reset your own 2FA here. Use Settings → Disable 2FA instead.',
+      );
+    }
+    const user = await this.systemPrisma.user.findFirst({
+      where: { id: userId, companyId },
+      select: { applicantId: true, brokerId: true },
+    });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.applicantId || user.brokerId) {
+      throw new BadRequestException(
+        "This is a portal user — reset their 2FA from their customer or broker record, not here.",
+      );
+    }
+
+    const wasEnabled = await this.systemPrisma.$transaction(async (tx) => {
+      // Locked so wasEnabled is accurate when two admins reset at once: the
+      // second sees 2FA already off. The clear itself is idempotent either way.
+      const [row] = await tx.$queryRaw<Array<{ totp_enabled: boolean }>>`
+        SELECT totp_enabled FROM users WHERE id = ${userId}::uuid FOR UPDATE
+      `;
+      await tx.user.update({ where: { id: userId }, data: TOTP_CLEARED });
+      await tx.auditLog.create({
+        data: authAuditData({
+          companyId,
+          actorId: adminUserId,
+          targetUserId: userId,
+          action: 'TOTP_RESET_BY_ADMIN',
+          after: { surface: 'staff', wasEnabled: row.totp_enabled },
+        }),
+      });
+      return row.totp_enabled;
+    });
+
+    // After the transaction, like deactivate(): TokenService writes through
+    // its own client.
+    await this.tokenService.revokeAllForUser(userId);
+    return { wasEnabled };
   }
 }
