@@ -170,15 +170,31 @@ export class PortalAuthService {
     }
 
     const recoveryCodes = this.totpService.generateRecoveryCodes();
-    await this.prisma.user.update({ where: { id: userId }, data: { totpEnabled: true, recoveryCodes } });
+    await this.prisma.$transaction([
+      this.prisma.user.update({ where: { id: userId }, data: { totpEnabled: true, recoveryCodes } }),
+      this.prisma.auditLog.create({
+        data: authAuditData({
+          companyId: user.companyId, actorId: userId, targetUserId: userId,
+          action: 'TOTP_ENABLED', after: { surface: 'portal' },
+        }),
+      }),
+    ]);
     return { recoveryCodes };
   }
 
-  async disableTotp(userId: string) {
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: TOTP_CLEARED,
-    });
+  async disableTotp(userId: string, companyId: string) {
+    await this.prisma.$transaction([
+      this.prisma.user.update({
+        where: { id: userId },
+        data: TOTP_CLEARED,
+      }),
+      this.prisma.auditLog.create({
+        data: authAuditData({
+          companyId, actorId: userId, targetUserId: userId,
+          action: 'TOTP_DISABLED', after: { surface: 'portal' },
+        }),
+      }),
+    ]);
   }
 
   async refreshTokens(rawRefreshToken: string) {
@@ -228,6 +244,12 @@ export class PortalAuthService {
     await this.prisma.$transaction([
       this.prisma.user.update({ where: { id: userId }, data: { passwordHash: hash } }),
       this.consumeResetLinks(userId),
+      this.prisma.auditLog.create({
+        data: authAuditData({
+          companyId: user.companyId, actorId: userId, targetUserId: userId,
+          action: 'PASSWORD_CHANGED', after: { surface: 'portal', via: 'self' },
+        }),
+      }),
     ]);
 
     // Leaves the session that made this request alone — mirrors the
@@ -285,7 +307,7 @@ export class PortalAuthService {
    * row lock; whichever loses the race re-evaluates against the
    * now-invalidated row and simply matches zero rows.
    */
-  async consumeInvite(inviteId: string, dto: PortalInviteConsumeDto) {
+  async consumeInvite(inviteId: string, dto: PortalInviteConsumeDto, ipAddress?: string) {
     const invite = await this.prisma.portalInvite.findUnique({ where: { id: inviteId } });
     if (!invite) throw new UnauthorizedException('Invalid invite');
     if (invite.consumedAt) throw new UnauthorizedException('Invite is no longer valid');
@@ -321,12 +343,13 @@ export class PortalAuthService {
     `;
     if (claimed.length === 0) throw new UnauthorizedException('Invite is no longer valid');
 
-    return this.finalizeInviteConsumption(invite, dto.password);
+    return this.finalizeInviteConsumption(invite, dto.password, ipAddress);
   }
 
   private async finalizeInviteConsumption(
-    invite: { companyId: string; applicantId: string | null; brokerId: string | null },
+    invite: { id: string; companyId: string; applicantId: string | null; brokerId: string | null },
     password: string,
+    ipAddress?: string,
   ) {
     const roleSlug = invite.applicantId ? SYSTEM_ROLES.CUSTOMER : SYSTEM_ROLES.BROKER;
     const role = await this.prisma.role.findFirst({ where: { companyId: invite.companyId, slug: roleSlug } });
@@ -354,7 +377,12 @@ export class PortalAuthService {
       where: invite.applicantId ? { applicantId: invite.applicantId } : { brokerId: invite.brokerId },
     });
 
-    // An existing account can hold reset links; a brand-new one can't.
+    // An existing account can hold reset links; a brand-new one can't. Only
+    // the existing-account branch is a password CHANGE worth auditing:
+    // re-inviting someone replaces their password (and reactivates them),
+    // which is exactly what an audit trail must be able to show. Actor is the
+    // account holder, who held the invite. The route is @Public(), so the IP
+    // comes from the controller.
     const user = existingUser
       ? (
           await this.prisma.$transaction([
@@ -364,6 +392,14 @@ export class PortalAuthService {
               include: { role: { include: { permissions: { include: { permission: true } } } } },
             }),
             this.consumeResetLinks(existingUser.id),
+            this.prisma.auditLog.create({
+              data: authAuditData({
+                companyId: invite.companyId, actorId: existingUser.id, targetUserId: existingUser.id,
+                action: 'PASSWORD_CHANGED',
+                after: { surface: 'portal', via: 'invite', inviteId: invite.id, reactivated: !existingUser.isActive },
+                ipAddress,
+              }),
+            }),
           ])
         )[0]
       : await this.prisma.user.create({
@@ -406,7 +442,7 @@ export class PortalAuthService {
     });
   }
 
-  async confirmPasswordReset(dto: PortalPasswordResetConfirmDto): Promise<void> {
+  async confirmPasswordReset(dto: PortalPasswordResetConfirmDto, ipAddress?: string): Promise<void> {
     const tokenHash = createHash('sha256').update(dto.token).digest('hex');
     const reset = await this.prisma.portalPasswordReset.findFirst({ where: { tokenHash } });
 
@@ -422,14 +458,24 @@ export class PortalAuthService {
     if (claimed.length === 0) throw new UnauthorizedException('Invalid or expired reset token');
 
     const passwordHash = await argon2.hash(dto.newPassword, { algorithm: argon2.Algorithm.Argon2id });
-    // Same inactive-account refusal as AuthService.confirmPasswordReset: the
-    // link is already claimed, and the conditional write can't race a
-    // deactivation.
-    const { count } = await this.prisma.user.updateMany({
-      where: { id: reset.userId, isActive: true },
-      data: { passwordHash, failedLoginAttempts: 0, lockedUntil: null },
+    // Same shape as AuthService.confirmPasswordReset: the claim above stays
+    // OUTSIDE this transaction so a refused (inactive) redemption still uses
+    // the link up; the conditional write can't race a deactivation; the
+    // audit row commits with the password or not at all.
+    await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.user.updateMany({
+        where: { id: reset.userId, isActive: true },
+        data: { passwordHash, failedLoginAttempts: 0, lockedUntil: null },
+      });
+      if (count === 0) throw new UnauthorizedException('Invalid or expired reset token');
+      await tx.auditLog.create({
+        data: authAuditData({
+          companyId: reset.companyId, actorId: reset.userId, targetUserId: reset.userId,
+          action: 'PASSWORD_RESET_USED', after: { surface: 'portal', portalPasswordResetId: reset.id },
+          ipAddress,
+        }),
+      });
     });
-    if (count === 0) throw new UnauthorizedException('Invalid or expired reset token');
     await this.tokenService.revokeAllForUser(reset.userId);
   }
 
