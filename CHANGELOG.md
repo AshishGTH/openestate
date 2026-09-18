@@ -3,6 +3,68 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+Planned as v0.7.0. An admin can now clear a user's two-factor
+authentication, on staff and portal accounts, and the break-glass script
+can do the same for a sole admin. Until now, anyone who lost both their
+authenticator and their recovery codes had no way back in: a password
+reset still left them at a code prompt they couldn't answer. 2FA and
+password changes are now written to the audit log. No migration, no new
+environment variable, no new permission.
+
+### Added
+
+- **Admin 2FA reset for staff users.** Admin → Users → a user → *Reset
+  2FA* (`POST /users/:id/reset-2fa`). Clears the TOTP secret, the recovery
+  codes and any 2FA lockout, and signs the user out everywhere. Their
+  password is unchanged; they sign in with it and can set 2FA up again.
+  The button is disabled when the user has no 2FA. It isn't offered for
+  your own account (use Settings) or for portal users (use their record).
+  Deactivated users can be reset.
+- **Admin 2FA reset for customer and broker portal accounts.** *Reset
+  portal 2FA* on the customer's or broker's record in the staff app
+  (`POST /admin/portal-2fa-resets`), with the same effect.
+- **`reset-admin-password.sh --clear-2fa`**, for when the only admin has
+  lost their phone and there is nobody to click the button. Without the
+  flag the script resets the password as before and leaves 2FA on; if the
+  account has 2FA on, it now says so on stderr and tells you to re-run with
+  `--clear-2fa`.
+- **Audit log entries for 2FA and password events**, staff and portal:
+  `TOTP_ENABLED`, `TOTP_DISABLED`, `TOTP_RESET_BY_ADMIN` (in-app or from
+  the script, with `surface` `staff`, `portal` or `cli`),
+  `PASSWORD_CHANGED` (by the user, at first sign-in, or by accepting a
+  re-sent portal invite) and `PASSWORD_RESET_USED`. None of them contains a
+  password, a 2FA secret, a recovery code or a reset token.
+
+### Fixed
+
+- **Turning 2FA off didn't clear the 2FA lockout.** Someone who got
+  locked out by wrong codes, turned 2FA off and straight back on within
+  five minutes had the first code from their new authenticator refused.
+  Staff and portal.
+- **`reset-admin-password.sh` claimed to bypass 2FA "entirely".** It
+  never did; its header and `--help` now say what it does.
+
+### Security
+
+- Resetting someone's portal 2FA needs `admin.user.update` (company admins
+  and super admins), **not** the `admin.portal-invite.send` that gates the
+  portal password-reset link. Sales managers hold the latter; holding both
+  would let them take over a broker's account and approve NOCs as that
+  broker.
+- **After a 2FA reset, the user's other devices can stay signed in for up
+  to 15 minutes.** The reset revokes every refresh token, so no session can
+  be renewed, but an access token already issued stays valid until it
+  expires (`JWT_ACCESS_EXPIRES_IN`, 15 minutes by default). If you are
+  resetting 2FA because an account may be compromised, that window still
+  applies.
+
+### Upgrading
+
+Nothing extra: no migration, no environment change, and the reset uses an
+existing permission, so company admins have it straight after the upgrade.
+
 ## [0.6.1]
 
 A bug-fix release. Staff users could not sign in with a two-factor recovery

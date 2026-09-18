@@ -6951,6 +6951,8 @@ file is true at every release.
   boot, decrypt on restart, and a wrong-key restart that fails) rather than
   the env line; v0.9.0 = document types, applicant and booking documents,
   the Aadhaar rule amendment, key rotation; v0.10.0 = deferred drops.
+  **Superseded by the "Release sequence moved: v0.7.0 is the admin 2FA
+  reset" entry below** — every item here moved up one release.
 - **Raised with the owner and still open:** checksum residuals and missed
   typos (with exemption options); staff unable to delete their own mistaken
   upload; `RolesService.update()` letting company_admin grant itself any
@@ -7213,6 +7215,151 @@ to rule out a real lockfile change.
   is due after the VM upgrade. The keyboard each mode brings up on a phone
   is reasoned from `inputMode`, not checked on a device. Both limits are
   stated in the CHANGELOG and the release notes.
+
+### Release sequence moved: v0.7.0 is the admin 2FA reset
+
+- **v0.7.0 ships the admin 2FA reset on its own.** Owner decision. The
+  reason is that it closes a live lockout: anyone who lost both their
+  authenticator and their recovery codes had no in-app way back in, and a
+  sole admin in that position had no way back in at all, because the
+  break-glass script reset the password but not 2FA.
+- **Everything planned moves up one release.** Aadhaar guard + booking
+  custom fields → v0.8.0; deploy plumbing → v0.9.0; document types and
+  documents → v1.0.0. The owner didn't place the old v0.10.0 (the deferred
+  `document_types.entity_type` drop); v1.1.0 is assumed. The plan doc's own
+  numbering is not yet updated — logged in `docs/todo.md`.
+
+### v0.7.0 — the TOTP lockout survived a 2FA disable
+
+- **Self-service disable cleared the secret and recovery codes but not
+  `failedTotpAttempts`/`totpLockedUntil`, staff and portal.** Someone who
+  locked themselves out with wrong codes, disabled 2FA and re-enrolled
+  within five minutes had the first code from the new authenticator refused
+  with a 429 by a lock belonging to the discarded secret. It self-heals
+  after five minutes, which is why it went unnoticed.
+- **Fixed with one definition, `TOTP_CLEARED` (`totp-lockout.ts`)**, used
+  by both disables and both admin resets. The admin reset is exactly the
+  flow that hits the bug, so the four sites must not drift. E3h in
+  `e2e-totp-lockout.test.ts` checks both the columns and the consequence (a
+  fresh authenticator's first code works); the consequence assertion was
+  shown to fail on its own, with the column assertions removed, because
+  otherwise they would always fire first and hide it.
+
+### v0.7.0 — admin-side 2FA reset, staff and portal
+
+- **A deliberate action, separate from password reset.** Coupling them
+  would make every reset token a 2FA bypass, and reset tokens already leak
+  in two places this log records: nginx access logs (query strings) and
+  `ConsoleCommunicationProvider` (portal self-service). The confirm routes
+  are also `@Public()`, so a coupled reset would have no actor to audit.
+- **`ADMIN_USER_UPDATE` on both surfaces, not `ADMIN_PORTAL_INVITE_SEND`
+  on the portal side.** Sales managers hold the latter and can already
+  issue a portal password-reset link; letting them clear 2FA too would let
+  them take over a broker account and approve NOCs as that broker. No new
+  permission, so no upgrade-sync gap (a new key would reach only
+  super_admin until granted by hand).
+- **The portal controller carries `@RequirePermissions` at class level.**
+  Checked by mutation: with the decorator removed, a real sales_manager's
+  reset returned 200, not 403 — `PermissionsGuard`'s default-allow,
+  observed rather than inferred.
+- **Deactivated accounts are allowed**, unlike the reset link's 409. The
+  reset issues no credential, and a deactivated account can't sign in
+  either way (login refuses it; since v0.6.0 so does reset-link
+  redemption). Requiring reactivation first would add a step and no
+  security.
+- **Staff refuses your own account (400)**: Settings → Disable 2FA does
+  that without revoking the caller's own session. Staff also refuses portal
+  users (400), pointing at their record; portal keeps
+  `issueAdminPasswordReset`'s 404 and 409 `NO_PORTAL_ACCOUNT`.
+- **`SYSTEM_PRISMA`, not the tenant client.** The tenant client's audit
+  extension would add a generic `UPDATE` row whose before/after diff holds
+  `totpSecret` and `recoveryCodes`.
+- **Sessions: `revokeAllForUser`, with an honest limit.** No refresh token
+  survives, and the reuse grace window can't revive one (it only rotates
+  when a live token remains in the family — tested by refreshing seconds
+  after a reset). But `JwtStrategy` does no database lookup, so an access
+  token already issued stays valid up to `JWT_ACCESS_EXPIRES_IN` (15
+  minutes). Stated in both service comments and the CHANGELOG.
+- **`wasEnabled` is read under `SELECT ... FOR UPDATE`**, so concurrent
+  resets report it accurately and the audit trail doesn't overstate what
+  happened. The audit row is written even when nothing was cleared: the
+  admin's action is itself worth recording.
+
+### v0.7.0 — audit rows for 2FA and password events
+
+- **One action name per event, `after.surface` saying which surface**
+  (`staff`, `portal`, `cli`). The reset-link actions differ per surface only
+  because they write different tables; these all write `users`. Names fit
+  `audit_logs.action`, `VarChar(20)`.
+- **The `@Public()` routes pass the IP explicitly.** The two reset confirms
+  and invite consumption have no `req.user`, so `TenantContextInterceptor`
+  sets no context and `getCurrentIpAddress()` returns nothing. Shown by
+  mutation: without the controller passing `req.ip`, the row's IP was null.
+- **`confirmPasswordReset` now runs the password write and the audit row in
+  one transaction, but the link claim stays outside it.** Moving the claim
+  in would roll it back when an inactive account is refused, and the link
+  would work again after a reactivation — the v0.6.0 bug, reintroduced. A
+  test checks the refused link stays consumed.
+- **A first-time invite writes no `PASSWORD_CHANGED` row; a re-invite of an
+  existing account does.** This diverges from the literal instruction,
+  which asked for `PASSWORD_CHANGED` "including the new invite-consumption
+  site" without distinguishing the two branches of
+  `finalizeInviteConsumption`. A first-time invite *creates* the account:
+  there was no password before it, so there's nothing to call a change, and
+  account creation is already recorded by the invite itself. A re-invite
+  *replaces* an existing account's password and reactivates the account if
+  it was deactivated — exactly what an audit trail must be able to show,
+  so it's recorded with `via: 'invite'`, the `inviteId` and
+  `reactivated`. The account holder is the actor: they held the invite.
+- **Counted: 10 self-service sites plus 2 admin**, not the 9 plus invite
+  the instruction's wording implied — `PASSWORD_CHANGED` has four sites
+  (staff self, portal self, staff first-login, portal invite), because the
+  approved plan kept `changePassword` on both surfaces.
+
+### v0.7.0 — `reset-admin-password.sh --clear-2fa`
+
+- **A flag, not the default.** Owner decision: unconditional clearing
+  would recreate the password-reset-implies-2FA-bypass coupling. Without
+  the flag, on a 2FA account, the script still resets the password, exits
+  0, and warns on stderr (`lib.sh`'s `warn()` writes to stdout, so these
+  calls redirect themselves). A silent dead end is what caused the problem.
+- **The script's header and `--help` said it bypassed 2FA "entirely".**
+  False since it was written; corrected.
+- **Two things psql has to set that Prisma never does:**
+  `audit_logs.id` has no database default (Prisma generates it), so the
+  insert uses `gen_random_uuid()`; `created_at` defaults to
+  `CURRENT_TIMESTAMP` on a `TIMESTAMP` column holding UTC, so it is set to
+  `now() AT TIME ZONE 'UTC'` — the bare default would be 5.5 hours off on
+  the Asia/Kolkata VM. The audit row has `user_id NULL` (the column is
+  nullable, so no sentinel system actor was needed) and `surface: 'cli'`.
+- **CI's native-install job runs the script for real** and checks the
+  outcomes a user would notice: login still demands a code without the
+  flag, returns a session with it, the warning is on stderr, and exactly
+  one CLI audit row exists. shellcheck was not run — not installed, and no
+  CI job runs it (logged in `docs/todo.md`).
+
+### Standing rule: a concurrency test must force its interleaving
+
+The first concurrency test for the admin reset fired five requests with
+`Promise.all` and asserted exactly one saw 2FA on. It passed, and it proved
+nothing: with `FOR UPDATE` removed, the staff version still passed two runs
+in three, because the requests often ran one after another. A race test
+that passes against broken code most of the time is worse than none — it
+turns an unproven claim into a green check.
+
+The fix was a barrier the test controls: it takes its own lock on the row,
+fires the requests, polls `pg_blocking_pids` (recursively, since queued
+waiters block each other) until every request is blocked behind it, then
+releases. That makes the interleaving certain instead of likely: with the
+lock, every request blocks before its read; without it, every request reads
+first. The mutation then failed 3 runs in 3.
+
+**Rule: before trusting a concurrency test, run it against the code with
+the protection removed, several times. If it doesn't fail every time,
+force the interleaving — don't raise the request count and hope.** Size
+the barrier below the connection pool (here 4 of `connection_limit=5`), or
+a request waits for a connection instead of the lock and the barrier never
+fills.
 
 ## graphify
 

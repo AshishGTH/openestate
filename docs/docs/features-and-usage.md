@@ -140,6 +140,22 @@ commission summaries, and more — every report exports to CSV.
 
 ---
 
+### 8. Account security and recovery
+- Two-factor authentication (an authenticator app, plus one-time recovery
+  codes) for staff, customers and brokers, each turned on from their own
+  Settings or Security page.
+- When someone loses both their phone and their recovery codes, a company
+  admin clears their 2FA: from Admin → Users for staff, or from the
+  customer's or broker's record for portal accounts. Their password stays
+  the same, they're signed out everywhere, and they can set 2FA up again.
+  Sales managers can send a portal password-reset link but cannot clear
+  2FA.
+- If the only admin is locked out, whoever runs the server can reset their
+  password — and, with `--clear-2fa`, their 2FA — from the command line
+  (see the installation guide).
+- Every 2FA change and password change lands in the audit log, including
+  who did it and from where.
+
 ## What OpenEstate deliberately does not do (yet)
 
 Honesty matters more than a feature list. As of v0.6.1:
