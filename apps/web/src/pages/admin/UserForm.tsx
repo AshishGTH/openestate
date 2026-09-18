@@ -296,7 +296,7 @@ export default function UserForm() {
           <h2 className="text-sm font-medium text-slate-900">Password</h2>
           {isPortalUser ? (
             <p className="mt-1 text-xs text-slate-500">
-              This is a portal user. Reset their password from the{' '}
+              This is a portal user. Reset their password or 2FA from the{' '}
               {applicantId ? (
                 <Link to={`/postsales/applicants/${applicantId}`} className="text-blue-600 hover:underline">
                   customer record
@@ -349,24 +349,12 @@ export default function UserForm() {
       {/* Same gate as the Password block above, for the same reason: until
           the record loads, totpEnabled reads undefined — and undefined keeps
           the button disabled, the safe direction. */}
-      {isEdit && existingUser && hasPermission(PERMISSIONS.ADMIN_USER_UPDATE) && (
+      {/* Not rendered for portal users: the Password section's pointer
+          above already sends them to the customer/broker record for both. */}
+      {isEdit && existingUser && !isPortalUser && hasPermission(PERMISSIONS.ADMIN_USER_UPDATE) && (
         <div className="mt-4 rounded-md border border-slate-200 p-4">
           <h2 className="text-sm font-medium text-slate-900">Two-factor authentication</h2>
-          {isPortalUser ? (
-            <p className="mt-1 text-xs text-slate-500">
-              This is a portal user. Reset their 2FA from the{' '}
-              {applicantId ? (
-                <Link to={`/postsales/applicants/${applicantId}`} className="text-blue-600 hover:underline">
-                  customer record
-                </Link>
-              ) : (
-                <Link to={`/postsales/brokers/${brokerId}`} className="text-blue-600 hover:underline">
-                  broker record
-                </Link>
-              )}
-              , not here.
-            </p>
-          ) : isSelf ? (
+          {isSelf ? (
             <p className="mt-1 text-xs text-slate-500">
               To turn off your own 2FA, use{' '}
               <Link to="/settings" className="text-blue-600 hover:underline">
