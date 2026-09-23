@@ -5,13 +5,15 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Planned as v0.7.0. An admin can now clear a user's two-factor
-authentication, on staff and portal accounts, and the break-glass script
-can do the same for a sole admin. Until now, anyone who lost both their
-authenticator and their recovery codes had no way back in: a password
-reset still left them at a code prompt they couldn't answer. 2FA and
-password changes are now written to the audit log. No migration, no new
-environment variable, no new permission.
+## [0.7.0] - 2026-09-23
+
+An admin can now clear a user's two-factor authentication, on staff and
+portal accounts, and the break-glass script can do the same for a sole
+admin. Until now, anyone who lost both their authenticator and their
+recovery codes had no way back in: a password reset still left them at a
+code prompt they couldn't answer. 2FA and password changes are now
+written to the audit log. No migration, no new environment variable, no
+new permission.
 
 ### Added
 
