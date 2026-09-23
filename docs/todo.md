@@ -293,7 +293,7 @@ complexity cost specifically for faster failure detection, not (per the
 Phase 4 reasoning, still valid) for lower total cost. Revisit alongside
 that question rather than sharding on wall-clock time alone.
 
-## Two known-timing-sensitive test failures, not re-investigated (contention-class, evidence already in hand)
+## Three known-timing-sensitive test failures, not re-investigated (contention-class, evidence already in hand)
 
 Found in a real full-`pnpm test` run on the walkthrough VM (2 CPU cores,
 live production traffic sharing the box — see CLAUDE.md's `scripts/
@@ -317,6 +317,27 @@ repeating it for these two as well.
 isolation (not the full suite) two or three times; if they pass every
 time, that confirms contention and this entry can be deleted; if either
 fails again in isolation, it is real and needs its own investigation.
+
+**Third instance, 2026-09-23, real GitHub Actions CI, not the VM**: the
+`Integration tests (Postgres + Redis)` job on `master`'s merge commit for
+PR #49 (admin-side 2FA reset) failed once on
+`e2e-totp-lockout.test.ts > staff > concurrent wrong codes cannot slip
+past the lock: exactly 5 of 8 are checked` — `Error: read ECONNRESET`, a
+transport-level connection reset, not a failed assertion. That test is
+byte-for-byte untouched by #49 (the PR only added a new `E3h` case to the
+same file, confirmed with `git show <merge-sha> -- apps/api/test/
+e2e-totp-lockout.test.ts` before re-running anything). A re-run of just
+that CI job passed cleanly. Same contention class as the two VM instances
+above, on a different runner (GitHub-hosted, not the VM) — the same
+"an already-flaky concurrency test occasionally hits a transport-level
+error under real resource contention" shape, not a new bug class.
+
+**If this recurs**: check first whether it's the SAME test — this one, or
+either of the two VM instances above — before assuming a regression. The
+diagnostic is the same one this entry already uses: re-run just that one
+CI job or test file in isolation. If it passes clean, it's this class. If
+it fails again in isolation, or a different test fails, it needs its own
+investigation.
 
 ## `ci.yml`'s `scripts/test-setup.sh` wiring — not verified by an actual GitHub Actions run
 

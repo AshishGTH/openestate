@@ -32,3 +32,9 @@ apps/e2e/.fixture-state.json
 # (see CLAUDE.md's "no credential VALUES in any committed file" rule) —
 # cheap insurance against the same mistake showing up here.
 .vercel/
+
+# Claude Code's own per-machine override file — permission allowlists and
+# other local settings, never something to share across contributors.
+# .claude/settings.json (the shared, committed one) and .claude/skills/
+# are unaffected; this pattern only matches the local-override filename.
+.claude/settings.local.json
