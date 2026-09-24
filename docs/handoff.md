@@ -20,7 +20,7 @@ them, and do not carry their addresses forward into future notes.
 | Box | IP | User | Role |
 |---|---|---|---|
 | Upgraded / walkthrough | 192.168.1.100 | `newopen` | Long-lived, carries real demo data + upgrade history. Password-auth only via plink (no working key for this session) — see the credentials note below for where the password lives. Currently v0.4.0, health endpoint reconfirmed live (`{"status":"ok","db":"ok","redis":"ok","version":"0.4.0"}`) on 2026-08-29. |
-| v0.6.0 deployment target | 192.168.1.20 | `textopen` | Ubuntu 24.04.5 LTS. Password-auth only via plink; `sudo` genuinely requires a password for `textopen` (confirmed, not passwordless). Host key fingerprint: `SHA256:yxr46xNP2TBAqStNsfNyyGhVaF34/bY7xRPDmcBahsE` (ed25519). **Upgraded to v0.6.0 (commit `924e55f`, tag `v0.6.0`) by the project owner directly, confirmed on 2026-09-17** — `textopen`'s own shell history shows a deliberate `install-native.sh`/`upgrade-native.sh` session (branch fetched via a git bundle, real backups taken, health checked). This was flagged and investigated during a recon pass and is resolved: it is expected prior activity by the project owner, not stray/unexplained access — do not re-flag it as a mystery in a future session. Health endpoint confirmed live (`{"status":"ok","db":"ok","redis":"ok","version":"0.6.0"}`) on 2026-09-17. **A real `backup-native.sh` bundle exists at `/var/backups/openestate/20260917-074728`** (taken immediately before this session's test-data creation — `db.sql` 416K, `openestate.env`, `uploads.tar.gz`). **Real-browser verification done this same day (see docs/todo.md's "Verify on VM at next deployment" for full detail): staff+portal 2FA/TOTP/recovery-codes (done, one real bug found — staff recovery-code input truncates at 6 chars), the staff↔portal login cross-links (done, both directions), and the broker NOC→cancel→clawback→statement flow (partially verified — everything but the NOC-request step itself, which has no UI anywhere and needs a workaround; see docs/todo.md).** Test artifacts left on the box from this session: staff user `totp-test-admin@openestate.local` (2FA-enabled), company config now has a real GSTIN/GST state code (`09ABCDE1234F1Z5`/`09`, previously unset), project "NOC Test Project" (NOCT) with Tower A / 2 units, applicant "NOC Test Applicant", a cancelled booking (`BKG/2026-27/000002`), and broker "Portal 2FA Test Broker" (2FA-enabled portal account, phone `9900011122`) — none deleted, left for audit trail per this project's own precedent of leaving prior sessions' walkthrough data in place. |
+| Deployment target (upgraded to master `b83ef31`) | 192.168.1.20 | `textopen` | Ubuntu 24.04.5 LTS. Password-auth only via plink; `sudo` genuinely requires a password for `textopen` (confirmed, not passwordless). Host key fingerprint: `SHA256:yxr46xNP2TBAqStNsfNyyGhVaF34/bY7xRPDmcBahsE` (ed25519). **Upgraded to master `b83ef31` (v0.7.0 plus the v0.7.1 audit fix) on 2026-09-24**, from v0.6.0, with `deploy/native/upgrade-native.sh --ref b83ef31c9630e8fdd57e2925b6d4ce90cc03c2dc` run over `plink` with a pty. The upgrade exited 0, with no migration and no permission changes. Its full output is in **`/home/textopen/upgrade-native-20260917-234007.log`**, and the pre-upgrade backup is `/var/backups/openestate/20260917-181007`. **Both names, the new release directory `/opt/openestate/releases/20260917181010-b83ef31`, and any audit row up to `2026-09-17 23:44` carry the wrong date: the VM's clock was a week behind that day (see below).** **The audit fix was verified on this box by the project owner in a browser on 2026-09-24:** a project edit appears in Admin → Audit Log with the owner's own name as the user, and the API's service log has no `[audit]` lines. Earlier: **upgraded to v0.6.0 (commit `924e55f`, tag `v0.6.0`) by the project owner directly, confirmed on 2026-09-17** — `textopen`'s own shell history shows a deliberate `install-native.sh`/`upgrade-native.sh` session (branch fetched via a git bundle, real backups taken, health checked). This was flagged and investigated during a recon pass and is resolved: it is expected prior activity by the project owner, not stray/unexplained access — do not re-flag it as a mystery in a future session. Health endpoint confirmed live after the upgrade (`{"status":"ok","db":"ok","redis":"ok","version":"0.7.0"}`, which is what `b83ef31` reports because the version bump to 0.7.1 comes in the release commit) on 2026-09-24. **An earlier `backup-native.sh` bundle exists at `/var/backups/openestate/20260917-074728`** (taken immediately before this session's test-data creation — `db.sql` 416K, `openestate.env`, `uploads.tar.gz`). **Real-browser verification done on 2026-09-17 (see docs/todo.md's "Verify on VM at next deployment" for full detail): staff+portal 2FA/TOTP/recovery-codes (done, one real bug found — staff recovery-code input truncates at 6 chars), the staff↔portal login cross-links (done, both directions), and the broker NOC→cancel→clawback→statement flow (partially verified — everything but the NOC-request step itself, which has no UI anywhere and needs a workaround; see docs/todo.md).** Test artifacts left on the box from the 2026-09-17 session: staff user `totp-test-admin@openestate.local` (2FA-enabled), company config now has a real GSTIN/GST state code (`09ABCDE1234F1Z5`/`09`, previously unset), project "NOC Test Project" (NOCT) with Tower A / 2 units, applicant "NOC Test Applicant", a cancelled booking (`BKG/2026-27/000002`), and broker "Portal 2FA Test Broker" (2FA-enabled portal account, phone `9900011122`) — none deleted, left for audit trail per this project's own precedent of leaving prior sessions' walkthrough data in place. |
 
 **VM credentials (SSH login password, demo-admin app password) are kept
 outside this repo — ask a maintainer for the current values rather than
@@ -125,24 +125,23 @@ verification entry (2026-08-23) for the full read on which failures are
 contention vs. real bugs, before assuming a full-suite red run here means
 a regression.
 
-**192.168.1.20 has an open, unconfirmed clock discrepancy — different from
-192.168.1.100's (that one is a confirmed, unfixed drift; this one is a
-puzzle, not yet explained).** `timedatectl status` on 2026-09-17 reported
-the clock correctly synchronized (NTP active, correct IST time) — the
-clock is fine *right now*. But `systemctl status openestate-api` reported
-`Active: ... since Fri 2026-09-11 23:12:09 IST; 5 days ago`, while `uptime`
-on the same box, same moment, showed the kernel itself has only been up
-**2h35m** — i.e. a much more recent reboot than the service's own claimed
-start time, which is a contradiction (a service cannot outlive the
-machine's last boot). The most likely account, given 192.168.1.100's own
-precedent: the clock was wrong (reading something like "Sep 11") at the
-moment of the last reboot/service-start and was corrected by NTP sometime
-between then and this check — which would also explain why
-`/opt/openestate/releases/20260911173714-924e55f` is folder-named "Sep 11"
-despite containing a commit that didn't exist until Sep 17. **Not
-independently confirmed** (no NTP correction history or reboot log was
-checked) — recorded here so a future session starts from this hypothesis
-instead of re-deriving it from the same raw numbers.
+**192.168.1.20's clock was a week behind, and that is resolved.** On
+2026-09-24 the VM reported 2026-09-17 while GitHub and the dev machine
+said 2026-09-24, and `timedatectl` still printed `System clock
+synchronized: yes`. The cause was that the VM had been **suspended**;
+the project owner corrected the clock on 2026-09-24. This also explains
+the earlier puzzle (the service claiming to have started five days before
+the kernel's own uptime, and a release directory named "Sep 11" that
+contains a commit made on Sep 17). Anything the VM stamped while the clock
+was wrong keeps the wrong date: the upgrade log, backup and release
+directory names above, and audit rows from that period.
+
+**VM testing note: after resuming a suspended VM, check its clock before
+testing anything time-dependent** — TOTP 2FA (codes are time-based),
+interest accrual, financial-year dates, audit timestamps, and TLS to
+GitHub or npm (a clock behind a certificate's start date fails the
+handshake). `date -Is` against a trusted clock is enough. Don't trust
+`timedatectl`'s "synchronized" line after a resume.
 
 Browser automation against these VMs: the Browser pane's per-site
 approval gate has repeatedly blocked real-browser checks here across

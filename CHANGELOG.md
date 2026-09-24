@@ -5,8 +5,13 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-Planned as v0.7.1: a security fix to the audit log. No migration, no new
-environment variable, no deploy-script change.
+## [0.7.1] - 2026-09-24
+
+A security fix to the audit log: most create, update and delete actions
+were never recorded, audit rows carried no user or IP address, and a
+failed audit write could report success for a change that was never
+saved. All three are fixed. No migration, no new environment variable,
+no deploy-script change.
 
 ### Security
 

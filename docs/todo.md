@@ -100,6 +100,42 @@ the change that found it.
 schema (with `relationMode` or a back-relation) and documenting that
 `migrate dev` output must always be reviewed for these three lines.
 
+## Low priority: consider a clock-skew warning at startup or in the health check
+
+**What:** a wrong server clock breaks TOTP 2FA (codes are time-based),
+and produces wrong interest accrual, financial-year boundaries and audit
+dates. Nothing in the app notices. A startup log line, or a field in
+`/api/v1/health`, comparing the server's clock against a trusted source
+(the database's `now()` is the same machine's clock in a single-host
+install, so it would need an external reference or an operator-configured
+tolerance) would surface it.
+
+**Why deferred:** not observed in production. Found on a test VM that had
+been suspended and resumed a week behind while `timedatectl` still said
+"System clock synchronized: yes" (`docs/handoff.md`, 192.168.1.20).
+
+**What unblocks it:** deciding what to compare against without adding a
+mandatory external dependency (CLAUDE.md principle 1: self-hostable, no
+mandatory SaaS). Probably an optional check, off unless configured.
+
+## Low priority: pnpm "Failed to create bin" warnings during the native upgrade build
+
+**What:** `upgrade-native.sh` builds print four warnings of the form
+`WARN Failed to create bin at .../.bin/<name>. ENOENT: no such file or
+directory` for `browserslist`, `webpack`, `vite` and `terser`, with the
+release directory's path appearing twice in different forms
+(observed on the 192.168.1.20 upgrade to `b83ef31`, 2026-09-24). The
+upgrade still completed, migrated and passed its health check.
+
+**Why deferred:** cosmetic; cause unknown. The shims are dev-tooling
+binaries the running API never calls. Unknown whether earlier upgrades
+printed them too.
+
+**What unblocks it:** reading the same build on a clean checkout (the CI
+`native-install` job's log) to see whether it's specific to upgrading in
+place, then tracing `pnpm deploy`'s bin linking against the release
+directory's layout.
+
 ## Verify on VM at next deployment
 
 Items deferred to real-hardware testing. **Status as of the v0.6.0
