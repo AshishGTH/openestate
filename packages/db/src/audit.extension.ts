@@ -144,11 +144,18 @@ const SENSITIVE_FIELDS = new Set([
   'key_hash',
 ]);
 
+// Recursive: a secret nested inside a write input (a nested create, a
+// JSON column) is redacted too. Only plain objects and arrays are walked;
+// anything else (Date, Prisma.Decimal) is left whole for JSON.stringify,
+// which uses its own toJSON.
 function sanitize(data: unknown): unknown {
+  if (Array.isArray(data)) return data.map(sanitize);
   if (!data || typeof data !== 'object') return data;
+  const proto = Object.getPrototypeOf(data);
+  if (proto !== Object.prototype && proto !== null) return data;
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
-    out[k] = SENSITIVE_FIELDS.has(k) ? '[REDACTED]' : v;
+    out[k] = SENSITIVE_FIELDS.has(k) ? '[REDACTED]' : sanitize(v);
   }
   return out;
 }

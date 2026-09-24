@@ -230,6 +230,10 @@ describeIf('audit extension', () => {
       );
       const [row] = await rowsFor(rule.id);
       expect(row?.after).toMatchObject({ thresholdPaise: '500000000' });
+      // A Prisma.Decimal survives the recursive sanitizer as its own
+      // string form, not as the object's internal fields.
+      expect((row?.after as Record<string, unknown>).ratePercent).toBe('1');
+      expect((row?.after as Record<string, unknown>).effectiveFrom).toBe('2020-01-01T00:00:00.000Z');
     } finally {
       if (saved) proto.toJSON = saved;
     }
