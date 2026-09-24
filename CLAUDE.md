@@ -7423,6 +7423,36 @@ asserts its audit row and actor through HTTP.** A passing write test says
 nothing about the audit row, and the audit extension gives no signal when
 it isn't writing one.
 
+### v0.7.1 — the audit fix verified on a real install (192.168.1.20)
+
+On 2026-09-24 the verification VM was upgraded from v0.6.0 (`924e55f`) to
+master `b83ef31` (v0.7.0 plus the audit fix) with `upgrade-native.sh --ref
+<full sha>`, run over `plink` with a pty. It exited 0, with no pending
+migration (32 migrations, none new) and no permission changes. The API
+came up healthy (`version` reads 0.7.0: the 0.7.1 bump is the release
+commit), `NRestarts=0`, and its journal since the restart had no `[audit]`
+lines and no error-level lines. The project owner then edited a project
+in the browser and saw the row in Admin → Audit Log with their own name as
+the user. That is the verification the v0.7.1 release notes cite.
+
+- **What it does not show:** audit rows written by the new code on that
+  box were produced by the owner's browser check, not by a scripted pass;
+  the counts I took before and after the upgrade can't be compared for the
+  fix, because every row that appeared between them (Inquiry UPDATE 6 → 14,
+  a follow-up, a custom-field delete and purge) was written before cutover
+  by the old release while the owner used the app during the backup and
+  build.
+- **The VM's clock was a week behind that day** (it read 2026-09-17), because
+  the VM had been suspended; the owner corrected it on 2026-09-24. The
+  upgrade log, backup and release directory names, and any audit row from
+  that period carry the wrong date. `timedatectl` still said "System
+  clock synchronized: yes" the whole time, so it can't be trusted after a
+  resume. `docs/handoff.md` has the details and the testing note.
+- **Handling:** the SSH password was piped to `sudo -S` over stdin and
+  never written to a file, commit or log. It appeared twice where it
+  shouldn't have: echoed by the pty into one tool output, and briefly as
+  an argument to `grep` on the VM.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
