@@ -179,7 +179,7 @@ describeIf('e2e audit rows: every write is audited, with the acting user', () =>
     }).expect(201);
     const row = await expectAuditedByAdmin('User', created.body.id, 'CREATE');
     expect(JSON.stringify(row.after)).not.toContain('$argon2');
-    await send('post', `/users/${created.body.id}/deactivate`).expect(201);
+    await send('post', `/users/${created.body.id}/deactivate`).expect(200);
     await expectAuditedByAdmin('User', created.body.id, 'UPDATE');
   });
 
