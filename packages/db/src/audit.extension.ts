@@ -1,7 +1,6 @@
 import { Prisma } from '@prisma/client';
 import {
   tenantTxContext,
-  getCurrentCompanyId,
   getCurrentUserId,
   getCurrentIpAddress,
 } from './tenant-context';
@@ -176,7 +175,9 @@ async function writeAuditRow(
     return;
   }
 
-  const companyId = getCurrentCompanyId() ?? null;
+  // The transaction's own company: always what RLS's WITH CHECK compares
+  // against, so the INSERT can't fail on a context/transaction mismatch.
+  const companyId = store.companyId;
   const userId = getCurrentUserId() ?? null;
   const ipAddress = getCurrentIpAddress() ?? null;
   const beforeJson = before ? toJson(before) : null;
