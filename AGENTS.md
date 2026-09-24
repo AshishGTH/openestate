@@ -114,6 +114,13 @@ docs/           Docusaurus site: install, admin, API, plugin dev
 - Audit log: every create/update/delete on domain entities writes
   an immutable audit row (actor, entity, before/after diff, IP,
   timestamp). Financial and auth events always audited.
+  **Not yet fully true (note added 2026-09-24, v0.7.1):** v0.7.1 fixed
+  audit rows being silently dropped on 53 write paths, rows written
+  without an actor or IP, and failed audit writes reporting success.
+  Still open, tracked in docs/todo.md: UPDATE rows record after-values
+  only (before = null); audit_logs is not append-only at the database
+  level; writes through updateMany/createMany/deleteMany/upsert on
+  audited models (role permissions among them) write no audit row.
 - PII: encrypt PAN numbers at rest (AES-256-GCM, key from env);
   mask PAN/phone in list views and logs. NEVER store Aadhaar
   numbers. Structured logger (pino) with a redaction list.

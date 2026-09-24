@@ -381,6 +381,11 @@ describeIf('Phase 6 e2e: real HTTP through the full guard pipeline', () => {
 
     expect(res.body.status).toBe('PENDING');
     expect(res.body.applicantId).toBe(applicantAId);
+
+    // v0.7.1: a customer-portal write is audited under the portal user.
+    const portalUser = await systemPrisma.user.findFirst({ where: { applicantId: applicantAId } });
+    const audit = await systemPrisma.auditLog.findFirst({ where: { entityType: 'ApplicantChangeRequest', entityId: res.body.id, action: 'CREATE' } });
+    expect(audit?.userId).toBe(portalUser.id);
   });
 
   it('portal tickets over HTTP: a customer can raise a ticket and read it back; an unrelated customer cannot', async () => {
@@ -393,6 +398,12 @@ describeIf('Phase 6 e2e: real HTTP through the full guard pipeline', () => {
       .send({ categoryId: ticketCategoryId, subject: 'Leak in bathroom', body: 'Please send a plumber.' })
       .expect(201);
     const ticketId = created.body.id as string;
+
+    // v0.7.1: a portal-session write is audited under the portal user
+    // (audit_logs has no RESTRICTIVE portal policy; only company isolation).
+    const portalUser = await systemPrisma.user.findFirst({ where: { applicantId: applicantAId } });
+    const audit = await systemPrisma.auditLog.findFirst({ where: { entityType: 'Ticket', entityId: ticketId, action: 'CREATE' } });
+    expect(audit?.userId).toBe(portalUser.id);
 
     const mine = await request(app.getHttpServer())
       .get('/api/v1/portal/tickets')

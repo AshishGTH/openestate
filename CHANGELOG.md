@@ -5,6 +5,49 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+Planned as v0.7.1: a security fix to the audit log. No migration, no new
+environment variable, no deploy-script change.
+
+### Security
+
+- **Most create, update and delete actions wrote no audit row.** Before
+  v0.7.1, 53 write paths recorded nothing in the audit log, among them
+  users, applicants and consents, projects, towers and units, brokers
+  and commission rules, GST and TDS rates, letter and SMS templates,
+  custom fields, follow-ups, NOC requests, communications, receipt
+  reprints, and assigning a broker to a booking. **The missing history
+  can't be recovered.** Treat audit history from before v0.7.1 as
+  incomplete. These actions are audited from v0.7.1 on.
+- **Audit rows had no user or IP address.** Nearly every row written
+  before v0.7.1, including bookings and receipts, shows "System" in
+  Admin → Audit Log instead of the person who acted. Rows now record the
+  signed-in user and their IP, staff and portal. Background jobs and the
+  inbound-lead API still show "System": no person made those changes.
+- **A failed audit write could report success for a write that was never
+  saved.** Before v0.7.1, if writing an audit row failed, the API could
+  still report success (for example, 201 with an id) for a change that
+  was never saved, including in the financial core. v0.7.1 makes such
+  failures visible errors, and logs each one at error level with the
+  record type, action and id, never field values.
+- Audit rows no longer depend on a global setting to record money
+  amounts, and secrets are redacted however deeply they're nested in a
+  change.
+
+### Still missing (tracked in docs/todo.md)
+
+- An UPDATE row records the new values only, not the old ones.
+- Bulk writes and upserts on audited records write no row: 14 places in
+  the code, listed in docs/todo.md. **Changing a role's permissions
+  (creating a role with permissions, editing them, deleting a role) is
+  not audited.** Nor are: replacing a broker commission rule's slabs,
+  setting a broker's primary bank account, moving inquiries to another
+  stage when a lead stage is retired, re-pointing inquiries when
+  applicants are merged, and creating a floor as a side effect of unit
+  create or import. (The two bulk user updates in sign-in and password
+  flows write their own explicit audit rows.)
+- The audit log is protected by the application, not by the database: a
+  database user with write access could still alter or delete rows.
+
 ## [0.7.0] - 2026-09-23
 
 An admin can now clear a user's two-factor authentication, on staff and
