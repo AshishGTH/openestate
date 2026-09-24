@@ -342,8 +342,9 @@ service then allows the delete when EITHER the caller holds
 the caller's own id AND the caller holds `.upload` (proof they're a genuine
 uploader, not merely a reader). No time window — a self-upload can be
 removed at any point in its life, same as anyone else's under the delete
-permission. Both paths write the same audit row (actor, `documentId`,
-before/after); the audit diff doesn't distinguish self-delete from
+permission. Both paths write the same audit row (actor, `documentId`, the
+values written — an UPDATE row records new values only, `docs/todo.md`);
+the audit diff doesn't distinguish self-delete from
 delete-permission delete, and doesn't need to — the actor id already says
 who did it. A sales_executive who can upload but not delete therefore can
 always undo their own mistake; deleting a colleague's file still needs a
@@ -589,10 +590,16 @@ isn't permanently blocked by layer (b)'s false-positive rate (§ above:
 - Settable only via `PATCH` on the definition, alongside `label`,
   `isRequired`, etc. — one more field on the existing update DTO, not a
   separate endpoint.
-- **Audited for free:** `CustomFieldDefinition` is already in
-  `AUDITED_MODELS` (`packages/db/src/audit.extension.ts`), so the
-  before/after diff extension already logs this flag flipping — no new
-  audit code needed, just confirmed coverage.
+- **Audited, with a limit (corrected in revision 5):**
+  `CustomFieldDefinition` is in `AUDITED_MODELS`
+  (`packages/db/src/audit.extension.ts`), so the flag flipping writes an
+  UPDATE row with the acting admin as user. The row records the new value
+  only (`after.allowsTwelveDigitValues`); `before` is always null on UPDATE
+  today (tracked in `docs/todo.md`). Revision 4 called this "audited for
+  free with a before/after diff" and it wasn't: until v0.7.1 this write
+  produced no audit row at all (`CustomFieldsService` used the
+  un-awaited `withTenantTx` form; CLAUDE.md, "v0.7.1 — audit rows
+  silently dropped"). The test asserts the row and its actor over HTTP.
 - **Visible in the admin UI, not just in the audit log:** the definition's
   edit form gets a checkbox, "Allow 12-digit values (bypasses the Aadhaar
   safety check)", with inline warning text directly under it: "Only enable
