@@ -213,6 +213,11 @@ describeIf('Phase 7 e2e: webhook + lead-api-key admin controllers through the fu
 
     const applicant = await systemPrisma.applicant.findUnique({ where: { id: res.body.applicantId } });
     expect(applicant.name).toBe('E2E Inbound Lead');
+
+    // v0.7.1: machine intake is audited, with no actor (no user made it).
+    const audit = await systemPrisma.auditLog.findFirst({ where: { entityType: 'Inquiry', entityId: res.body.inquiryId, action: 'CREATE' } });
+    expect(audit).toBeTruthy();
+    expect(audit.userId).toBeNull();
   });
 
   it('POST /leads/inbound with a payload missing the required "phone" path returns the specific 400 message', async () => {

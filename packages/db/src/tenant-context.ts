@@ -78,7 +78,17 @@ export function runWithTenant<T>(store: TenantStore, fn: () => T): T {
         'portalApplicantId/portalBrokerId in the new store.',
     );
   }
-  return tenantContext.run(store, fn);
+  // Same company: keep the request's actor and IP when the new store
+  // doesn't set them. Nearly every service wraps a bare
+  // runWithTenant({ companyId }), which until v0.7.1 shadowed the
+  // interceptor's store and left audit rows with no user_id or IP. A
+  // different company (a system job looping over companies) inherits
+  // nothing.
+  const effective =
+    existing && existing.companyId === store.companyId
+      ? { ...store, userId: store.userId ?? existing.userId, ipAddress: store.ipAddress ?? existing.ipAddress }
+      : store;
+  return tenantContext.run(effective, fn);
 }
 
 /**

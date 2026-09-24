@@ -393,7 +393,7 @@ export async function withTenantTx<T>(
           `(outer=${existing.companyId}, inner=${companyId})`,
       );
     }
-    return fn(existing.tx);
+    return await fn(existing.tx);
   }
 
   // Picks up the ambient portal scope (if any) from the ENCLOSING
@@ -408,7 +408,12 @@ export async function withTenantTx<T>(
   return prisma.$transaction(
     async (tx) => {
       await setTenantOnTx(tx, companyId, ambientStore?.portalApplicantId, ambientStore?.portalBrokerId);
-      return tenantTxContext.run({ tx, companyId }, () => fn(tx));
+      // `await` inside run() is load-bearing. A Prisma query is a lazy
+      // thenable: a callback like `(tx) => tx.model.create(...)` returns it
+      // un-run, and without the await it only executed after run() had
+      // exited — so the audit extension found no transaction in context and
+      // wrote no audit row (53 call sites, until v0.7.1).
+      return tenantTxContext.run({ tx, companyId }, async () => await fn(tx));
     },
     { timeout: options?.timeout ?? 10_000, maxWait: options?.maxWait ?? 10_000 },
   );
