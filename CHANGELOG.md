@@ -36,9 +36,15 @@ environment variable, no deploy-script change.
 ### Still missing (tracked in docs/todo.md)
 
 - An UPDATE row records the new values only, not the old ones.
-- Bulk writes and upserts on audited records write no row. That includes
-  changing a role's permissions, commission slabs, a broker's primary
-  bank account, and some bulk inquiry and user updates.
+- Bulk writes and upserts on audited records write no row: 14 places in
+  the code, listed in docs/todo.md. **Changing a role's permissions
+  (creating a role with permissions, editing them, deleting a role) is
+  not audited.** Nor are: replacing a broker commission rule's slabs,
+  setting a broker's primary bank account, moving inquiries to another
+  stage when a lead stage is retired, re-pointing inquiries when
+  applicants are merged, and creating a floor as a side effect of unit
+  create or import. (The two bulk user updates in sign-in and password
+  flows write their own explicit audit rows.)
 - The audit log is protected by the application, not by the database: a
   database user with write access could still alter or delete rows.
 

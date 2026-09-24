@@ -24,12 +24,19 @@ whether updateMany/upsert get the same treatment (next entry).
 
 **What:** the audit extension hooks `create`, `update` and `delete` only.
 14 call sites in `apps/api/src` write audited models through other
-operations and leave no row: `rolePermission.createMany`/`deleteMany`
-(changing a role's permissions, 2 each), `brokerCommissionSlab.createMany`
-(2) and `deleteMany` (1), `brokerBankDetail.updateMany` (1),
-`floor.upsert` (2), `inquiry.updateMany` (2), `user.updateMany` (2).
-Some of these have their own explicit audit rows (the auth events);
-role-permission changes do not.
+operations and leave no row:
+`roles/roles.service.ts:70,110,112,146` (`rolePermission.createMany`/
+`deleteMany`: creating, editing and deleting a role's permissions),
+`brokers/broker-commission-rule.service.ts:79,117,118`
+(`brokerCommissionSlab.createMany`/`deleteMany`),
+`brokers/broker.service.ts:118` (`brokerBankDetail.updateMany`),
+`inventory/unit.service.ts:239` and `inventory/import-export.service.ts:225`
+(`floor.upsert`), `masters/lead-stage/lead-stage.service.ts:170` and
+`presales/applicant.service.ts:348` (`inquiry.updateMany`),
+`auth/auth.service.ts:336` and `portal-auth/portal-auth.service.ts:466`
+(`user.updateMany`). The two `user.updateMany` calls are in the
+sign-in/password flows, which write their own explicit audit rows;
+role-permission changes have none.
 
 **Why deferred:** out of v0.7.1's scope, which was the rows the existing
 hooks were meant to write.
