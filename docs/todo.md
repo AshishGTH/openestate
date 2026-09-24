@@ -504,15 +504,6 @@ failures there look like application bugs. Start `oe-test-pg` and
 it; the repo itself uses no containers (see CLAUDE.md), so this is a
 machine setup issue, not a repo one.
 
-## `docs/plans/uploaded-documents-plan.md` still uses the old version numbers
-
-The release sequence moved (CLAUDE.md, "Release sequence moved: v0.7.0 is
-the admin 2FA reset"): Aadhaar guard + booking custom fields is now v0.8.0,
-deploy plumbing v0.9.0, documents v1.0.0, and the deferred drop presumably
-v1.1.0. The plan doc names its releases about 30 times and was not
-renumbered in v0.7.0. Renumber from the highest version down so no two
-collide, and add a note at the top.
-
 ## Test-infra flakiness from `syncLeadStages`' unscoped scan — timeboxed, root cause not fixed
 
 **Honest root cause, stated plainly**: `syncLeadStages` (`packages/db/prisma/
