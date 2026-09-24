@@ -158,7 +158,7 @@ commission summaries, and more — every report exports to CSV.
 
 ## What OpenEstate deliberately does not do (yet)
 
-Honesty matters more than a feature list. As of v0.7.0:
+Honesty matters more than a feature list. As of v0.7.1:
 - No native mobile app (the portals are mobile-web, not App Store apps).
 - No built-in accounting/GL beyond the receivables ledger — it's not a
   full accounting system; export to your accountant's tool.
@@ -201,6 +201,13 @@ limitation of the current build, not a bug you'll hit by accident:
   Unit-level custom field has no form to fill it in on today — there's
   no single-unit edit screen to hang one on yet (units are created via
   Bulk-Generate or CSV import, not one at a time).
+- **The audit log is incomplete.** From v0.7.1, create, update and delete
+  actions on audited records are recorded with the acting user and IP, and
+  a failed audit write fails the action. Before v0.7.1 most of them were
+  not recorded at all, and that history can't be recovered. Still missing:
+  an UPDATE row shows the new values only, not the old ones; changing a
+  role's permissions, and a few other bulk changes, write no row; and the
+  log is protected by the application, not the database.
 - **`Project.isActive` has no enforced effect anywhere.** It's shown as
   a read-only column and set at creation, but nothing — not
   available-unit lookups, not reports, not the portal — reads it.
