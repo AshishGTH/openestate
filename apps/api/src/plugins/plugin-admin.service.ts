@@ -160,6 +160,7 @@ export class PluginAdminService {
           fieldType: seed.fieldType as CustomFieldType,
           isRequired: seed.isRequired,
           options: seed.options,
+          allowsTwelveDigitValues: false,
           sortOrder: 0,
         });
       }
