@@ -129,6 +129,20 @@ commission summaries, and more — every report exports to CSV.
 - **Custom fields** on Applicants, Inquiries, and Projects, admin-configurable,
   no code required (Unit-level definitions can be created but not yet
   filled in — see "Known gaps" below).
+- **An Aadhaar safety net on custom fields.** OpenEstate does not collect
+  Aadhaar numbers. As a safety net against *accidental* entry, a custom field
+  named after Aadhaar is refused, and a custom-field value that looks like an
+  Aadhaar number is refused when saved; values already stored are shown
+  masked (last four digits) on detail screens and in the inquiries CSV
+  export. This is not a guarantee. About 1 in 10 random 12-digit numbers look
+  valid and are refused; a number with a typo, or written with other
+  separators, is not caught; and it checks custom-field values only, not
+  names, addresses, notes or other free text. Masking is on display and
+  export only: the raw value is still stored and is still in the API
+  response. A field that legitimately holds a 12-digit number, such as a bank
+  account, can be exempted by an admin. To see what is already stored, run
+  `sudo ./deploy/native/find-aadhaar-like-values.sh` (read-only; reports
+  field names and counts, never values).
 - **Terminology overrides** — rename "Unit" to "Product," "Booking" to
   "Order," and the whole app relabels itself. A proof-of-concept
   `generic-sales` plugin ships showing exactly how far this goes.

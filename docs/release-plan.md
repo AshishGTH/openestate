@@ -137,6 +137,10 @@ end. The feature-release estimate is unchanged from the original
 per-item sizing; only the harness now sits in front of it as a
 precondition instead of overlapping the first release.
 
+### v0.8.0 release gate: the Aadhaar guard needs a human check with real numbers
+
+The v0.8.0 tag waits for the human real-number check. If the check fails, fix the guard, re-run the check, and tag only after a pass. v0.8.0 does not ship without layer (b), the value check. Results are recorded as pass/fail only, never a digit.
+
 ## The `apps/web` test-harness gap
 
 ### The finding
