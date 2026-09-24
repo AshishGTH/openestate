@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { PrismaClient } from '@openestate/db';
 import { SYSTEM_PRISMA } from '../database/database.module';
-import { computeAgeingBucket, AGEING_BUCKETS, type Clock } from '@openestate/shared';
+import { computeAgeingBucket, AGEING_BUCKETS, maskAadhaarLike, type Clock } from '@openestate/shared';
 import { CLOCK } from '../common/clock.provider';
 import { TeamScopeService } from '../team-scope/team-scope.service';
 
@@ -395,7 +395,7 @@ export class ReportsService {
     scope: ReportScope,
     range: DateRange,
     projectId: string | undefined,
-    definitions: Array<{ entityType: string; key: string }>,
+    definitions: Array<{ entityType: string; key: string; allowsTwelveDigitValues?: boolean }>,
   ) {
     const createdAt = this.dateFilter(range);
     const flatten = (v: unknown): string => {
@@ -436,7 +436,10 @@ export class ReportsService {
           | Record<string, unknown>
           | null
           | undefined;
-        row.push(flatten(bag?.[def.key]));
+        // Aadhaar-like numbers leave the system masked (last four digits),
+        // unless the field is explicitly exempted. Deterrence, not prevention.
+        const cell = flatten(bag?.[def.key]);
+        row.push(def.allowsTwelveDigitValues ? cell : maskAadhaarLike(cell));
       }
       yield row;
     }

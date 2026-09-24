@@ -11,6 +11,7 @@
  *
  * Requires the compiled dist/ — see e2e-portal.test.ts for why.
  */
+import { aadhaarLike } from './helpers/aadhaar-like';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createRequire } from 'node:module';
 import request from 'supertest';
@@ -381,5 +382,40 @@ describeIf('e2e custom field values: validation, lifecycle, purge', () => {
     expect(res.text).toMatch(/inquiry\.Inquiry Note/);
     expect(res.text).toContain('applicant-side');
     expect(res.text).toContain('inquiry-side');
+  });
+
+  it('the CSV export masks an Aadhaar-like value to its last four digits, except in an exempted field', async () => {
+    const { agent, csrf, token } = await loginAgent();
+    const plainKey = `mask_plain_${TAG}`;
+    const exemptKey = `mask_exempt_${TAG}`;
+    for (const [key, label, exempt] of [[plainKey, 'Mask Plain', false], [exemptKey, 'Mask Exempt', true]] as const) {
+      await agent
+        .post('/api/v1/custom-fields')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-CSRF-Token', csrf)
+        .send({ entityType: 'INQUIRY', key, label, fieldType: 'TEXT', allowsTwelveDigitValues: exempt })
+        .expect(201);
+    }
+    const created = await agent
+      .post('/api/v1/inquiries')
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-CSRF-Token', csrf)
+      .send({ applicant: { name: 'Mask Applicant', primaryPhone: `9${String(Date.now() + 5).slice(-9)}`, alternatePhones: [] } })
+      .expect(201);
+    // Written straight to the row: the plain field would refuse this value through the API,
+    // which is exactly the state of data stored before the guard existed.
+    const stored = aadhaarLike();
+    await systemPrisma.inquiry.update({
+      where: { id: created.body.id },
+      data: { customFields: { [plainKey]: stored, [exemptKey]: stored } },
+    });
+
+    const res = await agent
+      .get('/api/v1/reports/presales/inquiries-export?format=csv')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+    const line = res.text.split(/\r?\n/).find((l: string) => l.includes(created.body.id))!;
+    expect(line).toContain(`XXXX XXXX ${stored.slice(8)}`);
+    expect(line.split(stored).length - 1).toBe(1); // only the exempt column carries the full number
   });
 });
