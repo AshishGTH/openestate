@@ -118,6 +118,13 @@ docs/           Docusaurus site: install, admin, API, plugin dev
 - Audit log: every create/update/delete on domain entities writes
   an immutable audit row (actor, entity, before/after diff, IP,
   timestamp). Financial and auth events always audited.
+  **Not yet fully true (note added 2026-09-24, v0.7.1):** v0.7.1 fixed
+  audit rows being silently dropped on 53 write paths, rows written
+  without an actor or IP, and failed audit writes reporting success.
+  Still open, tracked in docs/todo.md: UPDATE rows record after-values
+  only (before = null); audit_logs is not append-only at the database
+  level; writes through updateMany/createMany/deleteMany/upsert on
+  audited models (role permissions among them) write no audit row.
 - PII: encrypt PAN numbers at rest (AES-256-GCM, key from env);
   mask PAN/phone in list views and logs. NEVER store Aadhaar
   numbers. Structured logger (pino) with a redaction list.
@@ -7360,6 +7367,61 @@ force the interleaving — don't raise the request count and hope.** Size
 the barrier below the connection pool (here 4 of `connection_limit=5`), or
 a request waits for a connection instead of the lock and the barrier never
 fills.
+
+### v0.7.1 — audit rows silently dropped, written without an actor, or faked on failure
+
+Found during v0.8.0 work, when a test for the Aadhaar guard's exemption
+flag expected an UPDATE audit row and got none. Three separate defects,
+all in `packages/db`, none in any frozen financial file.
+
+- **Rows silently dropped.** `withTenantTx` ran its callback as
+  `tenantTxContext.run({ tx }, () => fn(tx))`. A Prisma query is a lazy
+  thenable, so `(tx) => tx.model.create(...)` returned it un-run; it
+  executed after `run()` had exited, the audit hook found no transaction
+  in context, and `if (!store?.tx) return;` skipped the row without a
+  word. 53 write call sites in 24 files used that form. Reproduced in
+  plain Node against the compiled app (`POST /custom-fields` → 201, 0
+  audit rows) as well as under vitest. Fixed in one place: `run(...,
+  async () => await fn(tx))`, and `return await` on the nested-reuse
+  branch.
+- **Rows without an actor.** 122 service-level `runWithTenant({
+  companyId })` calls replaced the interceptor's store, dropping userId
+  and IP, so nearly every audit row ever written had `user_id = NULL`,
+  bookings and receipts included. `runWithTenant` now fills userId and
+  ipAddress from the ambient store when the new store leaves them unset
+  and the company is the same. It runs after the portal guardrail, so it
+  can't widen or switch a portal scope; a different company inherits
+  nothing. `audit_logs.user_id` references `users(id)` and portal
+  sessions carry `sub = users.id`, so a portal actor always satisfies the
+  foreign key.
+- **Failed audit writes reported success.** The extension's `catch {}`
+  swallowed the audit INSERT's error, but Postgres had already aborted
+  the transaction, so Prisma's COMMIT became a silent rollback: when the
+  audited write was the last statement, the caller got the created row
+  back (a 201 with an id) for a write that was never saved. Measured
+  before the fix. The owner's first decision ("fail-closed, don't throw")
+  rested on the catch covering this; it didn't. Revised decision: any
+  error while writing the row is logged (model, action, id, error code,
+  never values) and rethrown. The no-transaction path stays log-only
+  (`docs/todo.md` asks whether anything still reaches it).
+
+Also: BigInt values serialize in the audit writer itself instead of
+depending on `main.ts`'s global patch (necessary once errors rethrow:
+test processes without the patch would otherwise fail writes), and the
+sanitizer redacts secrets at any depth while leaving `Date` and
+`Prisma.Decimal` whole.
+
+**Why no test caught it:** no test had ever asserted a row written by the
+audit extension. The audit assertions that existed all checked rows
+written explicitly through the system client (auth events, purges, reset
+links), plus RLS on `audit_logs`. The extension's own failure paths were
+both silent, and the rows that did exist (Inquiry, Booking) came from
+`async` callbacks, so the table looked populated.
+
+**Standing rule: a new write path to an audited model needs a test that
+asserts its audit row and actor through HTTP.** A passing write test says
+nothing about the audit row, and the audit extension gives no signal when
+it isn't writing one.
 
 ## graphify
 

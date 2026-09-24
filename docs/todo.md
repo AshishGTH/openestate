@@ -4,6 +4,95 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## HIGH PRIORITY: audit UPDATE rows record after-values only (before = null)
+
+**What:** the audit extension writes every UPDATE with `before = null` and
+`after = the request's data` (`packages/db/src/audit.extension.ts`,
+`auditOrThrow` for `update`). This holds for every audited model. An
+UPDATE row says what a field became, never what it was, which
+contradicts CLAUDE.md's security rule ("before/after diff").
+
+**Why deferred:** found during v0.8.0 work; the owner scheduled the fix
+as its own PR after v0.8.0. v0.7.1 fixed the rows that weren't written at
+all, which was the larger gap.
+
+**What unblocks it:** reading the row before the update inside the same
+transaction (one extra SELECT per audited update), plus a decision on
+whether updateMany/upsert get the same treatment (next entry).
+
+## Bulk writes and upserts on audited models write no audit row
+
+**What:** the audit extension hooks `create`, `update` and `delete` only.
+14 call sites in `apps/api/src` write audited models through other
+operations and leave no row: `rolePermission.createMany`/`deleteMany`
+(changing a role's permissions, 2 each), `brokerCommissionSlab.createMany`
+(2) and `deleteMany` (1), `brokerBankDetail.updateMany` (1),
+`floor.upsert` (2), `inquiry.updateMany` (2), `user.updateMany` (2).
+Some of these have their own explicit audit rows (the auth events);
+role-permission changes do not.
+
+**Why deferred:** out of v0.7.1's scope, which was the rows the existing
+hooks were meant to write.
+
+**What unblocks it:** deciding per operation what a row should hold
+(`createMany`/`updateMany` return counts, not rows), then either hooking
+them in the extension or writing explicit rows at those call sites.
+
+## `audit_logs` is not append-only at the database level
+
+**What:** CLAUDE.md calls audit rows "immutable", but `audit_logs` has no
+`forbid_financial_mutation`-style trigger and `openestate_app` holds
+UPDATE and DELETE on it. The application never updates or deletes audit
+rows, but nothing in the database stops it.
+
+**Why deferred:** owner decision (v0.7.1): tracked, not fixed in that PR.
+
+**What unblocks it:** a migration adding a trigger like the ledger's, plus
+the same maintenance escape hatch (`app.allow_financial_mutation`) for
+test teardown, which deletes audit rows today.
+
+## Does any production write still reach the audit extension's "no transaction in context" path?
+
+**What:** after v0.7.1, an audited write with no transaction in context
+is logged at error level (`[audit] no transaction in context: <model>
+<action> <id> was not audited`) but still succeeds without a row. The
+v0.7.1 fix removed the known cause (un-awaited queries in `withTenantTx`
+callbacks). Whether anything else still reaches this path is unknown.
+
+**Why deferred:** owner decision (v0.7.1): log-only for now.
+
+**What unblocks it:** watch for that log line on a real install (the
+journal) and in the CI and Playwright logs. If it never appears, make
+the path throw, the same as a failed audit write.
+
+## `prisma migrate diff` shows drift between the database and schema.prisma
+
+**What:** diffing a freshly migrated test database against
+`schema.prisma` produces three statements:
+
+```sql
+ALTER TABLE "bookings" DROP CONSTRAINT "bookings_source_inquiry_id_fkey";
+ALTER TABLE "portal_password_resets" DROP CONSTRAINT "portal_password_resets_created_by_id_fkey";
+ALTER INDEX "inquiry_disposition_history_company_id_inquiry_id_changed__idx"
+  RENAME TO "inquiry_disposition_history_company_id_inquiry_id_changed_a_idx";
+```
+
+The two foreign keys are deliberate: both columns follow the scalar-FK
+policy (a plain `@db.Uuid` column in the schema, the constraint added in
+the migration; CLAUDE.md Phase 4, "Relation policy"). Prisma can't see
+them, so it proposes dropping them. The index rename is Postgres
+truncating a 63+ character name differently from Prisma's own
+truncation. The practical risk: running `prisma migrate dev` would
+generate a migration that drops two real foreign keys, and anyone
+applying it without reading it would lose them.
+
+**Why deferred:** pre-existing, found during v0.8.0 work; not related to
+the change that found it.
+
+**What unblocks it:** deciding between declaring the relations in the
+schema (with `relationMode` or a back-relation) and documenting that
+`migrate dev` output must always be reviewed for these three lines.
+
 ## Verify on VM at next deployment
 
 Items deferred to real-hardware testing. **Status as of the v0.6.0
