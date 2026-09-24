@@ -7453,6 +7453,36 @@ the user. That is the verification the v0.7.1 release notes cite.
   shouldn't have: echoed by the pty into one tool output, and briefly as
   an argument to `grep` on the VM.
 
+### v0.8.0 (PR 1) — Aadhaar guard on custom fields
+
+- **A safety net against accidental storage, never described as blocking
+  Aadhaar storage.** Three layers: (a) a name check on custom-field key and
+  label (aadhaar/aadhar/आधार as substrings after NFKC folding; adhaar/adhar
+  as whole words only, so Dharavi and Hardware pass; `uid` deliberately not
+  blocked); (b) a value check on NEW or CHANGED staff writes to TEXT and
+  NUMBER values (12 digits, first digit 2-9, optional 4-4-4 grouping with
+  space or hyphen, valid Verhoeff), in `resolveValuesForWrite` rather than the
+  zod schema so a stored value re-sent unchanged never blocks an edit; (c) a
+  per-field `allows_twelve_digit_values` exemption, audited, refused on a
+  field named after Aadhaar. Layer (b) is what makes it worth shipping; the
+  v0.8.0 tag waits for a human real-number check (`docs/release-plan.md`).
+- **Machine-driven writes redact instead of reject** (inbound lead API,
+  plugin `ctx.leads.create`, the Excel importer): no one is there to read an
+  error, and losing the lead is worse than losing the number. They write
+  `[Aadhaar-like number removed]`.
+- **Masking is display and CSV export only.** The raw value is still stored
+  and still in the API response; docs say "masked", never "hidden".
+- **Measured, not assumed:** about 1 in 10 random 12-digit numbers starting
+  2-9 pass the check (tested), single-digit typos are not caught, and free
+  text outside custom-field values is unchecked (`docs/todo.md`).
+- **The scanner prints keys and counts, never values** and reaches a server
+  through `deploy/native/find-aadhaar-like-values.sh` (standalone; install,
+  upgrade, backup, restore and uninstall are untouched). `apps/api/scripts`
+  is in the release tree because `apps/api/package.json` has no `files`
+  allowlist for `pnpm deploy` to honour.
+- **Tests never contain a 12-digit literal**: valid values are computed with
+  Verhoeff, invalid ones are a valid value with its check digit changed.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

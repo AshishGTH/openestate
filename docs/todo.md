@@ -4,6 +4,21 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## Aadhaar guard covers custom-field values only — free text is unchecked
+
+v0.8.0 checks custom-field VALUES (staff writes) and redacts machine-written
+lead and import notes. Everything else that takes free text is unchecked, so a
+person can still type an Aadhaar number into: applicant name, address and
+alternate phones; follow-up notes; `dumpRemarks` on a disposition; ticket
+messages (staff and portal); and the inbound-lead `name` and `email` fields.
+Extending the value check to these needs a decision per field about
+reject-versus-redact and about the false-positive cost on names and addresses,
+so it is a tracked item and not a quiet default.
+
+Also: the name check blocks आधार, which is a false positive for the ordinary
+Hindi word for "base" (आधार मूल्य). The error suggests मूल instead. Revisit
+only if a real user hits it often.
+
 ## HIGH PRIORITY: audit UPDATE rows record after-values only (before = null)
 
 **What:** the audit extension writes every UPDATE with `before = null` and
