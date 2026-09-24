@@ -19,3 +19,4 @@ export * from './portal';
 export * from './webhooks';
 export * from './seed-data';
 export * from './dto-utils';
+export * from './aadhaar-guard';
