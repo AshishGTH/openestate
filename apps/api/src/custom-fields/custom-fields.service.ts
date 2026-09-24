@@ -65,6 +65,8 @@ export class CustomFieldsService {
       fieldType: d.fieldType,
       isRequired: d.isRequired,
       options: d.options,
+      label: d.label,
+      allowsTwelveDigitValues: d.allowsTwelveDigitValues,
     }));
   }
 

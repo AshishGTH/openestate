@@ -310,19 +310,21 @@ model AuditLog {
 // ─── Custom Fields ─────────────────────────────────────────────
 
 model CustomFieldDefinition {
-  id           String   @id @default(uuid()) @db.Uuid
-  companyId    String   @map("company_id") @db.Uuid
-  entityType   String   @map("entity_type") @db.VarChar(100)
-  key          String   @db.VarChar(100)
-  label        String   @db.VarChar(255)
-  fieldType    String   @map("field_type") @db.VarChar(20)
-  options      Json?
-  defaultValue String?  @map("default_value") @db.VarChar(500)
-  isRequired   Boolean  @default(false) @map("is_required")
-  sortOrder    Int      @default(0) @map("sort_order")
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  id                      String   @id @default(uuid()) @db.Uuid
+  companyId               String   @map("company_id") @db.Uuid
+  entityType              String   @map("entity_type") @db.VarChar(100)
+  key                     String   @db.VarChar(100)
+  label                   String   @db.VarChar(255)
+  fieldType               String   @map("field_type") @db.VarChar(20)
+  options                 Json?
+  defaultValue            String?  @map("default_value") @db.VarChar(500)
+  isRequired              Boolean  @default(false) @map("is_required")
+  /// v0.8.0: skips the Aadhaar value guard for this field (layer c)
+  allowsTwelveDigitValues Boolean  @default(false) @map("allows_twelve_digit_values")
+  sortOrder               Int      @default(0) @map("sort_order")
+  isActive                Boolean  @default(true) @map("is_active")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
 
   company Company @relation(fields: [companyId], references: [id])
 

@@ -75,6 +75,10 @@ export interface CustomFieldDefinitionLike {
   fieldType: string;
   isRequired: boolean;
   options: unknown;
+  /** Used in error messages; falls back to `key`. */
+  label?: string;
+  /** Layer (c): skip the Aadhaar value guard for this field. */
+  allowsTwelveDigitValues?: boolean;
 }
 
 /**
@@ -173,6 +177,8 @@ export const createCustomFieldSchema = z
     isRequired: z.boolean().default(false),
     options: z.array(z.string().max(255)).optional(),
     defaultValue: z.string().max(500).optional(),
+    // v0.8.0 layer (c): skip the Aadhaar value guard for this field.
+    allowsTwelveDigitValues: z.boolean().default(false),
     sortOrder: z.number().int().min(0).default(0),
   })
   .strict();
@@ -185,6 +191,7 @@ export const updateCustomFieldSchema = z
     isRequired: z.boolean().optional(),
     options: z.array(z.string().max(255)).optional(),
     defaultValue: z.string().max(500).optional(),
+    allowsTwelveDigitValues: z.boolean().optional(),
     sortOrder: z.number().int().min(0).optional(),
   })
   .strict();
