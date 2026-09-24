@@ -169,13 +169,18 @@ async function writeAuditRow(
   after: unknown,
 ): Promise<void> {
   const store = tenantTxContext.getStore();
-  if (!store?.tx) return;
+  if (!store?.tx) {
+    // Log-only for now (docs/todo.md tracks whether this should throw).
+    // Names the row, never its values.
+    console.error(`[audit] no transaction in context: ${entityType} ${action} ${entityId} was not audited`);
+    return;
+  }
 
   const companyId = getCurrentCompanyId() ?? null;
   const userId = getCurrentUserId() ?? null;
   const ipAddress = getCurrentIpAddress() ?? null;
-  const beforeJson = before ? JSON.stringify(before) : null;
-  const afterJson = after ? JSON.stringify(after) : null;
+  const beforeJson = before ? toJson(before) : null;
+  const afterJson = after ? toJson(after) : null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (store.tx as any).$executeRaw`
@@ -194,6 +199,40 @@ async function writeAuditRow(
     )`;
 }
 
+// BigInt money values must not depend on main.ts's global
+// BigInt.prototype.toJSON patch — without it JSON.stringify throws.
+function toJson(value: unknown): string {
+  return JSON.stringify(value, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
+}
+
+/**
+ * Writes the audit row, or fails the write. Fail-closed: once the audit
+ * INSERT has failed, Postgres has aborted the transaction and the business
+ * write can't commit anyway — swallowing the error (as this code did
+ * until v0.7.1) made Prisma's COMMIT a silent rollback, so the caller got
+ * a success response, row and all, for a write that was never saved.
+ * Rethrowing makes that failure visible. Any error in here — building
+ * the diff or the INSERT — is rethrown: no write commits without its row.
+ * The log names the row (model, action, id) and the error's code, never
+ * field values: a Postgres error message can echo them.
+ */
+async function auditOrThrow(
+  model: string,
+  action: 'CREATE' | 'UPDATE' | 'DELETE',
+  result: unknown,
+  diff: () => [unknown, unknown],
+): Promise<void> {
+  const entityId = extractId(result);
+  try {
+    const [before, after] = diff();
+    await writeAuditRow(model, entityId, action, before, after);
+  } catch (err) {
+    const e = err as { code?: string; name?: string };
+    console.error(`[audit] failed to write ${model} ${action} ${entityId} (${e?.code ?? e?.name ?? 'error'}); the write is rolled back`);
+    throw err;
+  }
+}
+
 /**
  * Prisma extension that writes an immutable audit row for every
  * create/update/delete on audited domain models.
@@ -201,9 +240,8 @@ async function writeAuditRow(
  * Audit rows are written via the same transaction client stored in
  * `tenantTxContext` — guaranteeing atomicity with the original
  * operation and inheriting the RLS session variable. If no tenant
- * transaction is active (e.g. system operations via the unscoped
- * client), the audit write is skipped here; system services are
- * responsible for writing their own audit rows via the system client.
+ * transaction is active the audit write is skipped and logged; system
+ * services write their own audit rows via the system client.
  */
 export function auditExtension() {
   return Prisma.defineExtension({
@@ -212,17 +250,7 @@ export function auditExtension() {
         async create({ model, args, query }) {
           const result = await query(args);
           if (model && AUDITED_MODELS.has(model)) {
-            try {
-              await writeAuditRow(
-                model,
-                extractId(result),
-                'CREATE',
-                null,
-                sanitize(result),
-              );
-            } catch {
-              // audit failure must not break the main operation
-            }
+            await auditOrThrow(model, 'CREATE', result, () => [null, sanitize(result)]);
           }
           return result;
         },
@@ -230,17 +258,7 @@ export function auditExtension() {
         async update({ model, args, query }) {
           const result = await query(args);
           if (model && AUDITED_MODELS.has(model)) {
-            try {
-              await writeAuditRow(
-                model,
-                extractId(result),
-                'UPDATE',
-                null,
-                sanitize(args.data),
-              );
-            } catch {
-              // audit failure must not break the main operation
-            }
+            await auditOrThrow(model, 'UPDATE', result, () => [null, sanitize(args.data)]);
           }
           return result;
         },
@@ -248,17 +266,7 @@ export function auditExtension() {
         async delete({ model, args, query }) {
           const result = await query(args);
           if (model && AUDITED_MODELS.has(model)) {
-            try {
-              await writeAuditRow(
-                model,
-                extractId(result),
-                'DELETE',
-                sanitize(result),
-                null,
-              );
-            } catch {
-              // audit failure must not break the main operation
-            }
+            await auditOrThrow(model, 'DELETE', result, () => [sanitize(result), null]);
           }
           return result;
         },
