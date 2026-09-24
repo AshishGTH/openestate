@@ -238,6 +238,15 @@ describeIf('Phase 6 e2e: broker portal through the full guard pipeline', () => {
       .set('X-CSRF-Token', sessionA.csrf)
       .expect(201);
     expect(approved.body.status).toBe('APPROVED');
+
+    // v0.7.1: a broker-portal write is audited under the broker's own
+    // portal user (users.id — what audit_logs.user_id references).
+    const brokerUser = await systemPrisma.user.findFirst({ where: { brokerId: brokerAId } });
+    const audit = await systemPrisma.auditLog.findFirst({
+      where: { entityType: 'BrokerNoc', entityId: nocAId, action: 'UPDATE' },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(audit?.userId).toBe(brokerUser.id);
   });
 
   it('broker documents over HTTP: a broker can list and download their own statement; an unrelated broker cannot download it', async () => {
