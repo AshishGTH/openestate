@@ -137,6 +137,18 @@ end. The feature-release estimate is unchanged from the original
 per-item sizing; only the harness now sits in front of it as a
 precondition instead of overlapping the first release.
 
+### v0.8.0 release gate: the Aadhaar guard needs a human check with real numbers
+
+The v0.8.0 tag waits for the human real-number check. If the check fails, fix the guard, re-run the check, and tag only after a pass. v0.8.0 does not ship without layer (b), the value check. Results are recorded as pass/fail only, never a digit.
+
+**Result: pass, 2026-09-25.** Done by the owner, by hand, in a browser on the verification VM, in the plain, spaced and hyphenated formats.
+
+A separate run earlier the same day, by Claude in Chrome with a made-up checksum-valid number, also saw all three formats refused. It exercised the same screens but used no real number, so it does not count toward this gate.
+
+### v0.8.0 scope: the Aadhaar guard only
+
+Owner decision, 2026-09-25: v0.8.0 ships the Aadhaar guard only. Booking custom fields (the `bookings.custom_fields` column, planned as v0.8.0 PR 2 in `docs/plans/uploaded-documents-plan.md`) move out of v0.8.0 and stay a planned item, not yet assigned to a release.
+
 ## The `apps/web` test-harness gap
 
 ### The finding

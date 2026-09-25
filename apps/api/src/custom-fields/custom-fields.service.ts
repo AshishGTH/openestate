@@ -10,6 +10,10 @@ import {
   validateCustomFieldValues,
   supportsCustomFieldValues,
   CUSTOM_FIELD_VALUE_ENTITIES,
+  containsAadhaarKeyword,
+  aadhaarKeywordError,
+  isAadhaarLikeValue,
+  aadhaarValueError,
   type CustomFieldDefinitionLike,
 } from '@openestate/shared';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
@@ -65,6 +69,8 @@ export class CustomFieldsService {
       fieldType: d.fieldType,
       isRequired: d.isRequired,
       options: d.options,
+      label: d.label,
+      allowsTwelveDigitValues: d.allowsTwelveDigitValues,
     }));
   }
 
@@ -86,6 +92,14 @@ export class CustomFieldsService {
         `Custom fields are not supported for ${dto.entityType} yet. ` +
           `Supported entity types: ${CUSTOM_FIELD_VALUE_ENTITIES.join(', ')}.`,
       );
+    }
+
+    // Aadhaar guard, layer (a): runs here rather than in the controller so
+    // plugin-seeded fields (PluginAdminService) are covered too.
+    assertNoAadhaarKeyword(dto.key);
+    assertNoAadhaarKeyword(dto.label);
+    if (!dto.allowsTwelveDigitValues) {
+      assertNoAadhaarLikeDefinitionValues(dto.label, dto.options ?? [], dto.defaultValue);
     }
 
     const existing = await this.systemPrisma.customFieldDefinition.findFirst({
@@ -135,6 +149,29 @@ export class CustomFieldsService {
       throw new BadRequestException(
         'SELECT/MULTI_SELECT fields require at least one option. ' +
           'Deactivate the field instead if it is no longer in use.',
+      );
+    }
+
+    // Aadhaar guard. Only what this request CHANGES is checked: `key` is
+    // immutable and an unchanged label is left alone, so a field created
+    // before the guard (the VM has an `aadhaar_number` field) stays
+    // editable and can still be deactivated or purged.
+    const label = dto.label ?? existing.label;
+    if (dto.label !== undefined && dto.label !== existing.label) assertNoAadhaarKeyword(dto.label);
+    if (dto.allowsTwelveDigitValues === true && !existing.allowsTwelveDigitValues) {
+      const matched = containsAadhaarKeyword(existing.key) ?? containsAadhaarKeyword(label);
+      if (matched) {
+        throw new BadRequestException(
+          `A field whose name or label refers to Aadhaar (matched "${matched}") can't allow 12-digit values.`,
+        );
+      }
+    }
+    if (!(dto.allowsTwelveDigitValues ?? existing.allowsTwelveDigitValues)) {
+      const oldOptions = Array.isArray(existing.options) ? (existing.options as unknown[]) : [];
+      assertNoAadhaarLikeDefinitionValues(
+        label,
+        (dto.options ?? []).filter((o) => !oldOptions.includes(o)),
+        dto.defaultValue !== existing.defaultValue ? dto.defaultValue : undefined,
       );
     }
 
@@ -319,6 +356,24 @@ export class CustomFieldsService {
       }
     }
 
+    // Aadhaar guard, layer (b): its own pass over NEW or CHANGED incoming
+    // values only — never inside the zod schema, which sees the merged
+    // record. Edit forms (ProjectDetail) send every stored value back, so
+    // "incoming" alone would make a record that already holds a matching
+    // value impossible to edit; an unchanged value is skipped.
+    if (incoming) {
+      for (const def of definitions) {
+        if (def.allowsTwelveDigitValues) continue; // layer (c)
+        if (def.fieldType !== 'TEXT' && def.fieldType !== 'NUMBER') continue;
+        if (!(def.key in incoming)) continue;
+        const value = incoming[def.key];
+        if (JSON.stringify(value) === JSON.stringify(storedValues[def.key])) continue;
+        if (isAadhaarLikeValue(value)) {
+          throw new BadRequestException(aadhaarValueError(def.label ?? def.key));
+        }
+      }
+    }
+
     if (definitions.length === 0) {
       // Nothing to validate; hand back whatever was already there so a
       // save doesn't wipe it.
@@ -349,6 +404,21 @@ export class CustomFieldsService {
     }
 
     return { ...preserved, ...validated };
+  }
+}
+
+function assertNoAadhaarKeyword(text: string): void {
+  const matched = containsAadhaarKeyword(text);
+  if (matched) throw new BadRequestException(aadhaarKeywordError(matched));
+}
+
+/** Layer (b) on a definition's options and default value. */
+function assertNoAadhaarLikeDefinitionValues(label: string, options: unknown[], defaultValue: string | undefined): void {
+  if (options.some(isAadhaarLikeValue) || isAadhaarLikeValue(defaultValue)) {
+    throw new BadRequestException(
+      `${label}: an option or the default value looks like an Aadhaar number. ` +
+        `If this field legitimately holds 12-digit numbers, tick "Allow 12-digit values".`,
+    );
   }
 }
 

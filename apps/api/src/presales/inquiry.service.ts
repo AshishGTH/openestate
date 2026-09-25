@@ -11,6 +11,7 @@ import {
   normalizePhone,
   normalizeEmail,
   isFollowUpOverdue,
+  redactAadhaarLike,
   type Clock,
 } from '@openestate/shared';
 import type {
@@ -368,7 +369,10 @@ export class InquiryService {
             applicantId,
             projectId: lead.projectId,
             stageId: resolvedStageId,
-            customFields: lead.note ? { leadNote: lead.note } : undefined,
+            // Aadhaar guard: machine-written notes (the inbound lead API and
+            // plugins' ctx.leads.create both land here) are REDACTED, never
+            // rejected — there is no one to show an error to.
+            customFields: lead.note ? { leadNote: redactAadhaarLike(lead.note) } : undefined,
           },
         });
         // No human actor for machine-driven intake — same reasoning as

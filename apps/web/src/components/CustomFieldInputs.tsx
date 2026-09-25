@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { supportsCustomFieldValues } from '@openestate/shared';
+import { supportsCustomFieldValues, maskAadhaarLike } from '@openestate/shared';
 import { api } from '../lib/api';
 
 export interface CustomFieldDefinition {
@@ -12,6 +12,7 @@ export interface CustomFieldDefinition {
   options: string[] | null;
   isActive: boolean;
   sortOrder: number;
+  allowsTwelveDigitValues?: boolean;
 }
 
 export type CustomFieldValues = Record<string, unknown>;
@@ -187,6 +188,16 @@ export default function CustomFieldInputs({ definitions, values, onChange }: Pro
   );
 }
 
+/**
+ * Display text with any Aadhaar-like number masked to its last four digits.
+ * A DISPLAY measure only: the raw value is still stored and still present
+ * in the API response.
+ */
+function maskedText(value: unknown): string {
+  const text = formatCustomFieldValue(value);
+  return typeof value === 'string' || typeof value === 'number' ? maskAadhaarLike(text) : text;
+}
+
 /** Read-only display of stored values, used on detail screens. */
 export function CustomFieldDisplay({
   definitions,
@@ -212,7 +223,9 @@ export function CustomFieldDisplay({
         {definitions.map((def) => (
           <div key={def.id} className="flex justify-between gap-3">
             <dt className="text-slate-500">{def.label}</dt>
-            <dd className="text-slate-800">{formatCustomFieldValue(stored[def.key])}</dd>
+            <dd className="text-slate-800">
+              {def.allowsTwelveDigitValues ? formatCustomFieldValue(stored[def.key]) : maskedText(stored[def.key])}
+            </dd>
           </div>
         ))}
         {orphaned.map((k) => (
@@ -220,7 +233,7 @@ export function CustomFieldDisplay({
             <dt className="text-slate-400" title="No active custom field is defined for this key">
               {k} <span className="text-xs">(inactive)</span>
             </dt>
-            <dd className="text-slate-500">{formatCustomFieldValue(stored[k])}</dd>
+            <dd className="text-slate-500">{maskedText(stored[k])}</dd>
           </div>
         ))}
       </dl>
