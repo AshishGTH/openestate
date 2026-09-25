@@ -4,6 +4,30 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## HIGH PRIORITY: fix the two flaky test races soon — flaky CI hides real failures
+
+Two known races make CI fail intermittently on unrelated changes. Each one
+teaches people to press "re-run" instead of reading the failure, which is
+how a real failure eventually gets waved through. Fix both soon, not
+"someday".
+
+1. **`syncLeadStages`' unscoped scan (`packages/db`).** Two test files
+   running it at the same moment can both seed the same company, and the
+   second insert fails `lead_stages (company_id, name)` with P2002. It
+   failed the v0.8.0 release PR's Integration job on 2026-09-25 and passed
+   on a re-run. Candidate fixes are in "Test-infra flakiness from
+   `syncLeadStages`' unscoped scan" below.
+2. **`rapid-reload-session.spec.ts`'s concurrent-refresh test
+   (`apps/e2e`).** "Two concurrent refreshes sharing one cookie do not end
+   the session" failed once in a local full Playwright run on 2026-09-25
+   and passed on the next. It's the refresh-rotation race described in the
+   E2E flakiness entry below (`REFRESH_REUSE_GRACE_SECONDS`).
+
+Done means: each race is fixed at its cause (not by raising a timeout or
+adding a retry), and the fix is shown by running the test repeatedly
+against the unfixed code first, so it fails reliably, then against the
+fix (CLAUDE.md, "a concurrency test must force its interleaving").
+
 ## Aadhaar guard covers custom-field values only — free text is unchecked
 
 v0.8.0 checks custom-field VALUES (staff writes) and redacts machine-written
