@@ -5,6 +5,15 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-25
+
+A safety net against accidentally storing Aadhaar numbers in custom fields.
+It is deterrence, not prevention, and its limits are listed below. One
+migration (a column with a default, metadata-only); no new environment
+variable; no change to install, upgrade, backup, restore or uninstall. One
+new standalone, read-only script. Booking custom fields, once planned for
+this release, are not in it.
+
 ### Added
 
 - **Aadhaar safety net on custom fields.** OpenEstate does not collect
