@@ -10,7 +10,7 @@ import { login, controlAfterLabel } from '../fixtures/actions';
 // flow, and InquiryDetail's stage picker actually persisting a change.
 
 test('Lead Stages admin: seeded pipeline, default flip, occupied-stage deactivate requires reassignment, and the InquiryDetail picker persists', async ({ page }) => {
-  const fixture = readFixture('mastersCrud');
+  const fixture = readFixture('leadStage');
   await login(page, fixture);
 
   await page.goto('/admin/lead-stages');

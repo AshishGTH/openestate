@@ -23,6 +23,11 @@ export default async function globalSetup() {
   const fixtures = {
     authTwoFactor: await seedE2eFixture(DATABASE_URL_SYSTEM, { forcePasswordChange: true }),
     mastersCrud: await seedE2eFixture(DATABASE_URL_SYSTEM),
+    // Its own company: lead-stage.spec.ts briefly makes a new stage the
+    // company-wide default and expects exactly one inquiry in it. On the
+    // shared mastersCrud company, any spec creating an inquiry in parallel
+    // could land in that stage too.
+    leadStage: await seedE2eFixture(DATABASE_URL_SYSTEM),
     chequeBounce: await seedE2eFixture(DATABASE_URL_SYSTEM),
     plcBooking: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPricingMasters: true }),
     ticketReply: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
