@@ -12,6 +12,9 @@ decisions only (below); otherwise the design is revision 4's.
   numbering, not the numbering in force when they were written.
 - **v0.8.0 is two PRs:** PR 1 is the Aadhaar guard only; PR 2 is booking
   custom fields.
+  **Superseded 2026-09-25 (owner decision):** v0.8.0 ships the Aadhaar
+  guard only. Booking custom fields are still planned but no longer in
+  v0.8.0 (`docs/release-plan.md`, "v0.8.0 scope").
 - **Layer (a) spelling rule changed by owner decision (2026-09-24):**
   substring match on the stripped string for `aadhaar`, `aadhar`, `आधार`;
   whole-word match only for `adhaar` and `adhar`. NFKC normalisation, plus
