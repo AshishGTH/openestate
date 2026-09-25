@@ -5,6 +5,7 @@ import type { E2eFixture } from './seed';
 interface AllFixtures {
   authTwoFactor: E2eFixture;
   mastersCrud: E2eFixture;
+  leadStage: E2eFixture;
   chequeBounce: E2eFixture;
   plcBooking: E2eFixture;
   ticketReply: E2eFixture;
