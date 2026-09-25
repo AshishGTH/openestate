@@ -7483,6 +7483,25 @@ the user. That is the verification the v0.7.1 release notes cite.
 - **Tests never contain a 12-digit literal**: valid values are computed with
   Verhoeff, invalid ones are a valid value with its check digit changed.
 
+### v0.8.0 — real-number release gate passed; scope narrowed to the guard
+
+- **Human real-number check: pass, 2026-09-25.** Done by the owner, by
+  hand, in a browser on the verification VM (192.168.1.20), in the plain,
+  spaced and hyphenated formats. Recorded as pass only: no digits, no count
+  of numbers.
+- **Not counted toward the gate:** earlier the same day, Claude in Chrome
+  ran the same screens with a made-up checksum-valid number; all three
+  formats were refused with the Aadhaar message and nothing was saved. It
+  used no real number, so it proves the wiring, not conformance with real
+  numbers.
+- **Before either run, the logging path was checked on the VM** with a
+  computed synthetic value: a rejected value reached none of the API
+  journal, the nginx logs, the PostgreSQL log or `audit_logs`.
+- **Owner decision: v0.8.0 ships the Aadhaar guard only.** Booking custom
+  fields (`bookings.custom_fields`, planned as v0.8.0 PR 2) move out of
+  v0.8.0 and stay a planned item with no release assigned
+  (`docs/release-plan.md`).
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
