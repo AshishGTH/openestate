@@ -7502,6 +7502,15 @@ the user. That is the verification the v0.7.1 release notes cite.
   v0.8.0 and stay a planned item with no release assigned
   (`docs/release-plan.md`).
 
+### v0.8.0 released — the Aadhaar guard only
+
+- **Cut from master `3b159c6` (PR #55 squash-merged) on 2026-09-25**, the
+  same way as v0.7.1: version 0.7.1 → 0.8.0 in the 11 workspace
+  `package.json` files, a dated `[0.8.0]` CHANGELOG entry, release notes
+  (`docs/releases/v0.8.0-release-notes.md`) that call the guard deterrence
+  and list its limits, and the current-status lines in README,
+  CONTRIBUTING and the docs site. Booking custom fields are not in it.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

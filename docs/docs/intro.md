@@ -11,12 +11,13 @@ pre-sales lead management, post-sales unit/installment/receipt management, a
 customer portal, and a broker portal. Its plugin system lets other verticals
 adapt it without forking core code.
 
-As of v0.7.1, the core sales funnel — auth/RBAC, multi-tenancy, inventory
+As of v0.8.0, the core sales funnel — auth/RBAC, multi-tenancy, inventory
 (unit-based and plotted/farmhouse land sales), a configurable lead-stage
 pipeline, manager-hierarchy-scoped lead visibility, pre-sales (including an
 expanded reporting suite), the post-sales ledger, brokers/commissions, both
 portals, plugins, webhooks, and custom fields — is built and exercised end
-to end. v0.7.1 is a security fix to the audit log — most create, update
+to end. v0.8.0 adds a safety net against accidentally storing Aadhaar
+numbers in custom fields — deterrence, not prevention; v0.7.1 is a security fix to the audit log — most create, update
 and delete actions had never been recorded, and rows had no user or IP
 address; v0.7.0 lets an admin clear a user's two-factor authentication —
 staff, portal, or a locked-out sole admin via the break-glass CLI; v0.6.1
