@@ -26,14 +26,13 @@ export type CustomFieldEntity = (typeof CUSTOM_FIELD_ENTITIES)[number];
  * i.e. the ones with a `custom_fields` JSONB column and server-side
  * validation wired into their create/update paths.
  *
- * BOOKING is in CUSTOM_FIELD_ENTITIES but deliberately NOT here: giving
- * it values means modifying BookingService, which CLAUDE.md freezes
- * ("don't modify without asking"). Rather than let an admin define a
- * BOOKING field that silently does nothing — the exact bug this release
- * exists to close — definition creation for an unsupported entity is
- * rejected at the API boundary and the admin UI marks it unsupported.
- * See docs/todo.md: it needs an explicit frozen-service exception when
- * someone actually asks for it.
+ * BOOKING is in CUSTOM_FIELD_ENTITIES but not here yet: `bookings` has no
+ * `custom_fields` column. It is planned for v0.8.0 PR 2
+ * (docs/plans/uploaded-documents-plan.md §2f), which adds the column and
+ * writes it from BookingController without editing BookingService. Until
+ * then, rather than let an admin define a BOOKING field that silently does
+ * nothing, definition creation for an unsupported entity is rejected at
+ * the API boundary and the admin UI marks it unsupported.
  *
  * This list is the single source of truth for both halves of that check,
  * so the API and the UI can never drift apart on which types work.
@@ -76,6 +75,10 @@ export interface CustomFieldDefinitionLike {
   fieldType: string;
   isRequired: boolean;
   options: unknown;
+  /** Used in error messages; falls back to `key`. */
+  label?: string;
+  /** Layer (c): skip the Aadhaar value guard for this field. */
+  allowsTwelveDigitValues?: boolean;
 }
 
 /**
@@ -174,6 +177,8 @@ export const createCustomFieldSchema = z
     isRequired: z.boolean().default(false),
     options: z.array(z.string().max(255)).optional(),
     defaultValue: z.string().max(500).optional(),
+    // v0.8.0 layer (c): skip the Aadhaar value guard for this field.
+    allowsTwelveDigitValues: z.boolean().default(false),
     sortOrder: z.number().int().min(0).default(0),
   })
   .strict();
@@ -186,6 +191,7 @@ export const updateCustomFieldSchema = z
     isRequired: z.boolean().optional(),
     options: z.array(z.string().max(255)).optional(),
     defaultValue: z.string().max(500).optional(),
+    allowsTwelveDigitValues: z.boolean().optional(),
     sortOrder: z.number().int().min(0).optional(),
   })
   .strict();

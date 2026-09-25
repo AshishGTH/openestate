@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { PrismaClient } from '@openestate/db';
 import type { Plugin, PluginConfigField } from '@openestate/plugin-sdk';
-import type { CustomFieldEntity, CustomFieldType } from '@openestate/shared';
+import { aadhaarKeywordError, containsAadhaarKeyword, type CustomFieldEntity, type CustomFieldType } from '@openestate/shared';
 import { SYSTEM_PRISMA } from '../database/database.module';
 import { PluginRegistryService } from './plugin-registry.service';
 import { PluginRuntimeService } from './plugin-runtime.service';
@@ -106,6 +106,20 @@ export class PluginAdminService {
     const existing = await this.systemPrisma.pluginInstallation.findUnique({ where: { companyId_pluginId: { companyId, pluginId } } });
     if (existing) throw new ConflictException(`Plugin "${pluginId}" is already installed`);
 
+    // Aadhaar guard, layer (a): check every custom field this plugin would
+    // seed BEFORE anything is written. CustomFieldsService.create() refuses
+    // such a name too, but by the time install() reaches it the installation
+    // row and the terminology/module changes are already saved — a rejection
+    // there would leave a half-installed plugin.
+    for (const seed of plugin.hooks.customFieldSeeds ?? []) {
+      const matched = containsAadhaarKeyword(seed.key) ?? containsAadhaarKeyword(seed.label);
+      if (matched) {
+        throw new BadRequestException(
+          `Plugin "${pluginId}" can't be installed: it declares a custom field "${seed.key}". ${aadhaarKeywordError(matched)}`,
+        );
+      }
+    }
+
     const installation = await this.systemPrisma.pluginInstallation.create({
       data: { companyId, pluginId, isEnabled: false, installedById: actorId },
     });
@@ -160,6 +174,7 @@ export class PluginAdminService {
           fieldType: seed.fieldType as CustomFieldType,
           isRequired: seed.isRequired,
           options: seed.options,
+          allowsTwelveDigitValues: false,
           sortOrder: 0,
         });
       }

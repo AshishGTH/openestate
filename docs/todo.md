@@ -4,6 +4,21 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## Aadhaar guard covers custom-field values only — free text is unchecked
+
+v0.8.0 checks custom-field VALUES (staff writes) and redacts machine-written
+lead and import notes. Everything else that takes free text is unchecked, so a
+person can still type an Aadhaar number into: applicant name, address and
+alternate phones; follow-up notes; `dumpRemarks` on a disposition; ticket
+messages (staff and portal); and the inbound-lead `name` and `email` fields.
+Extending the value check to these needs a decision per field about
+reject-versus-redact and about the false-positive cost on names and addresses,
+so it is a tracked item and not a quiet default.
+
+Also: the name check blocks आधार, which is a false positive for the ordinary
+Hindi word for "base" (आधार मूल्य). The error suggests मूल instead. Revisit
+only if a real user hits it often.
+
 ## HIGH PRIORITY: audit UPDATE rows record after-values only (before = null)
 
 **What:** the audit extension writes every UPDATE with `before = null` and
@@ -503,15 +518,6 @@ failures there look like application bugs. Start `oe-test-pg` and
 `oe-test-redis` explicitly. Either rename the manual pair's ports or delete
 it; the repo itself uses no containers (see CLAUDE.md), so this is a
 machine setup issue, not a repo one.
-
-## `docs/plans/uploaded-documents-plan.md` still uses the old version numbers
-
-The release sequence moved (CLAUDE.md, "Release sequence moved: v0.7.0 is
-the admin 2FA reset"): Aadhaar guard + booking custom fields is now v0.8.0,
-deploy plumbing v0.9.0, documents v1.0.0, and the deferred drop presumably
-v1.1.0. The plan doc names its releases about 30 times and was not
-renumbered in v0.7.0. Renumber from the highest version down so no two
-collide, and add a note at the top.
 
 ## Test-infra flakiness from `syncLeadStages`' unscoped scan — timeboxed, root cause not fixed
 

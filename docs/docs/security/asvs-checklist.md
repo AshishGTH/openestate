@@ -190,8 +190,15 @@ work — read that file for the full reasoning behind any entry here.
   this codebase specifically handles: PAN (AES-256-GCM at rest, masked in
   list views/logs — as of this phase, both `Broker.pan*` **and**
   `Applicant.pan*`, closing a retrofit gap open since Phase 5) and phone
-  numbers (masked in list views). Aadhaar numbers are never collected at
-  all, by explicit design rule.
+  numbers (masked in list views). Aadhaar numbers are not collected: no
+  field for one exists, and custom fields carry a safety net against
+  *accidental* storage (a name check, and a value check on staff writes with
+  redaction on machine-written notes). **Partial**, not a guarantee: about 1
+  in 10 random 12-digit numbers look valid and are refused, a number with a
+  typo or other separators is not caught, and free text outside custom-field
+  values (names, addresses, notes, messages) is not checked. Existing
+  values are masked on display and in CSV export only; the raw value is
+  still stored and returned by the API.
 - **V8.3 Sensitive private data** — Implemented for encryption-at-rest key
   hygiene specifically: PAN, TOTP, and plugin-secret encryption each use
   their **own** key (never reused across domains — Phase 1's stated

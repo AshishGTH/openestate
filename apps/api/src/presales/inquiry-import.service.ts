@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { withTenantTx, runWithTenant } from '@openestate/db';
 import { TENANT_PRISMA } from '../database/database.module';
-import { importInquiryRowSchema, normalizePhone, normalizeEmail } from '@openestate/shared';
+import { importInquiryRowSchema, normalizePhone, normalizeEmail, redactAadhaarLike } from '@openestate/shared';
 import * as ExcelJS from 'exceljs';
 import { AssignmentService } from './assignment.service';
 import { LeadStageTransitionService } from './lead-stage-transition.service';
@@ -221,7 +221,9 @@ export class InquiryImportService {
               budgetMinPaise: data.budgetMinPaise != null ? BigInt(data.budgetMinPaise) : null,
               budgetMaxPaise: data.budgetMaxPaise != null ? BigInt(data.budgetMaxPaise) : null,
               stageId: resolvedStageId,
-              customFields: data.notes ? { importNotes: data.notes } : undefined,
+              // Aadhaar guard: machine-written notes are REDACTED, never rejected —
+              // there is no one to show an error to on a batch import.
+              customFields: data.notes ? { importNotes: redactAadhaarLike(data.notes) } : undefined,
               // No human creator for a batch-imported row — no creator to
               // retain ownership for, so this always goes through
               // round-robin, same as inbound-lead intake.

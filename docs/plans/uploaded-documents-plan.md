@@ -1,6 +1,32 @@
 # Uploaded documents + booking custom fields — plan for review
 
-**Status:** revision 4, 2026-09-15. Not built. Owner rulings on revision 2's
+**Status:** revision 5, 2026-09-24. Not built. Housekeeping and owner
+decisions only (below); otherwise the design is revision 4's.
+
+**Revision 5 (2026-09-24):**
+- **Renumbered.** The release sequence moved when v0.7.0 became the admin
+  2FA reset (CLAUDE.md, "Release sequence moved"). Every release in this
+  plan moved up one: Aadhaar guard + booking custom fields is now v0.8.0,
+  deploy plumbing v0.9.0, documents v1.0.0, the deferred drop v1.1.0.
+  Revision notes below were renumbered too, so they read in today's
+  numbering, not the numbering in force when they were written.
+- **v0.8.0 is two PRs:** PR 1 is the Aadhaar guard only; PR 2 is booking
+  custom fields.
+  **Superseded 2026-09-25 (owner decision):** v0.8.0 ships the Aadhaar
+  guard only. Booking custom fields are still planned but no longer in
+  v0.8.0 (`docs/release-plan.md`, "v0.8.0 scope").
+- **Layer (a) spelling rule changed by owner decision (2026-09-24):**
+  substring match on the stripped string for `aadhaar`, `aadhar`, `आधार`;
+  whole-word match only for `adhaar` and `adhar`. NFKC normalisation, plus
+  two explicit Devanagari folds (`अा` → `आ`, nukta removed), because NFKC
+  alone changes nothing for आधार. `आधार` has a known false positive — it is
+  also the Hindi word for "base" (आधार मूल्य, "base price") — and stays
+  blocked anyway; the error message suggests rewording.
+- **Finding 4 corrected:** the VM's custom field is `aadhaar_number`.
+  "Aadhaar (reference only)" is a seeded Document Type master item, not a
+  custom field.
+
+**Status (revision 4, 2026-09-15):** Not built. Owner rulings on revision 2's
 objections applied (recorded in CLAUDE.md's decisions log, dated the same
 day), plus one same-day correction to revision 3's own design. §6 is now a
 log of what was ruled and corrected, not a list of open questions — the
@@ -25,15 +51,15 @@ Changes in revision 3:
   themselves; deleting someone else's needs the delete permission.
 - **`applicant_documents` disposition decided now, not deferred** (§2a):
   drop if empty, rename to `applicant_documents_legacy` if it has rows —
-  in the v0.9.0 migration itself. No v0.10.0 step for this table.
-- **v0.9.0 formally split into three PRs**, released together (§4).
+  in the v1.0.0 migration itself. No v1.1.0 step for this table.
+- **v1.0.0 formally split into three PRs**, released together (§4).
 - **RolesService self-escalation finding reported, not fixed** (§6, item 4):
   only company_admin and super_admin can edit roles on a fresh install —
   low severity — tracked in `docs/todo.md`.
 
 Revision 2's changes (A–F, still in effect): multiple files per document
 type (no replace endpoint); fresh-install permission grants; the Verhoeff
-checksum requirement; the release sequence v0.7.0/v0.8.0/v0.9.0/v0.10.0;
+checksum requirement; the release sequence v0.8.0/v0.9.0/v1.0.0/v1.1.0;
 required documents never block booking creation.
 
 ---
@@ -54,7 +80,9 @@ required documents never block booking creation.
    `Booking` table").
 4. The verification VM has an `aadhaar_number` TEXT custom field on
    Applicant, created deliberately during the admin walkthrough (CLAUDE.md,
-   walkthrough issue #5).
+   walkthrough issue #5). (Not to be confused with "Aadhaar (reference
+   only)", which is a seeded Document Type master item — `seed.ts:166` —
+   not a custom field.)
 5. Seeded Document Types mix KYC uploads (PAN, Passport) with generated
    outbound letters (Receipt, Demand Letter, NOC), all `entityType:
    'Applicant'`. `entityType` is admin-typed free text read by no code.
@@ -74,7 +102,7 @@ required documents never block booking creation.
     `uploads.tar.gz` + `openestate.env`). At-rest encryption protects against
     loss of the uploads directory or disk, not a stolen bundle.
 11. `upgrade-native.sh` never adds new env vars. A new boot-required key
-    would fail the healthcheck and roll back every upgrade — the gap v0.8.0
+    would fail the healthcheck and roll back every upgrade — the gap v0.9.0
     exists to close.
 12. `AGENTS.md` is a stale copy of CLAUDE.md (~490 lines behind) with the
     same Aadhaar line.
@@ -96,10 +124,11 @@ required documents never block booking creation.
 | Release | Contents | Migration | Env / deploy scripts |
 |---|---|---|---|
 | v0.6.0 | Predecessor, not this plan: `feat/admin-generated-reset-links` (head `acf2bb7`), `fix/login-cross-links` (head `26d6fef`) | — | — |
-| v0.7.0 | Aadhaar guard — definition-name guard + value guard (Verhoeff) + per-field exemption — booking custom fields | `bookings.custom_fields`, `custom_field_definitions.allows_twelve_digit_values` | None to install/upgrade/backup/restore. One new standalone read-only script, `deploy/native/find-aadhaar-like-values.sh` (§4) |
-| v0.8.0 | Deploy plumbing only: `ensure_env_key`, new key required at boot, key canary, `UploadedDocumentCrypto`, shared key-ring helper, backup/restore changes | None | Yes — the point of the release |
-| v0.9.0 | Three PRs, released together (§4): (1) document types + applicant documents + sweep, (2) booking documents, (3) rotation script + CLAUDE.md Aadhaar amendment + docs | `uploaded_documents` + DocumentType columns + `applicant_documents` drop-or-rename | `upgrade-native.sh` logs the drop/rename outcome |
-| v0.10.0 | Deferred removal: `document_types.entity_type` only | Drop column | — |
+| v0.7.0 | Not this plan: admin-side 2FA reset | — | — |
+| v0.8.0 | Aadhaar guard — definition-name guard + value guard (Verhoeff) + per-field exemption — booking custom fields | `bookings.custom_fields`, `custom_field_definitions.allows_twelve_digit_values` | None to install/upgrade/backup/restore. One new standalone read-only script, `deploy/native/find-aadhaar-like-values.sh` (§4) |
+| v0.9.0 | Deploy plumbing only: `ensure_env_key`, new key required at boot, key canary, `UploadedDocumentCrypto`, shared key-ring helper, backup/restore changes | None | Yes — the point of the release |
+| v1.0.0 | Three PRs, released together (§4): (1) document types + applicant documents + sweep, (2) booking documents, (3) rotation script + CLAUDE.md Aadhaar amendment + docs | `uploaded_documents` + DocumentType columns + `applicant_documents` drop-or-rename | `upgrade-native.sh` logs the drop/rename outcome |
+| v1.1.0 | Deferred removal: `document_types.entity_type` only | Drop column | — |
 
 ---
 
@@ -150,8 +179,8 @@ original filename — `Rahul_Aadhaar_2345….pdf` is a leak path. Indexes on
   uploads are refused until the count drops ("3 of 2 — limit reached").
 - **Required** = at least one live file (`deleted_at IS NULL`) for that type.
 
-**`applicant_documents` — resolved by ruling, decided in the v0.9.0
-migration itself (supersedes decision D's "defer to v0.10.0"):**
+**`applicant_documents` — resolved by ruling, decided in the v1.0.0
+migration itself (supersedes decision D's "defer to v1.1.0"):**
 - The migration counts rows in `applicant_documents`. **Zero rows → `DROP
   TABLE`.** **One or more rows → `ALTER TABLE ... RENAME TO
   applicant_documents_legacy`** — data kept, but the table is removed from
@@ -179,7 +208,7 @@ migration itself (supersedes decision D's "defer to v0.10.0"):**
   same release (the model is gone from `schema.prisma`), not left until a
   later one.
 
-**Locks (v0.9.0 migration):** `CREATE TABLE` with these foreign keys takes
+**Locks (v1.0.0 migration):** `CREATE TABLE` with these foreign keys takes
 SHARE ROW EXCLUSIVE on `companies`, `applicants`, `bookings`,
 `document_types` — briefly blocks writes, not reads. `DROP TABLE` (or
 `ALTER TABLE ... RENAME`) on `applicant_documents` takes ACCESS EXCLUSIVE
@@ -245,7 +274,7 @@ on that one table and drops its own triggers/policies with it — no lock on
 - **Location:** `${UPLOADS_DIR}/uploaded-documents/<companyId>/<documentId>`.
   Must stay under `UPLOADS_DIR` (systemd `ReadWritePaths`). Not
   `uploads/document/` (generated PDFs).
-- **Key canary (v0.8.0):** `${UPLOADS_DIR}/uploaded-documents/.key-check`
+- **Key canary (v0.9.0):** `${UPLOADS_DIR}/uploaded-documents/.key-check`
   holds a fixed plaintext encrypted with AAD `key-check`.
   - Boot: absent → create under the current key. Present → decrypt using
     the header's key version. Failure, or that version missing from the env
@@ -254,7 +283,7 @@ on that one table and drops its own triggers/policies with it — no lock on
   - A mismatch cannot come from an upgrade: `ensure_env_key` never
     overwrites. Refusing boot stops new documents being written under a
     second, unrelated key.
-  - v0.9.0 additionally decrypts one real document per referenced key
+  - v1.0.0 additionally decrypts one real document per referenced key
     version at boot (logs ERROR; doesn't refuse boot), because an operator
     can delete the canary.
 - **Download:** read the whole file, decrypt, verify the tag, then send. Not
@@ -271,7 +300,7 @@ on that one table and drops its own triggers/policies with it — no lock on
 - **Key loss:** every uploaded document is permanently unreadable; nothing
   else breaks. Downloads return an explicit 422 "cannot decrypt with the
   configured key". A missing env var refuses boot (same as PAN/TOTP/plugin).
-- **Deploy changes (all v0.8.0):**
+- **Deploy changes (all v0.9.0):**
   - `openestate.env.example` — new entry with a key-loss warning.
   - `lib.sh` — `ensure_env_key NAME VALUE`: append if absent, never overwrite.
   - `install-native.sh` — generate on a fresh env; `ensure_env_key` when the
@@ -295,7 +324,7 @@ on that one table and drops its own triggers/policies with it — no lock on
   - systemd unit — no change.
   - `docs/docs/installation.md` §7 — the key, what losing it means, the
     separate-keys option, the restore check, the canary.
-  - CI — see v0.8.0 in §4.
+  - CI — see v0.9.0 in §4.
   - `apps/e2e/playwright.config.ts`, the ci.yml e2e env, and the api test
     `??=` fallback all get the key.
 
@@ -316,8 +345,9 @@ service then allows the delete when EITHER the caller holds
 the caller's own id AND the caller holds `.upload` (proof they're a genuine
 uploader, not merely a reader). No time window — a self-upload can be
 removed at any point in its life, same as anyone else's under the delete
-permission. Both paths write the same audit row (actor, `documentId`,
-before/after); the audit diff doesn't distinguish self-delete from
+permission. Both paths write the same audit row (actor, `documentId`, the
+values written — an UPDATE row records new values only, `docs/todo.md`);
+the audit diff doesn't distinguish self-delete from
 delete-permission delete, and doesn't need to — the actor id already says
 who did it. A sales_executive who can upload but not delete therefore can
 always undo their own mistake; deleting a colleague's file still needs a
@@ -342,7 +372,7 @@ manager or admin.
   customer KYC-scan access on upgrade. Cleanup in `docs/todo.md`.
 - **Scope:** documents are company-wide for anyone holding read (Applicant and
   Booking are unscoped by the v0.4 decision).
-- **Installation-docs note (v0.9.0):** tell operators, after upgrading, to
+- **Installation-docs note (v1.0.0):** tell operators, after upgrading, to
   open Admin → Roles and review exactly which roles hold
   `postsales.uploaded-document.read` — anyone holding it can download KYC
   scans (PAN, Aadhaar if enabled) for every applicant in the company.
@@ -357,7 +387,7 @@ manager or admin.
   second SECURITY DEFINER helper".
 - Activating the dormant `PORTAL_DOCUMENT_UPLOAD` widens the customer role
   on upgrade.
-- **Ships anyway in v0.9.0:** a RESTRICTIVE policy on `uploaded_documents`
+- **Ships anyway in v1.0.0:** a RESTRICTIVE policy on `uploaded_documents`
   denying all portal sessions (`portal_applicant() IS NULL AND
   portal_broker() IS NULL`), plus a raw-connection test proving a portal
   session sees zero rows.
@@ -404,7 +434,7 @@ manager or admin.
 
 - `GET /reports/presales/inquiries-export` emits every active
   APPLICANT/INQUIRY custom field as a column. Old Aadhaar values would
-  export; each cell goes through the shared redactor (v0.7.0).
+  export; each cell goes through the shared redactor (v0.8.0).
 - `CustomFieldDisplay` shows old values on staff screens; same masking.
 - Uploaded documents never appear in any CSV, report, merge field, plugin
   context or webhook. No report queries the table; webhook `dispatchEvent`
@@ -453,13 +483,16 @@ trailing modifier. `key` never technically needs the Devanagari branch
 check runs on both fields through one function regardless, so there's one
 code path to test, not two.
 
-**What this would wrongly catch:** nothing known. The
-`aadhaar`/`aadhar`/`आधार` substring checks have no known plausible
-false-positive in English or Hindi real-estate CRM vocabulary — those
-character sequences aren't substrings of other ordinary words.
+**What this would wrongly catch (corrected in revision 5):** `आधार` is
+also the ordinary Hindi word for "base" or "foundation" (आधार मूल्य, "base
+price"), so a Hindi label using it is refused — accepted by owner decision,
+and the error message suggests rewording. The short spellings `adhaar` and
+`adhar` are matched as whole words only; as substrings of the stripped
+string they caught "Via Dharavi", "Adhartal locality", "Road hardware",
+"Lead Hardness" and "Radharani Nagar".
 
-**Interaction with the existing "Aadhaar (reference only)" custom field**
-already created on the verification VM (finding 4): this guard only fires
+**Interaction with the existing `aadhaar_number` custom field** already
+created on the verification VM (finding 4): this guard only fires
 on create/rename. That field was neither created nor renamed under this
 guard, so it is **not** retroactively affected — it keeps existing exactly
 as it is until someone renames it, at which point the new label is
@@ -539,7 +572,7 @@ above still applies to it.
 
 **Error message:** "This looks like an Aadhaar number. Aadhaar numbers can't
 be stored in custom fields — upload the card as a document instead."
-(Until v0.9.0 ships document upload: "…can't be stored in custom fields.")
+(Until v1.0.0 ships document upload: "…can't be stored in custom fields.")
 
 #### Layer (c) — per-field exemption (new)
 
@@ -560,10 +593,16 @@ isn't permanently blocked by layer (b)'s false-positive rate (§ above:
 - Settable only via `PATCH` on the definition, alongside `label`,
   `isRequired`, etc. — one more field on the existing update DTO, not a
   separate endpoint.
-- **Audited for free:** `CustomFieldDefinition` is already in
-  `AUDITED_MODELS` (`packages/db/src/audit.extension.ts`), so the
-  before/after diff extension already logs this flag flipping — no new
-  audit code needed, just confirmed coverage.
+- **Audited, with a limit (corrected in revision 5):**
+  `CustomFieldDefinition` is in `AUDITED_MODELS`
+  (`packages/db/src/audit.extension.ts`), so the flag flipping writes an
+  UPDATE row with the acting admin as user. The row records the new value
+  only (`after.allowsTwelveDigitValues`); `before` is always null on UPDATE
+  today (tracked in `docs/todo.md`). Revision 4 called this "audited for
+  free with a before/after diff" and it wasn't: until v0.7.1 this write
+  produced no audit row at all (`CustomFieldsService` used the
+  un-awaited `withTenantTx` form; CLAUDE.md, "v0.7.1 — audit rows
+  silently dropped"). The test asserts the row and its actor over HTTP.
 - **Visible in the admin UI, not just in the audit log:** the definition's
   edit form gets a checkbox, "Allow 12-digit values (bypasses the Aadhaar
   safety check)", with inline warning text directly under it: "Only enable
@@ -593,12 +632,12 @@ codebase today, and if it ever becomes the case, the fix is to reconsider
 that role's grant of `admin.custom-field.update` itself, not to carve out
 a second permission for one flag on it.
 
-**Migration:** the same v0.7.0 migration as `bookings.custom_fields` — one
+**Migration:** the same v0.8.0 migration as `bookings.custom_fields` — one
 more nullable-with-default column, additive, catalog-only.
 
 #### Pre-ship verification gate (kept from revision 2, procedure specified exactly)
 
-Before v0.7.0 ships, a human with lawful access to at least two real
+Before v0.8.0 ships, a human with lawful access to at least two real
 Aadhaar numbers (their own, and/or a consenting family member's, with
 consent) verifies layer (b)'s implementation against them, following
 these steps exactly — designed so no digit is ever written to disk,
@@ -635,7 +674,7 @@ install.
 
 ---
 
-## 3. CLAUDE.md amendment (exact wording — lands in v0.9.0)
+## 3. CLAUDE.md amendment (exact wording — lands in v1.0.0)
 
 **Replace** (line 118):
 ```
@@ -658,8 +697,8 @@ install.
   logger (pino) with a redaction list.
 ```
 
-Ships in v0.9.0, when scanned-Aadhaar collection becomes real, so the docs
-are true at every release. v0.7.0's guard is consistent with both wordings.
+Ships in v1.0.0, when scanned-Aadhaar collection becomes real, so the docs
+are true at every release. v0.8.0's guard is consistent with both wordings.
 Same release: a decisions-log entry, the same edit to `AGENTS.md` line 118,
 ASVS checklist V8.1 (Aadhaar sentence) and V8.3 (new key), and
 `feature-completion-plan.md` §5.2, §5 non-goals and decision 5 marked
@@ -674,7 +713,7 @@ resolved.
 `feat/admin-generated-reset-links` and `fix/login-cross-links`, both
 finished. Nothing below depends on them.
 
-### v0.7.0 — Aadhaar guard (3 layers) + booking custom fields
+### v0.8.0 — Aadhaar guard (3 layers) + booking custom fields
 
 **Constraint check — "no new env vars, no deploy-script changes":** true for
 env vars and for every install/upgrade/backup/restore/uninstall script.
@@ -786,7 +825,7 @@ itself — never a real Aadhaar number.
   to supply it (same as other entities).
 - Bookings created by transfer carry no values.
 
-### v0.8.0 — deploy plumbing only
+### v0.9.0 — deploy plumbing only
 
 **Purpose:** prove `upgrade-native.sh` can add a boot-required setting to an
 existing install without failing the healthcheck (finding 11). No document
@@ -858,17 +897,17 @@ Playwright suite runs as a regression check only.
 verified anyway:**
 1. *Boot check against real documents* — none exist. Replaced by the canary,
    which is meaningful now (it catches a restore with the wrong key today).
-   The per-document check is added in v0.9.0.
+   The per-document check is added in v1.0.0.
 2. *Backup/restore keeps documents decryptable* — the canary lives in the
    same directory under the same key, so it proves the mechanism, not the
-   feature. v0.9.0's Playwright re-proves it with a real file.
+   feature. v1.0.0's Playwright re-proves it with a real file.
 3. *Download-time behaviour on key mismatch (422)* — needs documents.
-   v0.8.0 unit-tests only the crypto error type.
+   v0.9.0 unit-tests only the crypto error type.
 4. *10MB encrypt/decrypt memory behaviour* — a unit test with a 10MB buffer;
-   concurrent-upload load waits for v0.9.0.
+   concurrent-upload load waits for v1.0.0.
 5. *AAD binding* — a unit test (decrypt with a different document id fails).
 6. *Cleanup sweep, rotation, operator-facing messages on document pages* —
-   they don't exist until v0.9.0.
+   they don't exist until v1.0.0.
 
 **What could go wrong:**
 - An env managed by configuration management gets rewritten without the
@@ -881,7 +920,7 @@ verified anyway:**
 - Pre-existing and unchanged: regenerating the env already loses PAN, TOTP
   and plugin secrets silently today.
 
-### v0.9.0 — the document feature
+### v1.0.0 — the document feature
 
 Largest release. Split into three PRs, merged in order, released together as
 one version bump (no PR ships to users on its own) — accepted per ruling.
@@ -906,7 +945,7 @@ The split points, exactly:
   stub. Depends on PR 1 (rotates real documents) but not on PR 2.
 
 Each PR gets its own review and its own green CI; the release itself only
-happens once all three are merged, so `v0.9.0`'s CHANGELOG entry and the
+happens once all three are merged, so `v1.0.0`'s CHANGELOG entry and the
 CI/Playwright gates described below span the merged result of all three,
 not any one PR in isolation.
 
@@ -919,7 +958,7 @@ not any one PR in isolation.
   - `max_size_bytes` (≤ 10MB)
   - `max_files` (default 5, CHECK 1–10)
   - `is_required`
-  - `entity_type` becomes nullable and unused; dropped in v0.10.0 (the
+  - `entity_type` becomes nullable and unused; dropped in v1.1.0 (the
     previous release still writes it during the upgrade window and after a
     rollback)
 - **Masters:** document types stay in the generic factory, gaining a
@@ -1048,13 +1087,13 @@ exceed `max_files` (integration test, N parallel requests).
   wrong id, or checking it before confirming `.upload` is actually held);
   needs the dedicated test in scenario 9 above, not just code review.
 
-### v0.10.0 — deferred removal
+### v1.1.0 — deferred removal
 
 - `document_types.entity_type`: drop the column (nothing reads it since
-  v0.9.0; the previous release still writes it during the upgrade window
+  v1.0.0; the previous release still writes it during the upgrade window
   and after a rollback, which is why it isn't dropped in the same release
   that stops reading it).
-- `applicant_documents` no longer has a step here — resolved in v0.9.0's
+- `applicant_documents` no longer has a step here — resolved in v1.0.0's
   own migration (§2a, drop if empty / rename to `applicant_documents_legacy`
   if it has rows).
 
@@ -1109,7 +1148,7 @@ unbuilt, by explicit instruction.
    uploaded themselves, no time window, regardless of the delete
    permission; deleting someone else's file still needs it. Both paths
    audited identically by actor id. §2d, and the Playwright scenario at
-   v0.9.0 PR 1, step 9.
+   v1.0.0 PR 1, step 9.
 
 4. **(B) `RolesService.update()` lets a role grant itself any permission it
    doesn't already check the grantor holds — reported, not fixed, by
@@ -1135,28 +1174,28 @@ unbuilt, by explicit instruction.
    check that the grantor already holds a permission before granting it"),
    not fixed in this plan or this session.
 
-5. **(D) Deferred drop — resolved, decided now.** In the v0.9.0 migration
+5. **(D) Deferred drop — resolved, decided now.** In the v1.0.0 migration
    itself: `DROP TABLE applicant_documents` if it has zero rows,
    `ALTER TABLE ... RENAME TO applicant_documents_legacy` if it has any.
    Never aborts the upgrade; never destroys data that exists. Logged
    loudly either way by `upgrade-native.sh`'s own post-migration check,
    not by relying on a SQL-level `NOTICE`/`WARNING` reaching its output.
-   §2a. No v0.10.0 step remains for this table.
+   §2a. No v1.1.0 step remains for this table.
 
-6. **(E) v0.8.0 refuses to boot on a key mismatch before any document
+6. **(E) v0.9.0 refuses to boot on a key mismatch before any document
    exists — kept as designed, by explicit instruction.** An operator who
    regenerates `openestate.env` by hand (rather than through
    `ensure_env_key`) will hit this. `install-native.sh`'s messaging
    explains it (§2c).
 
-7. **(E) v0.7.0's one non-application file — confirmed to stay.**
+7. **(E) v0.8.0's one non-application file — confirmed to stay.**
    `find-aadhaar-like-values.sh` stays under `deploy/native/`, per explicit
    instruction; it is a standalone, read-only tool that doesn't touch the
-   install or upgrade path, so "no deploy-script changes" for v0.7.0 holds
+   install or upgrade path, so "no deploy-script changes" for v0.8.0 holds
    for every script that path actually depends on.
 
-8. **(E) v0.9.0 size — accepted, three PRs, released together.** Split
-   points defined explicitly in §4's v0.9.0 section: PR 1 (foundation:
+8. **(E) v1.0.0 size — accepted, three PRs, released together.** Split
+   points defined explicitly in §4's v1.0.0 section: PR 1 (foundation:
    document types + applicant documents + sweep, functionally complete on
    its own), PR 2 (booking documents, depends on PR 1), PR 3 (rotation +
    Aadhaar amendment + docs, depends on PR 1). One version bump only once

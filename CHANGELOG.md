@@ -5,6 +5,45 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **Aadhaar safety net on custom fields.** OpenEstate does not collect
+  Aadhaar numbers, and custom fields are free-form, so this adds three
+  checks against *accidental* storage. It is a safety net, not a guarantee
+  and not something to describe as blocking Aadhaar storage.
+  - A custom field whose name or label refers to Aadhaar (Aadhaar, Aadhar,
+    Adhaar, Adhar, or आधार) is refused when created or renamed, on the
+    admin form, the API, and when installing a plugin that seeds one.
+  - A value that looks like an Aadhaar number (12 digits, first digit 2 to 9,
+    optionally grouped 4-4-4 with spaces or hyphens, with a valid Verhoeff
+    check digit) is refused when a custom-field value is saved by staff.
+    Values already stored are not re-checked, so an existing record can
+    still be edited.
+  - A field that legitimately holds a 12-digit number, such as a bank
+    account, can be exempted (Admin, Custom Fields, "Allow 12-digit values").
+    The change is audited, the field is badged in the list, and the exemption
+    is refused on a field named after Aadhaar.
+- **Machine-written notes are redacted rather than refused.** The inbound
+  lead API, a plugin's lead creation and the Excel importer have no one to
+  show an error to, so an Aadhaar-like number in the note they store is
+  replaced with `[Aadhaar-like number removed]`.
+- **Existing values are masked on detail screens and in the inquiries CSV
+  export** (`XXXX XXXX 1234`). This is masking on display and export only:
+  the raw value is still stored and is still returned by the API.
+- **`deploy/native/find-aadhaar-like-values.sh`**, a read-only report of
+  which custom fields already hold Aadhaar-like values, with counts and no
+  values. It is standalone and is not run by install or upgrade.
+
+**Limits, stated plainly.** About 1 in 10 random 12-digit numbers look valid
+and are refused. A number with a single mistyped digit fails the checksum
+and is not caught, and so is one written with other separators. The check
+covers custom-field values only, not names, addresses, phone numbers,
+notes or other free text (tracked in `docs/todo.md`).
+
+Database: one new column, `custom_field_definitions.allows_twelve_digit_values`
+(`NOT NULL DEFAULT false`, a metadata-only change). No new environment
+variable.
+
 ## [0.7.1] - 2026-09-24
 
 A security fix to the audit log: most create, update and delete actions
