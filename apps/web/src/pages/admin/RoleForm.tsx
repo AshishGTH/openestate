@@ -10,6 +10,7 @@ interface RoleDetail {
   name: string;
   slug: string;
   isSystem: boolean;
+  isPortal: boolean;
   permissions: Array<{ permission: { id: string; key: string } }>;
 }
 
@@ -37,6 +38,10 @@ export default function RoleForm() {
     queryFn: () => api(`/roles/${id}`),
     enabled: !!isEdit,
   });
+
+  // A portal role (Customer, Broker) can only hold portal.* permissions;
+  // the API refuses anything else, so only those are offered.
+  const perms = role?.isPortal ? allPerms?.filter((p) => p.key.startsWith('portal.')) : allPerms;
 
   useEffect(() => {
     if (role) {
@@ -68,8 +73,8 @@ export default function RoleForm() {
   };
 
   const toggleModule = (module: string) => {
-    if (!allPerms) return;
-    const modulePerms = allPerms.filter((p) => p.key.startsWith(module + '.'));
+    if (!perms) return;
+    const modulePerms = perms.filter((p) => p.key.startsWith(module + '.'));
     const allSelected = modulePerms.every((p) => selectedPerms.has(p.id));
     setSelectedPerms((prev) => {
       const next = new Set(prev);
@@ -144,9 +149,14 @@ export default function RoleForm() {
 
         <div>
           <label className="block text-sm font-medium text-slate-700 mb-2">Permissions</label>
+          {role?.isPortal && (
+            <p className="mb-2 text-xs text-slate-500">
+              This is a portal role, so it can only hold portal permissions.
+            </p>
+          )}
           <div className="space-y-4 rounded-lg border border-slate-200 bg-white p-4 max-h-96 overflow-y-auto">
             {PERMISSION_MODULES.map((module) => {
-              const modulePerms = (allPerms ?? []).filter((p) =>
+              const modulePerms = (perms ?? []).filter((p) =>
                 p.key.startsWith(module + '.'),
               );
               if (modulePerms.length === 0) return null;
@@ -190,7 +200,7 @@ export default function RoleForm() {
             })}
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            {selectedPerms.size} of {allPerms?.length ?? ALL_PERMISSIONS.length} permissions selected
+            {selectedPerms.size} of {perms?.length ?? ALL_PERMISSIONS.length} permissions selected
           </p>
         </div>
 

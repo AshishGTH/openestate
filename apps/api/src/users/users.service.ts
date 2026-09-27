@@ -213,6 +213,8 @@ export class UsersService {
     if (dto.managerId !== undefined) {
       await this.assertValidManager(companyId, null, dto.managerId);
     }
+    // This endpoint only creates staff accounts.
+    await this.assertRoleFitsAccount(companyId, dto.roleId, false);
 
     const hash = await argon2.hash(dto.password, { algorithm: argon2.Algorithm.Argon2id });
 
@@ -243,9 +245,12 @@ export class UsersService {
   }
 
   async update(companyId: string, userId: string, dto: UpdateUserDto) {
-    await this.findOne(companyId, userId);
+    const user = await this.findOne(companyId, userId);
     if (dto.managerId !== undefined) {
       await this.assertValidManager(companyId, userId, dto.managerId);
+    }
+    if (dto.roleId !== undefined) {
+      await this.assertRoleFitsAccount(companyId, dto.roleId, !!(user.applicantId || user.brokerId));
     }
 
     return runWithTenant({ companyId }, () =>
@@ -265,6 +270,24 @@ export class UsersService {
         }),
       ),
     );
+  }
+
+  /**
+   * A portal account (customer or broker) may only have a portal role, and
+   * a staff account only a staff role. The role must be this company's.
+   */
+  private async assertRoleFitsAccount(companyId: string, roleId: string, isPortalAccount: boolean) {
+    const role = await this.systemPrisma.role.findFirst({
+      where: { id: roleId, companyId },
+      select: { isPortal: true },
+    });
+    if (!role) throw new BadRequestException('Role not found');
+    if (isPortalAccount && !role.isPortal) {
+      throw new BadRequestException('A customer or broker portal account can only be given a portal role.');
+    }
+    if (!isPortalAccount && role.isPortal) {
+      throw new BadRequestException('A staff account cannot be given a portal role.');
+    }
   }
 
   /**

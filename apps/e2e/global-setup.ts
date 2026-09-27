@@ -56,6 +56,9 @@ export default async function globalSetup() {
     // each turns 2FA on for an account and then has an admin clear it.
     staffTotpReset: await seedE2eFixture(DATABASE_URL_SYSTEM),
     portalTotpReset: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
+    // Its own company: role-permission-edit.spec.ts edits this company's
+    // Customer portal role, which other specs' portal users depend on.
+    rolesPortal: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
   };
   writeFileSync(path.join(__dirname, '.fixture-state.json'), JSON.stringify(fixtures, null, 2));
 }

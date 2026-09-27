@@ -96,6 +96,20 @@ export class RolesService {
     if (role.isSystem && data.name !== undefined && data.name !== role.name) {
       throw new BadRequestException('Cannot rename system roles');
     }
+    // Only an existing role can be a portal role: create() never sets
+    // isPortal, so this is the one path that can add grants to one.
+    if (role.isPortal && data.permissionIds?.length) {
+      const perms = await this.systemPrisma.permission.findMany({
+        where: { id: { in: data.permissionIds } },
+        select: { key: true },
+      });
+      const notAllowed = perms.map((p) => p.key).filter((k) => !k.startsWith('portal.')).sort();
+      if (notAllowed.length > 0) {
+        throw new BadRequestException(
+          `Portal roles can only hold portal permissions. Not allowed: ${notAllowed.join(', ')}`,
+        );
+      }
+    }
 
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {

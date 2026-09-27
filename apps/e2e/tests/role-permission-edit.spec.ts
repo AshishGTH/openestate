@@ -68,6 +68,37 @@ test('toggling a permission on a system role persists, and the name field is loc
   ).toBeChecked();
 });
 
+// A portal role (Customer, Broker) can only hold portal.* permissions — the
+// API refuses anything else — so the screen offers only those for it.
+test('a portal role lists only portal permissions, and a change to it saves', async ({ page }) => {
+  const fixture = readFixture('rolesPortal');
+  const permBox = (label: string) =>
+    page.locator('label', { has: page.getByText(label, { exact: true }) }).locator('input[type="checkbox"]');
+
+  await login(page, fixture);
+  await page.goto('/admin/roles');
+  await page.getByRole('row', { name: /Customer/ }).getByRole('link', { name: 'Edit' }).click();
+  await expect(page).toHaveURL(/\/admin\/roles\/.+/);
+
+  await expect(permBox('ticket.read')).toBeChecked();
+  await expect(page.getByText('unit.plc-manage', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('user.read', { exact: true })).toHaveCount(0);
+
+  const [response] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes('/roles/') && r.request().method() === 'PATCH'),
+    (async () => {
+      await permBox('ticket.read').uncheck();
+      await page.getByRole('button', { name: 'Update Role' }).click();
+    })(),
+  ]);
+  expect(response.ok()).toBe(true);
+  await expect(page).toHaveURL(/\/admin\/roles$/);
+
+  await page.getByRole('row', { name: /Customer/ }).getByRole('link', { name: 'Edit' }).click();
+  await expect(permBox('ticket.read')).not.toBeChecked();
+  await expect(permBox('booking.read')).toBeChecked();
+});
+
 // Regression coverage for isIntraStateSupply() throwing (not silently
 // defaulting to intra-state) when a company's GST config is incomplete —
 // see CLAUDE.md's "v0.2.0 — upgrade-path permission delivery" entry. The
