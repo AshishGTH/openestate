@@ -14,7 +14,7 @@ export class PortalBrokerDashboardController {
   constructor(private readonly dashboard: PortalBrokerDashboardService) {}
 
   @Get()
-  @RequirePermissions(PERMISSIONS.REPORTS_BROKER_VIEW)
+  @RequirePermissions(PERMISSIONS.PORTAL_BROKER_DASHBOARD_READ)
   @ApiOperation({ summary: 'Commission summary, sold-units count, and pending NOC count for the logged-in broker' })
   async getDashboard(@Req() req: Request) {
     const user = req.user as JwtPayload;

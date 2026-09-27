@@ -201,6 +201,9 @@ export const PERMISSIONS = {
   // accounts.noc.approve; never granted to sales_manager/accounts.
   PORTAL_NOC_ACTION: 'portal.noc.action',
   PORTAL_CONSTRUCTION_UPDATE_READ: 'portal.construction-update.read',
+  // The broker's own dashboard. Portal roles hold only portal.* keys, so
+  // this is not the staff reports.broker.view.
+  PORTAL_BROKER_DASHBOARD_READ: 'portal.broker.dashboard.read',
 } as const;
 
 export type PermissionKey = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

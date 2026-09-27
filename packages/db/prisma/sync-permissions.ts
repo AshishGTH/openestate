@@ -36,7 +36,8 @@ const prisma = new PrismaClient();
  *    so upserting is unconditionally safe, on a fresh install or the
  *    thousandth upgrade of an old one.
  *  - Deliberately NOT extended to seeded masters, nor to the
- *    role_permissions of any role EXCEPT super_admin (see below). Both
+ *    role_permissions of any role EXCEPT super_admin and portal roles
+ *    (see the two functions below). Both
  *    are per-company data an admin may have already renamed, deactivated,
  *    or reassigned — silently injecting new rows into every existing
  *    company's live master/role lists on every upgrade would be a real
@@ -212,6 +213,65 @@ export async function syncLeadStages(
   return { seeded: seededCompanies, skipped };
 }
 
+/**
+ * Removes every permission that doesn't start with `portal.` from every
+ * portal role (isPortal), including grants an admin made on purpose.
+ *
+ * The second narrow exception to "never touch role composition", on the
+ * same grounds as super_admin: a portal role is defined as holding portal
+ * permissions only, so a staff grant on one is drift, not a customisation.
+ * The Roles API refuses such grants; this clears any made before it did.
+ *
+ * Each affected role gets one audit row (no actor: the upgrade did it)
+ * listing the keys removed, written in the same transaction as the delete.
+ * `scope.companyId` exists for tests; the upgrade runs it unscoped.
+ */
+export async function stripStaffPermissionsFromPortalRoles(
+  client: PrismaClient = prisma,
+  scope: { companyId?: string } = {},
+): Promise<{ removed: number; roles: number }> {
+  const grants = await client.rolePermission.findMany({
+    where: {
+      role: { isPortal: true, ...(scope.companyId ? { companyId: scope.companyId } : {}) },
+      NOT: { permission: { key: { startsWith: 'portal.' } } },
+    },
+    select: {
+      roleId: true,
+      permissionId: true,
+      permission: { select: { key: true } },
+      role: { select: { companyId: true, slug: true } },
+    },
+  });
+
+  const byRole = new Map<string, typeof grants>();
+  for (const g of grants) byRole.set(g.roleId, [...(byRole.get(g.roleId) ?? []), g]);
+
+  let removed = 0;
+  for (const [roleId, roleGrants] of byRole) {
+    const { companyId, slug } = roleGrants[0].role;
+    const keys = roleGrants.map((g) => g.permission.key).sort();
+    const [deleted] = await client.$transaction([
+      client.rolePermission.deleteMany({
+        where: { roleId, permissionId: { in: roleGrants.map((g) => g.permissionId) } },
+      }),
+      client.auditLog.create({
+        data: {
+          companyId,
+          userId: null,
+          entityType: 'Role',
+          entityId: roleId,
+          action: 'PORTAL_PERMS_REMOVED',
+          before: { removed: keys },
+          after: { surface: 'upgrade' },
+        },
+      }),
+    ]);
+    removed += deleted.count;
+    console.log(`Portal role "${slug}" (company ${companyId}): removed ${keys.join(', ')}`);
+  }
+  return { removed, roles: byRole.size };
+}
+
 // Exit codes this CLI entrypoint uses, inspected by
 // deploy/native/upgrade-native.sh (see its own comment at the call site):
 //   0 — clean, nothing skipped.
@@ -242,6 +302,22 @@ if (require.main === module) {
           ? 'Lead stages: already seeded for every company.'
           : `Lead stages: seeded the default pipeline for ${seeded} compan${seeded === 1 ? 'y' : 'ies'}.`,
       );
+      const stripped = await stripStaffPermissionsFromPortalRoles();
+      if (stripped.removed === 0) {
+        console.log('Portal roles: hold only portal permissions.');
+      } else {
+        console.log('');
+        console.log('='.repeat(72));
+        console.log(
+          `PORTAL ROLES: REMOVED ${stripped.removed} NON-PORTAL PERMISSION GRANT(S) FROM ${stripped.roles} ROLE(S).`,
+        );
+        console.log(
+          'Portal roles (Customer, Broker) can only hold portal.* permissions. The roles and ' +
+            'permissions removed are listed above and recorded in each company\'s audit log.',
+        );
+        console.log('='.repeat(72));
+        console.log('');
+      }
 
       const totalSkipped = superAdminSkipped + leadStagesSkipped;
       if (totalSkipped > 0) {

@@ -226,7 +226,11 @@ describeIf('Phase 6 broker-portal (commit 3)', () => {
   }
 
   it("bypass audit: the customer role's permission set contains neither PORTAL_NOC_ACTION nor REPORTS_BROKER_VIEW", () => {
-    const brokerOnlyPerms = [PERMISSIONS.PORTAL_NOC_ACTION, PERMISSIONS.REPORTS_BROKER_VIEW];
+    const brokerOnlyPerms = [
+      PERMISSIONS.PORTAL_NOC_ACTION,
+      PERMISSIONS.REPORTS_BROKER_VIEW,
+      PERMISSIONS.PORTAL_BROKER_DASHBOARD_READ,
+    ];
     const overlap = ROLE_PERMISSIONS[SYSTEM_ROLES.CUSTOMER].filter((p) => (brokerOnlyPerms as string[]).includes(p));
     expect(overlap).toEqual([]);
   });

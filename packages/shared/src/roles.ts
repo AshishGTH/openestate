@@ -163,7 +163,7 @@ export const ROLE_PERMISSIONS: Record<SystemRoleSlug, readonly string[]> = {
     P.PORTAL_TICKET_CREATE,
     P.PORTAL_TICKET_READ,
     P.PORTAL_NOC_ACTION,
-    P.REPORTS_BROKER_VIEW,
+    P.PORTAL_BROKER_DASHBOARD_READ,
   ],
 };
 

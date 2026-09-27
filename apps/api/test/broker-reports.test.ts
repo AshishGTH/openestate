@@ -47,6 +47,15 @@ describe('Report role-scoping: REPORTS_BROKER_VIEW wiring (no DB needed)', () =>
     expect(ROLE_PERMISSIONS[SYSTEM_ROLES.COMPANY_ADMIN]).toContain(PERMISSIONS.REPORTS_BROKER_VIEW);
     expect(ROLE_PERMISSIONS[SYSTEM_ROLES.SALES_EXECUTIVE]).not.toContain(PERMISSIONS.REPORTS_BROKER_VIEW);
   });
+
+  it('the seeded portal roles hold only portal.* permissions; broker has its own dashboard permission', () => {
+    const broker = ROLE_PERMISSIONS[SYSTEM_ROLES.BROKER];
+    expect(broker).toContain('portal.broker.dashboard.read');
+    expect(broker).not.toContain(PERMISSIONS.REPORTS_BROKER_VIEW);
+    for (const slug of [SYSTEM_ROLES.CUSTOMER, SYSTEM_ROLES.BROKER]) {
+      expect(ROLE_PERMISSIONS[slug].filter((key) => !key.startsWith('portal.'))).toEqual([]);
+    }
+  });
 });
 
 describeIf('BrokerReportsService', () => {
