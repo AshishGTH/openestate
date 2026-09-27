@@ -530,6 +530,20 @@ identical by direct comparison of both hardcoded values, but worth
 re-checking first) or (b) `$GITHUB_ENV` not receiving the three
 `DATABASE_URL_TEST*`/`REDIS_TEST_URL` lines from `.test-env` correctly.
 
+## `pgrep` isn't available in the Windows dev shell
+
+"Nothing is running" checks before a build or a test run must use the
+PowerShell process list, not `pgrep`:
+
+```powershell
+Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Select-Object ProcessId, CommandLine
+```
+
+Found while shipping 0.8.1: `pgrep` is not installed in the Git Bash shell
+on the dev machine, so `pgrep -f vitest 2>/dev/null` printed nothing
+because it failed, and several earlier "nothing running" checks proved
+nothing. The same rule is in CLAUDE.md's working habits.
+
 ## Local test containers: two pairs claim the same ports
 
 This development machine has two Postgres+Redis container pairs that both
@@ -955,9 +969,20 @@ this note once it has a real, tested effect.
   and any route added later without a decorator is open to every valid
   token too. Flipping to default-deny, with an explicit opt-in for "any
   signed-in user" routes, touches every controller and needs its own
-  branch and its own full testing.
-- **SECURITY-RELEVANT: staff and portal auth aren't bound to their own
-  users.** A pending-2FA token issued by one surface is accepted by the
+  branch and its own full testing. **Narrowed in 0.8.1, still open:**
+  `SessionSurfaceGuard` now refuses a portal session on every staff route
+  and a staff session on every portal route, so default-allow only
+  matters within one surface.
+- **FIXED in 0.8.1 — SECURITY-RELEVANT: staff and portal auth aren't bound
+  to their own users.** Access and 2FA-pending tokens now carry a
+  `surface` claim; `SessionSurfaceGuard` refuses a token on the other
+  surface's routes; staff login, refresh and 2FA verify refuse portal
+  accounts, and portal 2FA verify refuses staff accounts. This also
+  covers the related finding that a portal session could call staff API
+  routes (the broker role's `reports.broker.view` let brokers read the
+  staff broker reports). See CLAUDE.md's 0.8.1 entry. The original report
+  follows, unedited.
+  A pending-2FA token issued by one surface is accepted by the
   other surface's `totp/verify` — portal verify will issue a staff user a
   portal-shaped token, and staff verify a portal user a staff-shaped one
   with no `applicantId`. Separately, staff login resolves users by email
@@ -974,12 +999,30 @@ this note once it has a real, tested effect.
   session. Pre-existing. The fix is the same shape as `reserveTotpAttempt`
   (`apps/api/src/auth/totp-lockout.ts`): a single atomic statement that
   removes the code only if it is still present.
-- **`totp/verify`'s rate limit counts each endpoint separately.** A
-  pending-2FA token is accepted by both the staff and the portal verify
+- **FIXED in 0.8.1: `totp/verify`'s rate limit counts each endpoint
+  separately.** A 2FA-pending token is now accepted only by its own
+  surface's verify endpoint (403 on the other), so one user's attempts
+  can reach only one endpoint and the per-user limit is 5, not 10. The
+  lockout counter on the user row stays as a second layer. The original
+  report follows, unedited.
+  A pending-2FA token is accepted by both the staff and the portal verify
   endpoint, and the throttler keys each handler on its own, so the
   per-user 5-per-5-minutes limit allows 10 across the two. The stated
   budget only holds end to end because the TOTP lockout counter lives on
   the user row. Remove the lockout and the effective limit doubles.
+- **Later hardening: separate JWT signing secrets per surface.** Staff and
+  portal tokens are signed with one `JWT_ACCESS_SECRET`; 0.8.1 separates
+  them with a signed `surface` claim checked by a guard. A second secret
+  would make a staff strategy unable even to verify a portal token. It
+  adds a setting every existing install must have at boot, so it waits
+  until v0.9.0 proves `upgrade-native.sh` can add one safely.
+- **Low priority (UX): a broker whose session predates a permission change
+  gets a 403, not a refresh.** Access tokens carry a snapshot of the
+  role's permissions; the frontends refresh on 401 only. After the 0.8.1
+  upgrade a broker signed in beforehand sees an error on their dashboard
+  until the access token expires (up to 15 minutes) or they reload. Same
+  for any role change made while a user is signed in. A possible fix:
+  refresh once on a 403 before showing it.
 - **`ConsoleCommunicationProvider` logs full message bodies, so portal
   self-service password-reset tokens (`PortalPasswordResetProcessor`) reach
   server logs in plaintext.** Reset tokens still reach the logs through this
@@ -1239,6 +1282,11 @@ enforce and this one doesn't. Needs its own test proving a role WITH
 **Unblocked by:** nothing technical — it's a straightforward service-layer
 check. Deferred because it's a pre-existing gap unrelated to any feature
 currently being built, not because it's hard.
+
+**Still open after 0.8.1.** 0.8.1 added a different check to
+`RolesService.update()`: a portal role can hold only `portal.*`
+permissions. That doesn't stop a grantor giving a staff role what they
+don't hold themselves.
 
 ## Legacy system-written keys inside `custom_fields`
 

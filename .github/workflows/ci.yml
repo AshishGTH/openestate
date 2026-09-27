@@ -755,6 +755,13 @@ jobs:
           SYSTEM_ROLE_ID="$(auth http://localhost/api/v1/roles | jq -r '.[] | select(.slug=="company_admin") | .id')"
           [ -n "$SYSTEM_ROLE_ID" ] && [ "$SYSTEM_ROLE_ID" != "null" ] || { echo "::error::company_admin system role not found on the baseline install"; exit 1; }
 
+          # Premise for assertion 6: the baseline's seeded broker portal role
+          # holds the staff permission reports.broker.view, which the
+          # upgrade must remove. If it doesn't, assertion 6 proves nothing.
+          auth http://localhost/api/v1/roles \
+            | jq -e '.[] | select(.slug=="broker") | .permissions[].permission.key | select(. == "reports.broker.view")' > /dev/null \
+            || { echo "::error::baseline broker role does not hold reports.broker.view — assertion 6's premise is broken"; exit 1; }
+
           echo "WEBSITE_ID=${WEBSITE_ID}" >> "$GITHUB_ENV"
           echo "CUSTOM_ROLE_ID=${CUSTOM_ROLE_ID}" >> "$GITHUB_ENV"
           echo "SYSTEM_ROLE_ID=${SYSTEM_ROLE_ID}" >> "$GITHUB_ENV"
@@ -853,7 +860,35 @@ jobs:
           echo "$GRANT_RES" | jq -e --arg k "inventory.unit.plc-manage" '.permissions[].permission.key | select(. == $k)' > /dev/null \
             || { echo "::error::granting the new permission to a seeded system role failed after upgrade: ${GRANT_RES}"; exit 1; }
 
-          echo "All upgrade-path assertions passed: master customisation preserved, custom role preserved, new permissions delivered, system role can be granted them."
+          # 5. Outcome: a broker portal account created now, over HTTP
+          # (broker -> invite -> consume), loads its own dashboard and is
+          # refused a staff broker report. Uses a real portal session, not
+          # the role table, so it proves what a broker actually gets.
+          BROKER_RES="$(mutate -X POST http://localhost/api/v1/brokers \
+            -d '{"name":"E2E Upgrade Broker","phone":"9000000123"}')"
+          BROKER_ID="$(echo "$BROKER_RES" | jq -r .id)"
+          [ -n "$BROKER_ID" ] && [ "$BROKER_ID" != "null" ] || { echo "::error::failed to create a broker after upgrade: ${BROKER_RES}"; exit 1; }
+          INVITE_RES="$(mutate -X POST http://localhost/api/v1/admin/portal-invites \
+            -d "{\"brokerId\":\"${BROKER_ID}\",\"channel\":\"SMS\"}")"
+          INVITE_ID="$(echo "$INVITE_RES" | jq -r .inviteId)"
+          INVITE_TOKEN="$(echo "$INVITE_RES" | jq -r .token)"
+          [ -n "$INVITE_ID" ] && [ "$INVITE_ID" != "null" ] || { echo "::error::failed to create a broker portal invite after upgrade: ${INVITE_RES}"; exit 1; }
+          CONSUME_RES="$(curl -sS -X POST "http://localhost/api/v1/portal/auth/invite/${INVITE_ID}/consume" \
+            -H 'Content-Type: application/json' \
+            -d "{\"token\":\"${INVITE_TOKEN}\",\"password\":\"UpgradeBrokerPass123\"}")"
+          BROKER_TOKEN="$(echo "$CONSUME_RES" | jq -r .accessToken)"
+          [ -n "$BROKER_TOKEN" ] && [ "$BROKER_TOKEN" != "null" ] || { echo "::error::broker could not complete the portal invite after upgrade: ${CONSUME_RES}"; exit 1; }
+          DASH_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${BROKER_TOKEN}" http://localhost/api/v1/portal/broker/dashboard)"
+          [ "$DASH_STATUS" = "200" ] || { echo "::error::broker portal session got ${DASH_STATUS} on its own dashboard after upgrade (expected 200)"; exit 1; }
+          REPORT_STATUS="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer ${BROKER_TOKEN}" http://localhost/api/v1/reports/brokers/summary)"
+          [ "$REPORT_STATUS" = "403" ] || { echo "::error::broker portal session got ${REPORT_STATUS} on the staff broker report after upgrade (expected 403)"; exit 1; }
+
+          # 6. The upgrade printed the removal of the baseline broker role's
+          # staff permission (premise checked on the baseline above).
+          grep -qF "PORTAL ROLES: REMOVED 1 NON-PORTAL PERMISSION GRANT(S) FROM 1 ROLE(S)." /tmp/upgrade.log \
+            || { echo "::error::upgrade output did not report removing the broker role's staff permission"; exit 1; }
+
+          echo "All upgrade-path assertions passed: master customisation preserved, custom role preserved, new permissions delivered, system role can be granted them, broker portal account limited to its own surface."
 
       - name: Dump journalctl on failure
         if: failure()

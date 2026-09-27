@@ -5,6 +5,58 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-27
+
+A security fix. **Every install should upgrade.** One migration (row-level
+data only, no schema change); no new environment variable; no change to
+install, backup, restore or uninstall.
+
+### Security
+
+- **Portal sessions could reach staff API routes.** A signed-in customer
+  or broker on the portal could call staff API routes: the server didn't
+  check which login a session came from, only which permissions its role
+  held. The seeded broker role held one staff permission (for its
+  dashboard), so any broker could read the staff broker reports: every
+  broker's commission figures and contact details, and customer-level
+  detail of other brokers' bookings. Separately, a customer or broker
+  account could sign in through the staff login and get a staff session.
+  Each session is now tied to the login it came from, and a portal
+  session is refused on every staff route (and a staff session on every
+  portal route), whatever its role's permissions.
+- **Affected versions:** all releases up to and including 0.8.0.
+- **You can't tell whether this was used.** Reads aren't audited. nginx's
+  access log records each request's path, status and client address, but
+  not the access token, so a broker reading `/api/v1/reports/brokers/...`
+  looks the same as a staff user doing their job. An install has no
+  reliable record of which API calls a portal session made.
+- **Staff login refuses portal accounts.** Customers and brokers can no
+  longer sign in through the staff login; they use the portal as before.
+  Each surface's 2FA step also accepts only its own sign-in.
+
+### Changed
+
+- **The upgrade removes staff permissions from customer and broker roles.**
+  Portal roles can now hold only portal permissions. The upgrade removes
+  any others, including ones an admin granted on purpose, prints how many
+  it removed and from which roles, and writes one audit row per role
+  changed (visible in Admin, Audit Log). On a default install it removes
+  one: the broker role's `reports.broker.view`.
+- **The broker dashboard has its own permission**,
+  `portal.broker.dashboard.read`, granted to the broker role on upgrade.
+  **Brokers signed in during the upgrade may see an error on their
+  dashboard for up to 15 minutes**, until their session renews; reloading
+  the page fixes it sooner.
+- **Admin, Roles:** a customer or broker role can only be given portal
+  permissions, and the edit screen lists only those. The API refuses
+  anything else with a message naming the permissions.
+- **Admin, Users:** a customer or broker account can only be given a portal
+  role, and a staff account only a staff role. A role from another company
+  is refused with a clear error (it previously failed with a server error).
+
+Database: one migration, `20260927120000_portal_broker_dashboard_permission`
+(adds the permission and grants it to broker roles).
+
 ## [0.8.0] - 2026-09-25
 
 A safety net against accidentally storing Aadhaar numbers in custom fields.

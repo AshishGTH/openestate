@@ -176,6 +176,14 @@ docs/           Docusaurus site: install, admin, API, plugin dev
 types → zod schema → migration → service + tests → endpoint +
 OpenAPI → UI → seed/demo data → docs page stub → audit logging
 
+## Working habits
+
+- **"Nothing is running" checks use the PowerShell process list, not
+  `pgrep`.** `pgrep` isn't installed in the Windows dev shell (Git Bash), so
+  `pgrep -f vitest 2>/dev/null` prints nothing because it failed, not
+  because nothing is running. Before a build or a test run, check with
+  `Get-CimInstance Win32_Process -Filter "Name='node.exe'"`.
+
 ## Decisions log
 
 Append-only. One entry per architectural decision made while building a
@@ -7512,6 +7520,44 @@ the user. That is the verification the v0.7.1 release notes cite.
   (`docs/releases/v0.8.0-release-notes.md`) that call the guard deterrence
   and list its limits, and the current-status lines in README,
   CONTRIBUTING and the docs site. Booking custom fields are not in it.
+
+### 0.8.1 — staff and portal sessions separated
+
+A security fix. A portal session could call staff API routes, and portal
+accounts could get staff sessions; details in CHANGELOG `[0.8.1]`.
+
+- **The surface is a signed claim checked by one global guard.** Access
+  and 2FA-pending tokens carry `surface: 'staff' | 'portal'`.
+  `SessionSurfaceGuard` (after `TwoFactorPendingGuard`, before CSRF and
+  permissions) decides a route's surface by URL alone: under
+  `PORTAL_PATH_PREFIX` is portal, everything else is staff, so a new
+  route is staff-only by default. A token from the other surface gets 403,
+  whatever its permissions. Tokens issued before the fix have no claim and
+  are classified by `applicantId`/`brokerId`, so nobody is signed out.
+  A token carrying both ids, or a claim contradicting its ids, is refused.
+- **Staff login, refresh and 2FA verify refuse portal accounts; portal
+  2FA verify refuses staff accounts.** Each 2FA verify endpoint also
+  refuses a pending token from the other surface, so a user's 2FA attempts
+  reach one endpoint, not two.
+- **Portal roles hold only `portal.*` permissions.** The broker dashboard
+  moved from `reports.broker.view` to `portal.broker.dashboard.read`. The
+  Roles API refuses a staff permission on a portal role (`isPortal`); the
+  Users API refuses a staff role for a portal account, a portal role for a
+  staff account, and a role from another company.
+- **Second narrow exception to "sync-permissions never touches role
+  composition"**: `stripStaffPermissionsFromPortalRoles()` removes
+  non-`portal.*` grants from portal roles on every upgrade, including ones
+  an admin made (owner-approved). Same grounds as super_admin: a portal
+  role is defined as portal permissions only, so a staff grant is drift,
+  not a customisation. It prints what it removed and writes one
+  `PORTAL_PERMS_REMOVED` audit row per role (no actor). The one-time grant
+  of the new permission is a migration instead, because repeating it on
+  every upgrade would undo an admin's deliberate removal. The function
+  takes an optional company scope used only by tests: other test files
+  give portal roles staff permissions on purpose.
+- **What this doesn't cover:** `PermissionsGuard` is still default-allow
+  within a surface, and all tokens share one signing secret (both in
+  `docs/todo.md`).
 
 ## graphify
 
