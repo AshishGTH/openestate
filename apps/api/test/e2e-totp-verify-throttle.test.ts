@@ -302,16 +302,14 @@ describeIf('totp/verify brute-force limits, staff and portal', () => {
     expect(blocked.headers['retry-after-portal-auth']).toBeDefined();
   });
 
-  it('the lockout holds where the rate limit does not: after 5 failures on staff verify, the same tempToken is refused on portal verify, whose rate limit still has room', async () => {
+  it('a staff tempToken is refused (403) on the portal verify endpoint, before any rate limit applies', async () => {
     const user = await makeUser('staff');
     const p = await pending(user);
-    for (let i = 0; i < VERIFY_LIMIT; i++) {
-      await verify(p, wrongCode(user.secret), freshIp()).expect(401);
-    }
 
-    // A 2FA-pending token is accepted by both verify endpoints, and the rate
-    // limit keys them separately — so this request passes it (4 left). The
-    // attacker supplies their own portal CSRF pair.
+    // SessionSurfaceGuard rejects a staff-surface pending token on a
+    // portal-prefixed route before CSRF, permissions, or the totp-verify
+    // throttler ever run — so no rate-limit header is set, and this fails
+    // the exact same way regardless of the code supplied.
     const crossSurface = await request(app.getHttpServer())
       .post(VERIFY.portal)
       .set('X-Forwarded-For', freshIp())
@@ -319,8 +317,8 @@ describeIf('totp/verify brute-force limits, staff and portal', () => {
       .set('Cookie', `${CSRF.portal}=forged`)
       .set('X-CSRF-Token', 'forged')
       .send({ code: totpCode(user.secret) });
-    expect(crossSurface.headers['x-ratelimit-remaining-totp-verify']).toBe(String(VERIFY_LIMIT - 1));
-    expect(crossSurface.status).toBe(429);
-    expect(crossSurface.body.message).toBe('Too many incorrect codes. Wait a few minutes, then sign in again.');
+    expect(crossSurface.status).toBe(403);
+    expect(crossSurface.body.message).toBe('This session type may not access this route.');
+    expect(crossSurface.headers['x-ratelimit-remaining-totp-verify']).toBeUndefined();
   });
 });

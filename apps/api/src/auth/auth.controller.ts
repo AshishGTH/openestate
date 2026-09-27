@@ -126,8 +126,8 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const user = req.user as JwtPayload;
-    const result = await this.authService.verifyTotp(user.sub, dto.code);
+    const pending = req.user as JwtPayload;
+    const result = await this.authService.verifyTotp(pending.sub, dto.code, pending.surface);
 
     setRefreshCookie(res, result.refreshRaw, result.expiresAt);
     setCsrfCookie(res);

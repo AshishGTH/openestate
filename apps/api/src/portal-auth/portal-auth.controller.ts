@@ -121,8 +121,8 @@ export class PortalAuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const user = req.user as JwtPayload;
-    const result = await this.portalAuthService.verifyTotp(user.sub, dto.code);
+    const pending = req.user as JwtPayload;
+    const result = await this.portalAuthService.verifyTotp(pending.sub, dto.code, pending.surface);
     setPortalRefreshCookie(res, result.refreshRaw, result.expiresAt);
     setPortalCsrfCookie(res);
     return { accessToken: result.accessToken };

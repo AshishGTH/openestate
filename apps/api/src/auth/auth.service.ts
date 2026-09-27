@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   UnauthorizedException,
@@ -52,6 +53,14 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    // A portal account (customer/broker) must never authenticate on the staff
+    // surface. Mirrors the portal side's staff-exclusion at login. Same
+    // 'Invalid credentials' message as a missing user, so staff login does
+    // not reveal that a given identifier is a portal account.
+    if (user.applicantId || user.brokerId) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
     if (user.lockedUntil && user.lockedUntil > new Date()) {
       throw new UnauthorizedException(
         'Account locked. Try again later.',
@@ -79,6 +88,7 @@ export class AuthService {
         companyId: user.companyId,
         email: user.email,
         roleSlug: user.role.slug,
+        surface: 'staff',
       });
       return { requiresTwoFactor: true, tempToken };
     }
@@ -90,11 +100,19 @@ export class AuthService {
   async verifyTotp(
     userId: string,
     code: string,
+    pendingSurface?: 'staff' | 'portal',
   ): Promise<{
     accessToken: string;
     refreshRaw: string;
     expiresAt: Date;
   }> {
+    // A pending token minted on the portal surface must not complete a staff
+    // login, regardless of the account it names. Older pending tokens carry
+    // no surface; those fall through to the account-type check below.
+    if (pendingSurface && pendingSurface !== 'staff') {
+      throw new ForbiddenException('This session type may not access this route.');
+    }
+
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
       include: {
@@ -105,6 +123,12 @@ export class AuthService {
         },
       },
     });
+
+    // Defence in depth: a staff full token must only ever be minted for a
+    // staff account, whatever the pending token claimed.
+    if (user.applicantId || user.brokerId) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     if (!user.totpEnabled || !user.totpSecret) {
       throw new BadRequestException('2FA not enabled');
@@ -231,7 +255,7 @@ export class AuthService {
       },
     });
 
-    if (!user || !user.isActive) return null;
+    if (!user || !user.isActive || user.applicantId || user.brokerId) return null;
 
     const permissions = user.role.permissions.map(
       (rp) => rp.permission.key,

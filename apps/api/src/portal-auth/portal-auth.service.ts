@@ -95,6 +95,7 @@ export class PortalAuthService {
         companyId: user.companyId,
         email: user.email,
         roleSlug: user.role.slug,
+        surface: 'portal',
         applicantId: user.applicantId ?? undefined,
         brokerId: user.brokerId ?? undefined,
       });
@@ -105,11 +106,28 @@ export class PortalAuthService {
     return { requiresTwoFactor: false, ...tokens };
   }
 
-  async verifyTotp(userId: string, code: string): Promise<Required<Omit<PortalLoginResult, 'requiresTwoFactor' | 'tempToken'>>> {
+  async verifyTotp(
+    userId: string,
+    code: string,
+    pendingSurface?: 'staff' | 'portal',
+  ): Promise<Required<Omit<PortalLoginResult, 'requiresTwoFactor' | 'tempToken'>>> {
+    // A pending token minted on the staff surface must not complete a portal
+    // login, regardless of the account it names. Older pending tokens carry
+    // no surface; those fall through to the account-type check below.
+    if (pendingSurface && pendingSurface !== 'portal') {
+      throw new ForbiddenException('This session type may not access this route.');
+    }
+
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
       include: { role: { include: { permissions: { include: { permission: true } } } } },
     });
+
+    // Mirror of the staff side: a portal full token must only ever be minted
+    // for a portal account.
+    if (!user.applicantId && !user.brokerId) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     if (!user.totpEnabled || !user.totpSecret) {
       throw new BadRequestException('2FA not enabled');
