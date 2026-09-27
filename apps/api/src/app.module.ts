@@ -25,6 +25,7 @@ import { QueuesModule } from './queues/queues.module';
 import { NotificationModule } from './notifications/notification.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { TwoFactorPendingGuard } from './auth/guards/two-factor-pending.guard';
+import { SessionSurfaceGuard } from './auth/guards/session-surface.guard';
 import { DefaultThrottlerGuard } from './auth/guards/default-throttler.guard';
 import { TenantContextInterceptor } from './auth/interceptors/tenant-context.interceptor';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
@@ -178,6 +179,7 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     // totp/verify, before CSRF or permissions are even looked at. Global,
     // so no controller can opt out — see the guard's doc comment.
     { provide: APP_GUARD, useClass: TwoFactorPendingGuard },
+    { provide: APP_GUARD, useClass: SessionSurfaceGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     // Establishes ambient tenant/portal context for the rest of the

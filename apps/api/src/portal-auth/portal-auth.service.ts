@@ -215,6 +215,7 @@ export class PortalAuthService {
       email: user.email,
       roleSlug: user.role.slug,
       permissions,
+      surface: 'portal',
       applicantId: user.applicantId ?? undefined,
       brokerId: user.brokerId ?? undefined,
     });
@@ -669,6 +670,7 @@ export class PortalAuthService {
       email: user.email,
       roleSlug: user.role.slug,
       permissions,
+      surface: 'portal',
       applicantId: user.applicantId ?? undefined,
       brokerId: user.brokerId ?? undefined,
     });

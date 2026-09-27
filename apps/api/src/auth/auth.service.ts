@@ -243,6 +243,7 @@ export class AuthService {
       email: user.email,
       roleSlug: user.role.slug,
       permissions,
+      surface: 'staff',
       forcePasswordChange: user.forcePasswordChange,
     });
 
@@ -403,6 +404,7 @@ export class AuthService {
       email: user.email,
       roleSlug: user.role.slug,
       permissions,
+      surface: 'staff',
       forcePasswordChange: user.forcePasswordChange,
     });
 
