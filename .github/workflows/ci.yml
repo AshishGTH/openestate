@@ -682,15 +682,16 @@ jobs:
           # v0.1.2 itself still pins the old `argon2` native package, which
           # SIGSEGVs at module-LOAD time specifically on GitHub's
           # ubuntu-latest hosted runners (see CLAUDE.md's two SIGSEGV
-          # investigations, resolved by replacing it with @node-rs/argon2
-          # in c2c32e0) — installing literal v0.1.2 here would crash during
-          # the very first seed step, for a reason that has nothing to do
-          # with what this job tests. c2c32e0 is the oldest ref that can
-          # reliably install on this runner class, so it stands in for
-          # "the previous release" as this job's baseline. If a real
-          # tagged release ever supersedes v0.1.2, point this at that tag
-          # instead.
-          BASELINE_REF=c2c32e0
+          # investigations, resolved by replacing it with @node-rs/argon2).
+          # Installing literal v0.1.2 here would crash during the very
+          # first seed step, for a reason that has nothing to do with what
+          # this job tests. `ci-baseline-argon2-fix` is a tag (not a raw
+          # SHA, so a future history rewrite can't silently break this
+          # step again) pinned to the oldest commit that can reliably
+          # install on this runner class, standing in for "the previous
+          # release" as this job's baseline. If a real tagged release ever
+          # supersedes v0.1.2, point this at that tag instead.
+          BASELINE_REF=ci-baseline-argon2-fix
           echo "Baseline ref: ${BASELINE_REF} ($(git log -1 --format='%h %s' "$BASELINE_REF"))"
           git checkout "$BASELINE_REF"
 
