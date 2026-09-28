@@ -168,6 +168,8 @@ docs/           Docusaurus site: install, admin, API, plugin dev
 - Migrations are forward-only; never edit an applied migration.
 - Conventional commits. Every phase ends with all tests green and
   `sudo ./deploy/native/install-native.sh` working from scratch.
+- Never add Co-Authored-By trailers or "Generated with Claude Code"
+  lines to commits or PR descriptions.
 
 ## Definition of done for any feature
 
