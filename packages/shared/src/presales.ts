@@ -33,6 +33,57 @@ export function normalizePhone(raw: string): string {
   return trimmed;
 }
 
+// ── Inquiry list search ─────────────────────────────────────
+
+/** A search term shorter than this is ignored (the list is returned unfiltered). */
+export const INQUIRY_SEARCH_MIN_LENGTH = 2;
+/** Digits needed before a term is also matched against phone numbers. */
+export const INQUIRY_SEARCH_MIN_PHONE_DIGITS = 3;
+
+/**
+ * Escapes the characters that are special in a SQL LIKE pattern (`%`, `_` and the
+ * escape character `\\` itself) so user text matches literally. Prisma binds the
+ * value as a parameter but does NOT escape LIKE wildcards inside `contains`, so
+ * without this a search for `%%` matches every row.
+ */
+export function escapeLikePattern(raw: string): string {
+  return raw.replace(/[\\%_]/g, '\\$&');
+}
+
+export interface InquirySearchTerms {
+  /** The trimmed, whitespace-collapsed text, matched case-insensitively against name/email/project. */
+  text: string;
+  /**
+   * Digit strings to match against phone numbers. Empty when the term is not
+   * phone-like. Holds the digits as typed plus the same digits with an Indian
+   * country/trunk prefix removed, so "+91 98765", "098765" and "98765" all find
+   * 9876543210 (stored normalised, see `normalizePhone`).
+   */
+  phoneDigits: string[];
+}
+
+/**
+ * Turns the raw `search` query parameter into safe match terms, or null when
+ * there is nothing to search for. Pure: no I/O, so the rules are unit-tested
+ * without a database. The terms are only ever passed to Prisma as bound
+ * parameters (`contains`), never spliced into SQL.
+ */
+export function buildInquirySearchTerms(raw: string | undefined | null): InquirySearchTerms | null {
+  const text = (raw ?? '').replace(/\s+/g, ' ').trim();
+  if (text.length < INQUIRY_SEARCH_MIN_LENGTH) return null;
+
+  const phoneLike = /^\+?[\d\s().-]+$/.test(text);
+  const digits = text.replace(/\D/g, '');
+  const phoneDigits: string[] = [];
+  if (phoneLike && digits.length >= INQUIRY_SEARCH_MIN_PHONE_DIGITS) {
+    phoneDigits.push(digits);
+    // "+91 ..." / "91 ..." / "0 ...": also try without the prefix normalizePhone strips.
+    const stripped = text.startsWith('+91') || /^91\s/.test(text) ? digits.slice(2) : digits.startsWith('0') ? digits.slice(1) : '';
+    if (stripped.length >= INQUIRY_SEARCH_MIN_PHONE_DIGITS) phoneDigits.push(stripped);
+  }
+  return { text, phoneDigits };
+}
+
 export function normalizeEmail(raw: string): string {
   return raw.trim().toLowerCase();
 }

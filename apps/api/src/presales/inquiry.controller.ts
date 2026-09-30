@@ -8,7 +8,7 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { createZodDto } from 'nestjs-zod';
 import {
@@ -48,6 +48,13 @@ export class InquiryController {
   @Get()
   @RequirePermissions(PERMISSIONS.PRESALES_INQUIRY_READ)
   @ApiOperation({ summary: "List inquiries (scoped to the caller's reporting subtree)" })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    description:
+      'Case-insensitive match on applicant name, email or phone digits, or project name. ' +
+      'Fewer than 2 characters is ignored (unfiltered list). Combined with the caller\'s team scope, never widening it.',
+  })
   async findAll(@Query() query: PaginationQueryDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.inquiryService.findAll(user.companyId, query, await this.scopeFor(user));

@@ -10,6 +10,8 @@ import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import {
   normalizePhone,
   normalizeEmail,
+  buildInquirySearchTerms,
+  escapeLikePattern,
   isFollowUpOverdue,
   redactAadhaarLike,
   type Clock,
@@ -76,6 +78,34 @@ export class InquiryService {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = { companyId };
     if (scope.visibleUserIds) where.assignedToId = { in: scope.visibleUserIds };
+
+    // Search narrows the caller's visible set; it is AND-ed in, never merged
+    // over `assignedToId`, so it cannot widen what the caller may see.
+    const search = buildInquirySearchTerms(query.search);
+    if (search) {
+      const { phoneDigits } = search;
+      // LIKE wildcards in the user's text are escaped so they match literally.
+      const text = escapeLikePattern(search.text);
+      where.AND = [
+        {
+          OR: [
+            // Prisma binds every `contains` value as a parameter; nothing is
+            // interpolated into SQL.
+            { applicant: { name: { contains: text, mode: 'insensitive' } } },
+            { applicant: { email: { contains: text, mode: 'insensitive' } } },
+            { project: { name: { contains: text, mode: 'insensitive' } } },
+            // Phones are stored normalised (10-digit Indian mobile) or, for
+            // anything else, exactly as typed: match the digits, and the text
+            // as typed (finds "+1 415 555 0132" when the user types "415 555").
+            ...(phoneDigits.length > 0 ? [{ applicant: { primaryPhone: { contains: text } } }] : []),
+            ...phoneDigits.flatMap((d) => [
+              { applicant: { primaryPhoneNormalized: { contains: d } } },
+              { applicant: { primaryPhone: { contains: d } } },
+            ]),
+          ],
+        },
+      ];
+    }
 
     const [data, total] = await Promise.all([
       this.systemPrisma.inquiry.findMany({
