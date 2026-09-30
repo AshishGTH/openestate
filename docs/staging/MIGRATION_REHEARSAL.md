@@ -43,7 +43,8 @@ cd packages/db && DATABASE_URL="$STAGING_DB_URL" npx prisma migrate deploy
 psql "$STAGING_DB_URL" -v after=true -f docs/staging/site-visit-backfill-report.sql | tee after.txt
 ```
 
-Section 8 must show `rule_matches_not_flagged_should_be_0 = 0`.
+Section 8 must show `rule_matches_not_flagged_should_be_0 = 0`, and section 10 must show `rows_now_site_visit` equal to
+the `rows_become_site_visit` total from section 5b (before the migration).
 
 ## 5. Record the result
 
@@ -55,6 +56,10 @@ Section 8 must show `rule_matches_not_flagged_should_be_0 = 0`.
 | Auto-flagged (`flagged_total`, after) | NOT TESTED |
 | Left unclassified (`left_unclassified`) | NOT TESTED |
 | Unclassified types that are really site visits (needs a manual flag) | NOT TESTED |
+| Follow-up rows that become site visits (`rows_become_site_visit`, section 5b) | NOT TESTED |
+| of which the old report already counted (`rows_in_legacy_report`) | NOT TESTED |
+| of which only the app will show (`rows_app_only`) | NOT TESTED |
+| Follow-up rows that stay unclassified (`rows_stay_unclassified`) | NOT TESTED |
 
 Variants that must behave exactly like this (section 4 shows whether they exist in your data; create them on the copy if
 not, and re-run the migration test path by inserting them before step 3):

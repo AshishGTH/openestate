@@ -64,7 +64,8 @@ sudo sed -i 's|__SERVER_NAME__|staging.example.com|g; s|__CERT_DIR__|/etc/letsen
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
-`nginx.conf` has **not** been syntax-checked (no nginx was available when it was written); `nginx -t` is the first check.
+`nginx.conf` passed `nginx -t` on nginx 1.24 in a sandbox after one fix (see `NGINX_LOCAL_CHECK.md`, including what that did
+not cover: IPv6 and the static paths). Run `nginx -t` again on the staging host; it is the first check there.
 
 ## 4. Health checks
 
@@ -101,7 +102,7 @@ sudo -u postgres psql openestate -c "select migration_name, finished_at from _pr
 | Install or upgrade finished with exit 0 | NOT TESTED |
 | Health endpoint OK over HTTPS, version as expected | NOT TESTED |
 | HTTP redirects to HTTPS; HSTS present | NOT TESTED |
-| `nginx -t` passes with `nginx.conf` | NOT TESTED |
+| `nginx -t` passes with `nginx.conf` on the staging host | NOT TESTED (passed in a sandbox only) |
 | Login returns `Secure` cookies | NOT TESTED |
 | Migration `20260930120000_follow_up_type_is_site_visit` recorded as finished | NOT TESTED |
 | No errors in the service journal after 10 minutes | NOT TESTED |

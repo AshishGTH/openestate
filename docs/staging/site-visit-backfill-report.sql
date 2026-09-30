@@ -56,14 +56,31 @@ SELECT '[' || v.variant || ']' AS variant,
  ORDER BY v.variant;
 
 \echo
-\echo '== 5. Follow-ups per type the site-visit report and list depend on'
--- Existing follow-up rows are not modified by the migration; only the type flag is set.
-SELECT t.company_id, t.name, count(f.*) AS follow_ups
+\echo '== 5. Per follow-up type: how many follow-up rows change classification'
+-- Follow-up rows themselves are never modified. What changes is how the app classifies them: a row whose type gets
+-- flagged starts to count as a site visit (GET /site-visits, dashboard counts). rows_become_site_visit is that number.
+-- rows_in_legacy_report is what the existing pre-sales "Site visit" report counts today (exact name 'Site Visit');
+-- rows_app_only is the difference: visits the app will show that the old report does not.
+-- Types with no rows and no rule match are omitted.
+SELECT t.company_id,
+       '[' || t.name || ']'                                                            AS type_name,
+       count(f.*)                                                                      AS follow_up_rows,
+       count(f.*) FILTER (WHERE lower(btrim(t.name)) = 'site visit')                   AS rows_become_site_visit,
+       count(f.*) FILTER (WHERE t.name = 'Site Visit')                                 AS rows_in_legacy_report,
+       count(f.*) FILTER (WHERE lower(btrim(t.name)) = 'site visit' AND t.name <> 'Site Visit') AS rows_app_only
   FROM follow_up_types t
   LEFT JOIN follow_ups f ON f.follow_up_type_id = t.id
- WHERE lower(btrim(t.name)) = 'site visit' OR t.name ILIKE '%site%'
  GROUP BY t.company_id, t.name
+HAVING count(f.*) > 0 OR lower(btrim(t.name)) = 'site visit'
  ORDER BY t.company_id, t.name;
+
+\echo
+\echo '== 5b. Totals of the above'
+SELECT count(f.*) FILTER (WHERE lower(btrim(t.name)) = 'site visit')                   AS rows_become_site_visit,
+       count(f.*) FILTER (WHERE t.name = 'Site Visit')                                 AS rows_in_legacy_report,
+       count(f.*) FILTER (WHERE lower(btrim(t.name)) = 'site visit' AND t.name <> 'Site Visit') AS rows_app_only,
+       count(f.*) FILTER (WHERE lower(btrim(t.name)) <> 'site visit')                  AS rows_stay_unclassified
+  FROM follow_ups f JOIN follow_up_types t ON t.id = f.follow_up_type_id;
 
 \echo
 \echo '== 6. Existing pre-sales "Site visit" report input: exact-name matches (the report matches name = ''Site Visit'')'
@@ -99,4 +116,10 @@ SELECT company_id, name, is_active
   FROM follow_up_types
  WHERE NOT is_site_visit
  ORDER BY company_id, name;
+
+\echo
+\echo '== 10. AFTER: follow-up rows by flag (must equal rows_become_site_visit from section 5b)'
+SELECT count(f.*) FILTER (WHERE t.is_site_visit)     AS rows_now_site_visit,
+       count(f.*) FILTER (WHERE NOT t.is_site_visit) AS rows_not_site_visit
+  FROM follow_ups f JOIN follow_up_types t ON t.id = f.follow_up_type_id;
 \endif
