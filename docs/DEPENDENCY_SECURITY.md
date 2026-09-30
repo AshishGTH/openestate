@@ -1,3 +1,8 @@
+> **SUPERSEDED. DO NOT MERGE THIS BRANCH.** `chore/deps-security-patches` is replaced by **`chore/rc-with-deps`**, which
+> contains the same patch set on top of the G1-G7 release candidate. This branch is built from `master`, does not contain
+> G1-G7, and its test numbers were reported wrongly earlier (they were never measured on this branch; see section 6). The
+> version of this document you are reading is the corrected one. The verified results are on `chore/rc-with-deps`.
+
 # Dependency security triage (API repo)
 
 Audit date 2026-09-30, `pnpm audit` (advisory data from the npm registry), branch `chore/api-release-readiness`
@@ -86,13 +91,69 @@ Docusaurus update or `pnpm update --filter docs` would normally carry). Not rele
 
 Nothing that needs a major upgrade is applied in this release candidate.
 
-## 6. What was applied
+## 6. What was applied, and where each number comes from
 
-Branch `chore/deps-security-patches` (off `master`), same-major changes only:
+**Correction (evidence review).** The first version of this section reported "122 files / 892 tests, web 81, portal 215" as
+the result on `chore/deps-security-patches`. That was wrong on two counts:
 
-- Overrides: qs 6.16.0, multer 2.4.0, js-yaml 4.3.2, lodash 4.18.1, body-parser 1.20.8, brace-expansion 1.1.21 / 2.1.7 / 5.0.12.
-- Direct bumps: multer ^2.4.0 and sharp ^0.35.5 (apps/api), react-router-dom ^7.18.4 (apps/web, apps/portal).
+- `chore/deps-security-patches` is built from `master` and does not contain the G1-G7 branches (113 API test files there, 122
+  on the release candidate, counted with `git ls-tree` for `*.test.ts` / `*.spec.ts` under `apps/api`), so 122 files / 892 tests cannot have come from it. Those totals match the release candidate
+  (`chore/api-release-readiness`) and were not measured on the patch branch. **No test result was ever recorded for
+  `chore/deps-security-patches` on its own.**
+- "web 81 / portal 215" were the `packages/db` (81) and `packages/shared` (215) counts, mislabelled. The web and portal
+  counts are 6 and 4.
 
-Verification: typecheck and lint clean; API build; API suite 122 files / 892 tests passed; web 81 tests passed; portal 215 tests passed; web and portal builds succeeded.
+The combination that will ship is release candidate + patches. It now exists as **`chore/rc-with-deps`**, and every number
+below comes from that branch.
 
-Result: production advisories 63 -> 31 (`pnpm audit --prod`: 15 high, 10 moderate, 6 low, 0 critical). What remains is the deferred and accepted set in section 5. These changes have not been exercised on a staging server (NOT TESTED there).
+### Patch set (unchanged from the triage)
+
+- Overrides in the root `package.json`: qs 6.16.0, multer 2.4.0, js-yaml 4.3.2, lodash 4.18.1, body-parser 1.20.8,
+  brace-expansion 1.1.21 / 2.1.7 / 5.0.12.
+- Direct bumps: multer ^2.4.0 and sharp ^0.35.5 (`apps/api`); react-router-dom ^7.18.4 (`apps/web`, `apps/portal`).
+- The lockfile was regenerated on this branch (not copied from the patch branch).
+
+### Verification on `chore/rc-with-deps` (2026-09-30)
+
+Procedure: delete every `node_modules` and every `dist`, `pnpm install --frozen-lockfile`, provision the test database with
+`scripts/test-setup.sh` (this also runs `prisma generate`), then typecheck, lint, build, then each test suite
+(`CI=true PROPERTY_NUM_RUNS=500`). PostgreSQL 16 and Redis 7 on one development machine. Counts are copied from the runner
+output.
+
+| Step | Result |
+|---|---|
+| Install | exit 0, lockfile up to date |
+| Typecheck (turbo) | 15 of 15 tasks successful |
+| Lint (turbo) | 14 of 14 tasks successful |
+| Build (turbo, includes web and portal production builds) | 10 of 10 tasks successful |
+
+| Suite | Test files | Tests |
+|---|---|---|
+| `apps/api` | 122 passed (122) | 892 passed (892) |
+| `packages/db` | 11 passed (11) | 81 passed (81) |
+| `packages/shared` | 15 passed (15) | 215 passed (215) |
+| `apps/web` | 3 passed (3) | 6 passed (6) |
+| `apps/portal` | 2 passed (2) | 4 passed (4) |
+
+Counts are the same as reported earlier for the release candidate (122 / 892, 11 / 81, 15 / 215); only their attribution was
+wrong, and the web/portal figures were mislabelled.
+
+An earlier attempt on this branch failed 97 API tests in six inquiry e2e files. The cause was the test run, not the
+patches: those tests load the compiled `apps/api/dist`, which was stale from another branch because the script did not
+rebuild it. The run above starts from an empty `dist`.
+
+### Audit (`pnpm audit --prod`)
+
+| | Distinct advisories | By severity (advisories) | Tool's per-path count (low / moderate / high) |
+|---|---|---|---|
+| Release candidate, before patches (measured this session) | 63 | see section 1 | 9 / 21 / 40 |
+| `chore/rc-with-deps`, after patches | 29 | 4 low, 10 moderate, 15 high, 0 critical | 6 / 10 / 15 |
+
+Note: the earlier text mixed two measures ("63 to 31"). Advisories (unique) went 63 to **29**; the tool's per-path count went
+70 to **31**. Severity split of the 63 before patches is in section 1 (36 high, 21 moderate, 6 low).
+
+What remains, by advisories: docs-site build tooling 24 (accepted, section 5); runtime `@nestjs/core` 1, `file-type` 2,
+`uuid` 1, `deepmerge-ts` 1 (deferred, not exposed, section 5). No critical.
+
+**Not tested:** these packages on a staging server. Runtime behaviour of the upgraded multer, sharp and qs on a real host is
+`NOT TESTED`.
