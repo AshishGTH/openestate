@@ -15,6 +15,8 @@ import { InquiryImportController } from './inquiry-import.controller';
 import { InquiryImportService } from './inquiry-import.service';
 import { FollowUpController } from './follow-up.controller';
 import { SiteVisitController } from './site-visit.controller';
+import { InquiryActivityController } from './inquiry-activity.controller';
+import { InquiryActivityService } from './inquiry-activity.service';
 import { FollowUpService } from './follow-up.service';
 import { CommunicationController } from './communication.controller';
 import { CommunicationService } from './communication.service';
@@ -41,6 +43,7 @@ import { InquiryDispositionTransitionService } from './inquiry-disposition-trans
     InquiryController,
     AssignmentPoolController,
     FollowUpController,
+    InquiryActivityController,
     SiteVisitController,
     CommunicationController,
     ReportsController,
@@ -53,6 +56,7 @@ import { InquiryDispositionTransitionService } from './inquiry-disposition-trans
     AssignmentService,
     InquiryImportService,
     FollowUpService,
+    InquiryActivityService,
     CommunicationService,
     CommunicationProcessor,
     EscalationService,

@@ -23,3 +23,20 @@ describe('siteVisitListQuerySchema', () => {
     expect(parse({ state }).success).toBe(true);
   });
 });
+
+import { inquiryActivityQuerySchema } from '../src/presales';
+
+describe('inquiryActivityQuerySchema', () => {
+  const ok = (q: object) => inquiryActivityQuerySchema.safeParse(q);
+  it('defaults and empty type', () => {
+    expect(ok({})).toMatchObject({ success: true, data: { page: 1, limit: 20 } });
+    expect(ok({ type: '' })).toMatchObject({ success: true, data: { type: undefined } });
+  });
+  it('accepts a comma list and repeats, de-duplicated', () => {
+    expect(ok({ type: 'follow_up,assignment' })).toMatchObject({ success: true, data: { type: ['follow_up', 'assignment'] } });
+    expect(ok({ type: ['stage_change', 'stage_change', 'assignment'] })).toMatchObject({ success: true, data: { type: ['stage_change', 'assignment'] } });
+  });
+  it.each([{ type: 'communication' }, { type: 'call' }, { type: 'FOLLOW_UP' }, { page: '11' }, { page: '0' }, { limit: '101' }, { limit: '0' }])('rejects %o', (q) => {
+    expect(ok(q).success).toBe(false);
+  });
+});

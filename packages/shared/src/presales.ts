@@ -440,6 +440,35 @@ export type CreateFollowUpDto = z.infer<typeof createFollowUpSchema>;
 export const updateFollowUpSchema = createFollowUpSchema.partial().strict();
 export type UpdateFollowUpDto = z.infer<typeof updateFollowUpSchema>;
 
+// ── Lead activity (GET /inquiries/:id/activity) ─────────────
+
+/**
+ * Only kinds that exist as real, stored events. Notably absent: calls and
+ * messages sent (communication logs have no read permission and hold message
+ * bodies), and edits to other lead fields (the audit log is admin-only).
+ */
+export const INQUIRY_ACTIVITY_TYPES = ['follow_up', 'stage_change', 'status_change', 'assignment'] as const;
+export type InquiryActivityType = (typeof INQUIRY_ACTIVITY_TYPES)[number];
+
+/** Deep enough for any real lead; keeps the per-source window (page x limit) bounded. */
+export const INQUIRY_ACTIVITY_MAX_PAGE = 10;
+
+export const inquiryActivityQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).max(INQUIRY_ACTIVITY_MAX_PAGE).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  /** `?type=follow_up,assignment` or repeated. Empty means every kind the caller may read. */
+  type: z.preprocess(
+    (v) => {
+      const raw = Array.isArray(v) ? v.join(',') : v;
+      if (typeof raw !== 'string') return raw;
+      const parts = raw.split(',').map((p) => p.trim()).filter((p) => p !== '');
+      return parts.length === 0 ? undefined : [...new Set(parts)];
+    },
+    z.array(z.enum(INQUIRY_ACTIVITY_TYPES)).min(1).optional(),
+  ),
+});
+export type InquiryActivityQuery = z.infer<typeof inquiryActivityQuerySchema>;
+
 // ── Site visits (GET /site-visits) ──────────────────────────
 
 /**
