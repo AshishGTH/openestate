@@ -14,6 +14,7 @@ import { AssignmentService } from './assignment.service';
 import { InquiryImportController } from './inquiry-import.controller';
 import { InquiryImportService } from './inquiry-import.service';
 import { FollowUpController } from './follow-up.controller';
+import { SiteVisitController } from './site-visit.controller';
 import { FollowUpService } from './follow-up.service';
 import { CommunicationController } from './communication.controller';
 import { CommunicationService } from './communication.service';
@@ -40,6 +41,7 @@ import { InquiryDispositionTransitionService } from './inquiry-disposition-trans
     InquiryController,
     AssignmentPoolController,
     FollowUpController,
+    SiteVisitController,
     CommunicationController,
     ReportsController,
   ],

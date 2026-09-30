@@ -1469,3 +1469,10 @@ the suspect code and confirming the failure persists unchanged in kind),
 not assumed from "E2E is flaky" folklore. This entry documents one
 specific, evidenced instance of pre-existing contention; it does not mean
 future E2E red is presumed innocent.
+
+## Site-visit reports still identify a site visit by type name
+
+`GET /site-visits` uses the stable `follow_up_types.is_site_visit` flag, but the existing pre-sales
+site-visit report and its counts (`reports.service.ts`) still match `type.name = 'Site Visit'`. A company
+that renames the type will see the two disagree. Switch the reports to the flag (with a note in the
+changelog, since it changes what an already-renamed type reports) once the flag is settled.

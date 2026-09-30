@@ -18,7 +18,11 @@ const SIMPLE_MASTERS = [
   { modelName: 'DumpReason', routePath: 'dump-reasons', apiTag: 'Dump Reasons' },
   { modelName: 'InquiryType', routePath: 'inquiry-types', apiTag: 'Inquiry Types' },
   { modelName: 'InquiryTemperature', routePath: 'inquiry-temperatures', apiTag: 'Inquiry Temperatures' },
-  { modelName: 'FollowUpType', routePath: 'follow-up-types', apiTag: 'Follow-Up Types' },
+  {
+    modelName: 'FollowUpType', routePath: 'follow-up-types', apiTag: 'Follow-Up Types',
+    // Marks the type(s) that represent a site visit; GET /site-visits lists follow-ups of these types.
+    extraFields: { isSiteVisit: z.boolean().optional() },
+  },
   { modelName: 'CommunicationType', routePath: 'communication-types', apiTag: 'Communication Types' },
   { modelName: 'ProjectType', routePath: 'project-types', apiTag: 'Project Types' },
   { modelName: 'ReceiptType', routePath: 'receipt-types', apiTag: 'Receipt Types' },

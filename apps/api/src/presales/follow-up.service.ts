@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaClient, withTenantTx, runWithTenant } from '@openestate/db';
 import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
-import { ACTIVE_INQUIRY_STATUSES, type CreateFollowUpDto, type UpdateFollowUpDto, type Clock } from '@openestate/shared';
+import { ACTIVE_INQUIRY_STATUSES, type CreateFollowUpDto, type UpdateFollowUpDto, type SiteVisitListQuery, type SiteVisitState, type Clock } from '@openestate/shared';
 import { CLOCK } from '../common/clock.provider';
 import { InquiryService, type InquiryScope } from './inquiry.service';
 
@@ -39,6 +39,53 @@ export class FollowUpService {
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  /**
+   * Site visits the caller may see: follow-ups whose type is flagged
+   * `isSiteVisit` (never matched by name) and which have a `scheduledAt`,
+   * whose parent inquiry is in the caller's visible set. Same scope and
+   * `assignedTo` semantics as the inquiry list, via InquiryService.scopedWhere.
+   */
+  async listSiteVisits(companyId: string, query: SiteVisitListQuery, scope: InquiryScope, actorId: string) {
+    const now = this.clock.now();
+    const inquiry = await this.inquiryService.scopedWhere(companyId, scope, actorId, query.assignedTo);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const scheduledAt: any = { not: null };
+    if (query.from) scheduledAt.gte = query.from;
+    if (query.to) scheduledAt.lt = query.to;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const where: any = { companyId, type: { isSiteVisit: true }, scheduledAt, inquiry: { is: inquiry } };
+    if (query.state === 'outcome_recorded') where.outcome = { not: null };
+    else if (query.state) {
+      where.outcome = null;
+      // `scheduledAt` already holds the from/to bounds: AND the state bound instead of overwriting them.
+      where.AND = [{ scheduledAt: query.state === 'scheduled' ? { gte: now } : { lt: now } }];
+    }
+    const [rows, total] = await Promise.all([
+      this.systemPrisma.followUp.findMany({
+        where,
+        orderBy: [{ scheduledAt: query.sortOrder }, { id: 'asc' }],
+        skip: (query.page - 1) * query.limit,
+        take: query.limit,
+        select: {
+          id: true, inquiryId: true, scheduledAt: true, venue: true, notes: true, outcome: true, interactionAt: true,
+          type: { select: { id: true, name: true } },
+          createdBy: { select: { id: true, name: true } },
+          inquiry: {
+            select: {
+              id: true, status: true,
+              applicant: { select: { id: true, name: true, primaryPhone: true } },
+              project: { select: { id: true, name: true } },
+              assignedTo: { select: { id: true, name: true } },
+            },
+          },
+        },
+      }),
+      this.systemPrisma.followUp.count({ where }),
+    ]);
+    const data = rows.map((r) => ({ ...r, state: siteVisitState(r.outcome, r.scheduledAt as Date, now) }));
+    return { data, meta: { page: query.page, limit: query.limit, total, totalPages: Math.ceil(total / query.limit) } };
   }
 
   async create(
@@ -117,4 +164,9 @@ export class FollowUpService {
       ),
     );
   }
+}
+
+export function siteVisitState(outcome: string | null, scheduledAt: Date, now: Date): SiteVisitState {
+  if (outcome) return 'outcome_recorded';
+  return scheduledAt.getTime() >= now.getTime() ? 'scheduled' : 'awaiting_outcome';
 }

@@ -93,7 +93,7 @@ export class InquiryService {
    * what a caller may see. Shared by the list and the summary so the two can
    * never disagree about which leads are "visible".
    */
-  private async scopedWhere(
+  async scopedWhere(
     companyId: string,
     scope: InquiryScope,
     actorId: string,

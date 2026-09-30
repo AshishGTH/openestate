@@ -170,13 +170,13 @@ const statusListSchema = z.preprocess(
  * Date-only or offset-less strings are rejected: they would be silently read as
  * UTC and a client in another zone would get the wrong day.
  */
-const instantSchema = z
+export const instantSchema = z
   .string()
   .datetime({ offset: true, message: 'Must be an ISO 8601 instant with a time zone offset, e.g. 2026-10-01T00:00:00+05:30 or ...Z' })
   .transform((v) => new Date(v));
 
 /** `me` (the caller) or a user id inside the caller's visible team. */
-const assignedToSchema = z.union([z.literal('me'), z.string().uuid()]);
+export const assignedToSchema = z.union([z.literal('me'), z.string().uuid()]);
 
 export const inquiryListQuerySchema = z
   .object({
@@ -439,6 +439,38 @@ export type CreateFollowUpDto = z.infer<typeof createFollowUpSchema>;
 
 export const updateFollowUpSchema = createFollowUpSchema.partial().strict();
 export type UpdateFollowUpDto = z.infer<typeof updateFollowUpSchema>;
+
+// ── Site visits (GET /site-visits) ──────────────────────────
+
+/**
+ * Derived, never stored. A site visit is a follow-up whose type is flagged
+ * `isSiteVisit` and which has a `scheduledAt`.
+ *  - scheduled:        no outcome yet, scheduledAt is now or later
+ *  - awaiting_outcome: no outcome yet, scheduledAt has passed
+ *  - outcome_recorded: an outcome (completed, no response, rescheduled, ...) is set
+ * There is deliberately no "cancelled": the data has no such state.
+ */
+export const SITE_VISIT_STATES = ['scheduled', 'awaiting_outcome', 'outcome_recorded'] as const;
+export type SiteVisitState = (typeof SITE_VISIT_STATES)[number];
+
+export const siteVisitListQuerySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    /** Inclusive lower bound on scheduledAt. */
+    from: instantSchema.optional(),
+    /** Exclusive upper bound on scheduledAt. */
+    to: instantSchema.optional(),
+    state: z.enum(SITE_VISIT_STATES).optional(),
+    sortOrder: z.enum(['asc', 'desc']).default('asc'),
+    assignedTo: assignedToSchema.optional(),
+  })
+  .superRefine((q, ctx) => {
+    if (q.from && q.to && q.from >= q.to) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['to'], message: 'to must be later than from' });
+    }
+  });
+export type SiteVisitListQuery = z.infer<typeof siteVisitListQuerySchema>;
 
 // ── Zod Schemas: Communication send ─────────────────────────
 

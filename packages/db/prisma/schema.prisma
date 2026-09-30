@@ -436,6 +436,9 @@ model FollowUpType {
   id        String     @id @default(uuid()) @db.Uuid
   companyId String     @map("company_id") @db.Uuid
   name      String     @db.VarChar(255)
+  /// Stable marker for "this type is a site visit", so nothing has to match
+  /// on the (admin-editable) name. Backfilled from name = 'Site Visit'.
+  isSiteVisit Boolean  @default(false) @map("is_site_visit")
   isActive  Boolean    @default(true) @map("is_active")
   sortOrder Int        @default(0) @map("sort_order")
   createdAt DateTime   @default(now()) @map("created_at")

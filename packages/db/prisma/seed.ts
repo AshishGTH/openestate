@@ -199,6 +199,9 @@ async function main() {
     }
     console.log(`  ${model}: ${items.length} entries`);
   }
+  // The stable site-visit marker (follow_up_types.is_site_visit): consumers
+  // must not identify a site visit by its editable name.
+  await prisma.followUpType.updateMany({ where: { companyId: company.id, name: 'Site Visit' }, data: { isSiteVisit: true } });
 
   console.log('Seeding interest rules...');
   await prisma.interestRule.create({
