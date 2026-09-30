@@ -165,16 +165,74 @@ const statusListSchema = z.preprocess(
   z.array(z.enum(STATUS_VALUES)).min(1).optional(),
 );
 
-export const inquiryListQuerySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-  search: z.string().max(255).optional(),
-  status: statusListSchema,
-  sortBy: z.enum(INQUIRY_SORT_FIELDS).optional(),
-  sortOrder: z.enum(['asc', 'desc']).default('asc'),
-});
+/**
+ * An instant with an explicit offset ("2026-10-01T00:00:00+05:30" or "...Z").
+ * Date-only or offset-less strings are rejected: they would be silently read as
+ * UTC and a client in another zone would get the wrong day.
+ */
+const instantSchema = z
+  .string()
+  .datetime({ offset: true, message: 'Must be an ISO 8601 instant with a time zone offset, e.g. 2026-10-01T00:00:00+05:30 or ...Z' })
+  .transform((v) => new Date(v));
+
+/** `me` (the caller) or a user id inside the caller's visible team. */
+const assignedToSchema = z.union([z.literal('me'), z.string().uuid()]);
+
+export const inquiryListQuerySchema = z
+  .object({
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+    search: z.string().max(255).optional(),
+    status: statusListSchema,
+    sortBy: z.enum(INQUIRY_SORT_FIELDS).optional(),
+    sortOrder: z.enum(['asc', 'desc']).default('asc'),
+    /** Inclusive lower bound on `nextFollowupAt`. */
+    followUpAfter: instantSchema.optional(),
+    /** Exclusive upper bound on `nextFollowupAt`. */
+    followUpBefore: instantSchema.optional(),
+    /** Only `none` (no follow-up date set) is supported. */
+    followUp: z.enum(['none']).optional(),
+    assignedTo: assignedToSchema.optional(),
+  })
+  .superRefine((q, ctx) => {
+    if (q.followUp === 'none' && (q.followUpAfter || q.followUpBefore)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['followUp'], message: 'followUp=none cannot be combined with followUpAfter or followUpBefore' });
+    }
+    if (q.followUpAfter && q.followUpBefore && q.followUpAfter >= q.followUpBefore) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['followUpBefore'], message: 'followUpBefore must be later than followUpAfter' });
+    }
+  });
 
 export type InquiryListQuery = z.infer<typeof inquiryListQuerySchema>;
+
+// ── Inquiry summary (GET /inquiries/summary) ────────────────
+
+/** A "day" is at most this long: 25 h covers a DST fall-back, the rest is slack. */
+export const INQUIRY_SUMMARY_MAX_DAY_MS = 26 * 3_600_000;
+
+export const inquirySummaryQuerySchema = z
+  .object({
+    /** Start (inclusive) of the caller's "today". Omitted: the company's day (CompanyConfig.timezone). */
+    dayStart: instantSchema.optional(),
+    /** End (exclusive) of the caller's "today". Must be given together with dayStart. */
+    dayEnd: instantSchema.optional(),
+    /** Count leads created at or after this instant as "new". Default: dayEnd minus 7 days. */
+    since: instantSchema.optional(),
+    assignedTo: assignedToSchema.optional(),
+  })
+  .superRefine((q, ctx) => {
+    if (!!q.dayStart !== !!q.dayEnd) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dayEnd'], message: 'dayStart and dayEnd must be given together' });
+      return;
+    }
+    if (q.dayStart && q.dayEnd) {
+      const span = q.dayEnd.getTime() - q.dayStart.getTime();
+      if (span <= 0) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dayEnd'], message: 'dayEnd must be later than dayStart' });
+      else if (span > INQUIRY_SUMMARY_MAX_DAY_MS) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['dayEnd'], message: 'A day cannot be longer than 26 hours' });
+    }
+  });
+
+export type InquirySummaryQuery = z.infer<typeof inquirySummaryQuerySchema>;
 
 /** Seeded default pipeline — India-first per CLAUDE.md, matches the set
  *  the requester approved for Phase 0 of the lead-stage foundation.

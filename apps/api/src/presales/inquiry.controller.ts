@@ -17,6 +17,7 @@ import {
   updateInquirySchema,
   assignInquirySchema,
   inquiryListQuerySchema,
+  inquirySummaryQuerySchema,
   PERMISSIONS,
 } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
@@ -28,6 +29,7 @@ class CreateInquiryDto extends createZodDto(createInquirySchema) {}
 class UpdateInquiryDto extends createZodDto(updateInquirySchema) {}
 class AssignInquiryDto extends createZodDto(assignInquirySchema) {}
 class InquiryListQueryDto extends createZodDto(inquiryListQuerySchema) {}
+class InquirySummaryQueryDto extends createZodDto(inquirySummaryQuerySchema) {}
 
 @ApiTags('Inquiries')
 @Controller('inquiries')
@@ -69,9 +71,25 @@ export class InquiryController {
     description: 'Default createdAt descending. nextFollowupAt sorts leads with no follow-up last. Any other value is a 400.',
   })
   @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'], description: 'Applies when sortBy is given. Default asc.' })
+  @ApiQuery({ name: 'followUpAfter', required: false, description: 'Inclusive lower bound on the lead\'s next follow-up. ISO 8601 instant WITH offset (2026-10-01T00:00:00+05:30 or ...Z); date-only or offset-less values are a 400.' })
+  @ApiQuery({ name: 'followUpBefore', required: false, description: 'Exclusive upper bound on the next follow-up. Same format. Must be later than followUpAfter.' })
+  @ApiQuery({ name: 'followUp', required: false, enum: ['none'], description: 'none = no follow-up date set. Cannot be combined with followUpAfter/followUpBefore.' })
+  @ApiQuery({ name: 'assignedTo', required: false, description: '"me" or a user id inside the caller\'s visible team (404 otherwise).' })
   async findAll(@Query() query: InquiryListQueryDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.inquiryService.findAll(user.companyId, query, await this.scopeFor(user));
+    return this.inquiryService.findAll(user.companyId, query, await this.scopeFor(user), user.sub);
+  }
+
+  @Get('summary')
+  @RequirePermissions(PERMISSIONS.PRESALES_INQUIRY_READ)
+  @ApiOperation({ summary: "Dashboard counts over the caller's visible leads (total, by status, overdue, due today, new)" })
+  @ApiQuery({ name: 'dayStart', required: false, description: 'Start (inclusive) of the caller\'s "today", ISO 8601 with offset. Give with dayEnd. Default: the company\'s day (CompanyConfig.timezone).' })
+  @ApiQuery({ name: 'dayEnd', required: false, description: 'End (exclusive) of "today". At most 26 hours after dayStart.' })
+  @ApiQuery({ name: 'since', required: false, description: 'Count leads created at or after this instant as "new". Default: dayEnd minus 7 days.' })
+  @ApiQuery({ name: 'assignedTo', required: false, description: '"me" or a user id in the caller\'s visible team. Default: everyone the caller can see.' })
+  async summary(@Query() query: InquirySummaryQueryDto, @Req() req: Request) {
+    const user = req.user as JwtPayload;
+    return this.inquiryService.summary(user.companyId, query, await this.scopeFor(user), user.sub);
   }
 
   @Get('my-day')

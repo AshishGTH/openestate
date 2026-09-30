@@ -11,6 +11,7 @@ export * from './custom-field.dto';
 export * from './company.dto';
 export * from './inventory';
 export * from './presales';
+export * from './tz';
 export * from './finance';
 export * from './documents';
 export * from './commission';

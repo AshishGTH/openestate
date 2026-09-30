@@ -12,6 +12,8 @@ import {
   normalizeEmail,
   buildInquirySearchTerms,
   escapeLikePattern,
+  dayBoundsInTimeZone,
+  DEFAULT_TIME_ZONE,
   isFollowUpOverdue,
   redactAadhaarLike,
   type Clock,
@@ -21,6 +23,7 @@ import type {
   UpdateInquiryDto,
   InquiryListQuery,
   InquirySortField,
+  InquirySummaryQuery,
 } from '@openestate/shared';
 import { CLOCK } from '../common/clock.provider';
 import { AssignmentService } from './assignment.service';
@@ -84,45 +87,103 @@ export class InquiryService {
     private readonly dispositionTransition: InquiryDispositionTransitionService,
   ) {}
 
-  async findAll(companyId: string, query: InquiryListQuery, scope: InquiryScope) {
-    const { page, limit, sortBy, sortOrder, status } = query;
-    const skip = (page - 1) * limit;
-
+  /**
+   * The caller's visible set, narrowed by the request. Every filter is AND-ed
+   * (never merged over the scope's `assignedToId`), so nothing here can widen
+   * what a caller may see. Shared by the list and the summary so the two can
+   * never disagree about which leads are "visible".
+   */
+  private async scopedWhere(
+    companyId: string,
+    scope: InquiryScope,
+    actorId: string,
+    assignedTo: string | undefined,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    extra: any[] = [],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): Promise<any> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = { companyId };
     if (scope.visibleUserIds) where.assignedToId = { in: scope.visibleUserIds };
+    const and = [...extra];
+    const assignedToId = await this.resolveAssignedTo(companyId, assignedTo, actorId, scope);
+    if (assignedToId) and.push({ assignedToId });
+    if (and.length > 0) where.AND = and;
+    return where;
+  }
 
-    if (status) where.status = { in: status };
+  /** `me` is the caller; an id must be someone in the caller's visible team (404 otherwise, like every out-of-scope reference). */
+  private async resolveAssignedTo(companyId: string, assignedTo: string | undefined, actorId: string, scope: InquiryScope): Promise<string | undefined> {
+    if (!assignedTo) return undefined;
+    if (assignedTo === 'me') return actorId;
+    if (scope.visibleUserIds && !scope.visibleUserIds.includes(assignedTo)) throw new NotFoundException('User not found');
+    const user = await this.systemPrisma.user.findFirst({ where: { id: assignedTo, companyId }, select: { id: true } });
+    if (!user) throw new NotFoundException('User not found');
+    return assignedTo;
+  }
 
-    // Search narrows the caller's visible set; it is AND-ed in, never merged
-    // over `assignedToId`, so it cannot widen what the caller may see.
+  /**
+   * `lastActivityAt` = the later of the lead's own `updatedAt` and its newest
+   * logged follow-up interaction (ignoring interactions dated in the future).
+   * One grouped query for the whole page, not one per row.
+   */
+  private async withLastActivity<T extends { id: string; updatedAt: Date }>(companyId: string, rows: T[]): Promise<(T & { lastActivityAt: Date })[]> {
+    if (rows.length === 0) return [];
+    const groups = await this.systemPrisma.followUp.groupBy({
+      by: ['inquiryId'],
+      where: { companyId, inquiryId: { in: rows.map((r) => r.id) }, interactionAt: { lte: this.clock.now() } },
+      _max: { interactionAt: true },
+    });
+    const newest = new Map(groups.map((g) => [g.inquiryId, g._max.interactionAt]));
+    return rows.map((r) => {
+      const interaction = newest.get(r.id);
+      return { ...r, lastActivityAt: interaction && interaction > r.updatedAt ? interaction : r.updatedAt };
+    });
+  }
+
+  async findAll(companyId: string, query: InquiryListQuery, scope: InquiryScope, actorId: string) {
+    const { page, limit, sortBy, sortOrder, status, followUp, followUpAfter, followUpBefore } = query;
+    const skip = (page - 1) * limit;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const and: any[] = [];
+
+    if (status) and.push({ status: { in: status } });
+
+    // Follow-up date: the lead's own `nextFollowupAt` (an instant; the client
+    // sends day boundaries in its own time zone). Bounds exclude NULLs.
+    if (followUp === 'none') and.push({ nextFollowupAt: null });
+    if (followUpAfter || followUpBefore) {
+      and.push({ nextFollowupAt: { ...(followUpAfter ? { gte: followUpAfter } : {}), ...(followUpBefore ? { lt: followUpBefore } : {}) } });
+    }
+
     const search = buildInquirySearchTerms(query.search);
     if (search) {
       const { phoneDigits } = search;
       // LIKE wildcards in the user's text are escaped so they match literally.
       const text = escapeLikePattern(search.text);
-      where.AND = [
-        {
-          OR: [
-            // Prisma binds every `contains` value as a parameter; nothing is
-            // interpolated into SQL.
-            { applicant: { name: { contains: text, mode: 'insensitive' } } },
-            { applicant: { email: { contains: text, mode: 'insensitive' } } },
-            { project: { name: { contains: text, mode: 'insensitive' } } },
-            // Phones are stored normalised (10-digit Indian mobile) or, for
-            // anything else, exactly as typed: match the digits, and the text
-            // as typed (finds "+1 415 555 0132" when the user types "415 555").
-            ...(phoneDigits.length > 0 ? [{ applicant: { primaryPhone: { contains: text } } }] : []),
-            ...phoneDigits.flatMap((d) => [
-              { applicant: { primaryPhoneNormalized: { contains: d } } },
-              { applicant: { primaryPhone: { contains: d } } },
-            ]),
-          ],
-        },
-      ];
+      and.push({
+        OR: [
+          // Prisma binds every `contains` value as a parameter; nothing is
+          // interpolated into SQL.
+          { applicant: { name: { contains: text, mode: 'insensitive' } } },
+          { applicant: { email: { contains: text, mode: 'insensitive' } } },
+          { project: { name: { contains: text, mode: 'insensitive' } } },
+          // Phones are stored normalised (10-digit Indian mobile) or, for
+          // anything else, exactly as typed: match the digits, and the text
+          // as typed (finds "+1 415 555 0132" when the user types "415 555").
+          ...(phoneDigits.length > 0 ? [{ applicant: { primaryPhone: { contains: text } } }] : []),
+          ...phoneDigits.flatMap((d) => [
+            { applicant: { primaryPhoneNormalized: { contains: d } } },
+            { applicant: { primaryPhone: { contains: d } } },
+          ]),
+        ],
+      });
     }
 
-    const [data, total] = await Promise.all([
+    const where = await this.scopedWhere(companyId, scope, actorId, query.assignedTo, and);
+
+    const [rows, total] = await Promise.all([
       this.systemPrisma.inquiry.findMany({
         where,
         skip,
@@ -143,8 +204,54 @@ export class InquiryService {
     ]);
 
     return {
-      data,
+      data: await this.withLastActivity(companyId, rows),
       meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  /**
+   * Dashboard counts over the caller's visible set, in ONE place so the numbers
+   * match the list exactly. Only what the data can state accurately:
+   * `byStatus`/`total`, `overdue` and `dueToday` (active leads by their
+   * follow-up date), and `newSince` (by creation date). "Today" is the
+   * client's `dayStart`/`dayEnd`, or the company's own day (CompanyConfig
+   * .timezone), never the server's.
+   */
+  async summary(companyId: string, query: InquirySummaryQuery, scope: InquiryScope, actorId: string) {
+    const now = this.clock.now();
+    let dayStart: Date;
+    let dayEnd: Date;
+    let timeZone: string | null = null;
+    if (query.dayStart && query.dayEnd) {
+      dayStart = query.dayStart;
+      dayEnd = query.dayEnd;
+    } else {
+      const config = await this.systemPrisma.companyConfig.findFirst({ where: { companyId }, select: { timezone: true } });
+      const bounds = dayBoundsInTimeZone(now, config?.timezone ?? DEFAULT_TIME_ZONE);
+      dayStart = bounds.start;
+      dayEnd = bounds.end;
+      timeZone = bounds.timeZone;
+    }
+    const since = query.since ?? new Date(dayEnd.getTime() - 7 * 86_400_000);
+    const where = await this.scopedWhere(companyId, scope, actorId, query.assignedTo);
+    const active = { in: ['OPEN', 'CONTINUED'] };
+
+    const [groups, overdue, dueToday, newSince] = await Promise.all([
+      this.systemPrisma.inquiry.groupBy({ by: ['status'], where, _count: { _all: true } }),
+      this.systemPrisma.inquiry.count({ where: { ...where, status: active, nextFollowupAt: { lt: dayStart } } }),
+      this.systemPrisma.inquiry.count({ where: { ...where, status: active, nextFollowupAt: { gte: dayStart, lt: dayEnd } } }),
+      this.systemPrisma.inquiry.count({ where: { ...where, createdAt: { gte: since } } }),
+    ]);
+
+    const byStatus = { OPEN: 0, CONTINUED: 0, SUCCESSFUL: 0, DUMPED: 0 } as Record<string, number>;
+    for (const g of groups) byStatus[g.status] = g._count._all;
+    return {
+      total: Object.values(byStatus).reduce((a, b) => a + b, 0),
+      byStatus,
+      overdue,
+      dueToday,
+      newSince,
+      period: { timeZone, dayStart, dayEnd, since },
     };
   }
 
@@ -168,7 +275,9 @@ export class InquiryService {
       },
     });
     if (!item) throw new NotFoundException('Inquiry not found');
-    return item;
+    const now = this.clock.now();
+    const newest = item.followUps.reduce<Date>((m, f) => (f.interactionAt <= now && f.interactionAt > m ? f.interactionAt : m), item.updatedAt);
+    return { ...item, lastActivityAt: newest };
   }
 
   /**
@@ -192,7 +301,7 @@ export class InquiryService {
     const endOfToday = new Date(now);
     endOfToday.setHours(23, 59, 59, 999);
 
-    return this.systemPrisma.inquiry.findMany({
+    const rows = await this.systemPrisma.inquiry.findMany({
       where: {
         companyId,
         assignedToId: userId,
@@ -202,6 +311,7 @@ export class InquiryService {
       include: { applicant: { omit: { panCiphertext: true, panKeyVersion: true } }, project: true, temperature: true },
       orderBy: { nextFollowupAt: 'asc' },
     });
+    return this.withLastActivity(companyId, rows);
   }
 
   /**

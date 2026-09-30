@@ -109,3 +109,86 @@ response is identical to before.
   used to work by accident, is now a `400`.
 - `GET|PATCH /inquiries/:id` and `PATCH /inquiries/:id/assign` return `400` for an id
   that is not a UUID. They used to return `500`.
+
+## Follow-up filters and `assignedTo` on `GET /inquiries`
+
+These narrow the list further and work together with `search`, `status`, sorting and pagination.
+They use the lead's follow-up date, `nextFollowupAt`, which is the field the app treats as "next action".
+
+| Name | Type | Notes |
+|---|---|---|
+| `followUpAfter` | ISO 8601 instant **with offset** | Inclusive lower bound on `nextFollowupAt`. Date-only or offset-less values (`2026-10-01`, `2026-10-01T00:00:00`) are `400`: they would be read as UTC and give the wrong day to a client in another zone |
+| `followUpBefore` | ISO 8601 instant with offset | Exclusive upper bound. Must be later than `followUpAfter` |
+| `followUp` | `none` | Leads with no follow-up date. Cannot be combined with `followUpAfter`/`followUpBefore` (`400`) |
+| `assignedTo` | `me` or a user id | Narrows to one user's leads. A user id must be inside the caller's visible team; a user outside it is `404`, the same answer as for a lead outside the team, so ids cannot be probed. `me` is the caller. Anything else (`ME`, `all`, a non-UUID) is `400` |
+
+A lead with no follow-up date never matches `followUpAfter`/`followUpBefore`.
+
+"Overdue" for the caller's day is `status=OPEN,CONTINUED&followUpBefore=<dayStart>`. "Due today" is
+`status=OPEN,CONTINUED&followUpAfter=<dayStart>&followUpBefore=<dayEnd>`. The client supplies the
+boundaries, so the server never guesses the caller's time zone.
+
+### `lastActivityAt` on each row
+
+Each list row carries `lastActivityAt`: the latest of the lead's most recent logged follow-up
+(`interactionAt`) and the lead's own `updatedAt`, as an ISO instant. It is computed with one grouped query per page, not one per row.
+It is also returned by `GET /inquiries/:id`. It is a hint for "how stale is this lead", not an audit trail.
+
+## `GET /inquiries/summary`
+
+Counts for the caller's dashboard, computed by the database, over the same visible set as the list.
+
+| | |
+|---|---|
+| Method / path | `GET /api/v1/inquiries/summary` |
+| Authentication | Bearer access token |
+| Authorization | `presales.inquiry.read`. Scope is the caller's visible team (`TeamScopeService`); `company_admin` and `super_admin` see the company |
+| Request body | none |
+| Caching | Not cached and not cacheable: the numbers change with every edit. Clients should refetch on focus or pull-to-refresh |
+
+### Query parameters
+
+| Name | Type | Notes |
+|---|---|---|
+| `dayStart`, `dayEnd` | ISO instants with offset | The caller's "today", `[dayStart, dayEnd)`. Must be given together, `dayEnd` later than `dayStart`, and no longer than 26 hours (covers a DST change). Omitted: the server uses the **company's** day in `CompanyConfig.timezone` (default `Asia/Kolkata`) |
+| `since` | ISO instant with offset | "New" leads are those created at or after this. Default: `dayEnd` minus 7 days |
+| `assignedTo` | `me` or a user id | As on the list |
+
+### Response `200`
+
+```json
+{
+  "total": 11,
+  "byStatus": { "OPEN": 7, "CONTINUED": 2, "SUCCESSFUL": 1, "DUMPED": 1 },
+  "overdue": 2,
+  "dueToday": 2,
+  "newSince": 10,
+  "period": {
+    "timeZone": "Asia/Kolkata",
+    "dayStart": "2026-09-29T18:30:00.000Z",
+    "dayEnd": "2026-09-30T18:30:00.000Z",
+    "since": "2026-09-23T18:30:00.000Z"
+  }
+}
+```
+
+- `total` is the sum of `byStatus`; every status key is always present (zero-filled).
+- `overdue` and `dueToday` count only `OPEN` and `CONTINUED` leads, using `nextFollowupAt` (before `dayStart`, and within `[dayStart, dayEnd)`).
+- All of them equal the totals of the matching `GET /inquiries` queries. This is tested.
+- `period.timeZone` is `null` when the client supplied `dayStart`/`dayEnd`.
+
+### Errors
+
+| Status | When |
+|---|---|
+| `400` | Only one of `dayStart`/`dayEnd`; `dayEnd` not after `dayStart`; a day longer than 26 hours; a date without an offset, or not a date; `assignedTo` not `me` or a UUID |
+| `401` | No or invalid access token |
+| `403` | Caller lacks `presales.inquiry.read` |
+| `404` | `assignedTo` is a user outside the caller's visible team |
+
+### Example
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://crm.example.com/api/v1/inquiries/summary?assignedTo=me&dayStart=2026-09-29T18:30:00.000Z&dayEnd=2026-09-30T18:30:00.000Z"
+```

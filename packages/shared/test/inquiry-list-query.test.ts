@@ -58,3 +58,54 @@ describe('inquiryListQuerySchema', () => {
     expect(r.data).not.toHaveProperty('cacheBuster');
   });
 });
+
+describe('follow-up and assignee parameters', () => {
+  const uuid = '3b1c7d1e-5a53-4f2a-9f0e-0d0f9b0c1a11';
+  it('accepts instants with an offset and turns them into Dates', () => {
+    const r = parse({ followUpAfter: '2026-09-30T00:00:00+05:30', followUpBefore: '2026-10-01T00:00:00Z' });
+    expect(r.success).toBe(true);
+    expect(r.data!.followUpAfter).toEqual(new Date('2026-09-29T18:30:00Z'));
+    expect(r.data!.followUpBefore).toEqual(new Date('2026-10-01T00:00:00Z'));
+  });
+  it('rejects date-only, offset-less and junk dates (they would be silently read as UTC)', () => {
+    for (const v of ['2026-10-01', '2026-10-01T00:00:00', '2026-13-01T00:00:00Z', 'tomorrow', '1727740800000', '']) {
+      expect(parse({ followUpAfter: v }).success, v).toBe(false);
+    }
+  });
+  it('the range must be non-empty', () => {
+    expect(parse({ followUpAfter: '2026-10-01T00:00:00Z', followUpBefore: '2026-10-01T00:00:00Z' }).success).toBe(false);
+    expect(parse({ followUpAfter: '2026-10-02T00:00:00Z', followUpBefore: '2026-10-01T00:00:00Z' }).success).toBe(false);
+  });
+  it('followUp=none is the only value, and cannot be combined with a date bound', () => {
+    expect(parse({ followUp: 'none' }).success).toBe(true);
+    expect(parse({ followUp: 'any' }).success).toBe(false);
+    expect(parse({ followUp: 'none', followUpBefore: '2026-10-01T00:00:00Z' }).success).toBe(false);
+  });
+  it('assignedTo is "me" or a uuid, nothing else', () => {
+    expect(parse({ assignedTo: 'me' }).success).toBe(true);
+    expect(parse({ assignedTo: uuid }).success).toBe(true);
+    for (const v of ['ME', 'everyone', '123', 'me,you', `${uuid}x`]) expect(parse({ assignedTo: v }).success, v).toBe(false);
+  });
+});
+
+import { inquirySummaryQuerySchema } from '../src/presales';
+
+describe('inquirySummaryQuerySchema', () => {
+  const sp = (q: Record<string, unknown>) => inquirySummaryQuerySchema.safeParse(q);
+  it('all optional', () => expect(sp({}).success).toBe(true));
+  it('dayStart and dayEnd come as a pair', () => {
+    expect(sp({ dayStart: '2026-09-30T00:00:00+05:30' }).success).toBe(false);
+    expect(sp({ dayEnd: '2026-10-01T00:00:00+05:30' }).success).toBe(false);
+    expect(sp({ dayStart: '2026-09-30T00:00:00+05:30', dayEnd: '2026-10-01T00:00:00+05:30' }).success).toBe(true);
+  });
+  it('a day must be positive and at most 26 hours', () => {
+    expect(sp({ dayStart: '2026-10-01T00:00:00Z', dayEnd: '2026-10-01T00:00:00Z' }).success).toBe(false);
+    expect(sp({ dayStart: '2026-10-01T00:00:00Z', dayEnd: '2026-10-02T02:00:00Z' }).success).toBe(true); // 26h
+    expect(sp({ dayStart: '2026-10-01T00:00:00Z', dayEnd: '2026-10-02T03:00:00Z' }).success).toBe(false);
+    expect(sp({ dayStart: '2026-10-01T00:00:00Z', dayEnd: '2026-11-01T00:00:00Z' }).success).toBe(false); // a month is not a day
+  });
+  it('rejects offset-less instants', () => {
+    expect(sp({ since: '2026-09-23' }).success).toBe(false);
+    expect(sp({ since: '2026-09-23T00:00:00Z' }).success).toBe(true);
+  });
+});
