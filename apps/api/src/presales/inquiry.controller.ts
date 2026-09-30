@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -15,7 +16,7 @@ import {
   createInquirySchema,
   updateInquirySchema,
   assignInquirySchema,
-  paginationQuerySchema,
+  inquiryListQuerySchema,
   PERMISSIONS,
 } from '@openestate/shared';
 import type { JwtPayload } from '@openestate/shared';
@@ -26,7 +27,7 @@ import { TeamScopeService } from '../team-scope/team-scope.service';
 class CreateInquiryDto extends createZodDto(createInquirySchema) {}
 class UpdateInquiryDto extends createZodDto(updateInquirySchema) {}
 class AssignInquiryDto extends createZodDto(assignInquirySchema) {}
-class PaginationQueryDto extends createZodDto(paginationQuerySchema) {}
+class InquiryListQueryDto extends createZodDto(inquiryListQuerySchema) {}
 
 @ApiTags('Inquiries')
 @Controller('inquiries')
@@ -55,7 +56,20 @@ export class InquiryController {
       'Case-insensitive match on applicant name, email or phone digits, or project name. ' +
       'Fewer than 2 characters is ignored (unfiltered list). Combined with the caller\'s team scope, never widening it.',
   })
-  async findAll(@Query() query: PaginationQueryDto, @Req() req: Request) {
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    description: 'Comma-separated (or repeated) subset of OPEN, CONTINUED, SUCCESSFUL, DUMPED. Unknown values are a 400; omitted or empty means no status filter.',
+    example: 'OPEN,CONTINUED',
+  })
+  @ApiQuery({
+    name: 'sortBy',
+    required: false,
+    enum: ['createdAt', 'updatedAt', 'nextFollowupAt', 'status'],
+    description: 'Default createdAt descending. nextFollowupAt sorts leads with no follow-up last. Any other value is a 400.',
+  })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'], description: 'Applies when sortBy is given. Default asc.' })
+  async findAll(@Query() query: InquiryListQueryDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.inquiryService.findAll(user.companyId, query, await this.scopeFor(user));
   }
@@ -71,7 +85,7 @@ export class InquiryController {
   @Get(':id')
   @RequirePermissions(PERMISSIONS.PRESALES_INQUIRY_READ)
   @ApiOperation({ summary: 'Get inquiry by ID' })
-  async findOne(@Param('id') id: string, @Req() req: Request) {
+  async findOne(@Param('id', new ParseUUIDPipe()) id: string, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.inquiryService.findOne(user.companyId, id, await this.scopeFor(user));
   }
@@ -87,7 +101,7 @@ export class InquiryController {
   @Patch(':id')
   @RequirePermissions(PERMISSIONS.PRESALES_INQUIRY_UPDATE)
   @ApiOperation({ summary: 'Update inquiry' })
-  async update(@Param('id') id: string, @Body() dto: UpdateInquiryDto, @Req() req: Request) {
+  async update(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: UpdateInquiryDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.inquiryService.update(user.companyId, id, dto, await this.scopeFor(user), user.sub);
   }
@@ -95,7 +109,7 @@ export class InquiryController {
   @Patch(':id/assign')
   @RequirePermissions(PERMISSIONS.PRESALES_INQUIRY_ASSIGN)
   @ApiOperation({ summary: 'Manually reassign an inquiry (both the inquiry and the target user must be in the caller\'s visible set)' })
-  async assign(@Param('id') id: string, @Body() dto: AssignInquiryDto, @Req() req: Request) {
+  async assign(@Param('id', new ParseUUIDPipe()) id: string, @Body() dto: AssignInquiryDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
     return this.inquiryService.assign(
       user.companyId,

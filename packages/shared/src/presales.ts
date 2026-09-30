@@ -142,6 +142,40 @@ export type InquiryStatusValue = (typeof INQUIRY_STATUS)[keyof typeof INQUIRY_ST
  *  and never overdue regardless of nextFollowupAt. */
 export const ACTIVE_INQUIRY_STATUSES = [INQUIRY_STATUS.OPEN, INQUIRY_STATUS.CONTINUED] as const;
 
+// ── Inquiry list query (GET /inquiries) ─────────────────────
+
+/**
+ * The only fields GET /inquiries may be sorted by. `sortBy` used to be passed
+ * straight into the ORM, so any inquiry column (or a bad name, which threw a
+ * 500) was accepted; anything not listed here is now a 400.
+ */
+export const INQUIRY_SORT_FIELDS = ['createdAt', 'updatedAt', 'nextFollowupAt', 'status'] as const;
+export type InquirySortField = (typeof INQUIRY_SORT_FIELDS)[number];
+
+const STATUS_VALUES = Object.values(INQUIRY_STATUS) as [InquiryStatusValue, ...InquiryStatusValue[]];
+
+/** `?status=OPEN,CONTINUED` or repeated `?status=OPEN&status=CONTINUED`. Empty means "not filtering". */
+const statusListSchema = z.preprocess(
+  (v) => {
+    const raw = Array.isArray(v) ? v.join(',') : v;
+    if (typeof raw !== 'string') return raw;
+    const parts = raw.split(',').map((p) => p.trim()).filter((p) => p !== '');
+    return parts.length === 0 ? undefined : [...new Set(parts)];
+  },
+  z.array(z.enum(STATUS_VALUES)).min(1).optional(),
+);
+
+export const inquiryListQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().max(255).optional(),
+  status: statusListSchema,
+  sortBy: z.enum(INQUIRY_SORT_FIELDS).optional(),
+  sortOrder: z.enum(['asc', 'desc']).default('asc'),
+});
+
+export type InquiryListQuery = z.infer<typeof inquiryListQuerySchema>;
+
 /** Seeded default pipeline — India-first per CLAUDE.md, matches the set
  *  the requester approved for Phase 0 of the lead-stage foundation.
  *  "New" is the isDefault stage. Order is the seeded sortOrder. */

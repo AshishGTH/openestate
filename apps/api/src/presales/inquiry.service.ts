@@ -19,7 +19,8 @@ import {
 import type {
   CreateInquiryDto,
   UpdateInquiryDto,
-  PaginationQuery,
+  InquiryListQuery,
+  InquirySortField,
 } from '@openestate/shared';
 import { CLOCK } from '../common/clock.provider';
 import { AssignmentService } from './assignment.service';
@@ -27,6 +28,18 @@ import { ApplicantService } from './applicant.service';
 import { CustomFieldsService } from '../custom-fields/custom-fields.service';
 import { LeadStageTransitionService } from './lead-stage-transition.service';
 import { InquiryDispositionTransitionService } from './inquiry-disposition-transition.service';
+
+/**
+ * `sortBy` is a validated whitelist (`INQUIRY_SORT_FIELDS`), never a raw field
+ * name from the client. `id` is a final tie-break so pages are stable: without
+ * it, rows with equal sort values can repeat or vanish between pages.
+ * Follow-up dates sort with NULLs last so "no follow-up" never leads the list.
+ */
+export function inquiryOrderBy(sortBy: InquirySortField | undefined, sortOrder: 'asc' | 'desc') {
+  if (!sortBy) return [{ createdAt: 'desc' as const }, { id: 'asc' as const }];
+  const primary = sortBy === 'nextFollowupAt' ? { nextFollowupAt: { sort: sortOrder, nulls: 'last' as const } } : { [sortBy]: sortOrder };
+  return [primary, { id: 'asc' as const }];
+}
 
 export interface InquiryScope {
   /**
@@ -71,13 +84,15 @@ export class InquiryService {
     private readonly dispositionTransition: InquiryDispositionTransitionService,
   ) {}
 
-  async findAll(companyId: string, query: PaginationQuery, scope: InquiryScope) {
-    const { page, limit, sortBy, sortOrder } = query;
+  async findAll(companyId: string, query: InquiryListQuery, scope: InquiryScope) {
+    const { page, limit, sortBy, sortOrder, status } = query;
     const skip = (page - 1) * limit;
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const where: any = { companyId };
     if (scope.visibleUserIds) where.assignedToId = { in: scope.visibleUserIds };
+
+    if (status) where.status = { in: status };
 
     // Search narrows the caller's visible set; it is AND-ed in, never merged
     // over `assignedToId`, so it cannot widen what the caller may see.
@@ -112,7 +127,7 @@ export class InquiryService {
         where,
         skip,
         take: limit,
-        orderBy: sortBy ? { [sortBy]: sortOrder } : { createdAt: 'desc' },
+        orderBy: inquiryOrderBy(sortBy, sortOrder),
         include: {
           applicant: { omit: { panCiphertext: true, panKeyVersion: true } },
           project: true,
