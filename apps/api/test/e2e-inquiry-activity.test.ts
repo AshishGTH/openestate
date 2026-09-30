@@ -58,7 +58,7 @@ describeIfDb('e2e GET /inquiries/:id/activity', () => {
     const reason = await prisma.dumpReason.create({ data: { companyId: c, name: 'Act Budget' } });
 
     // Oldest to newest, one per kind, plus two events at the SAME instant to prove a stable order.
-    await prisma.inquiryAssignment.create({ data: { companyId: c, inquiryId: leadId, toUserId: m.id, assignmentType: 'MANUAL', actorId: m.id, createdAt: at(1) } });
+    await prisma.inquiryAssignment.create({ data: { companyId: c, inquiryId: leadId, toUserId: m.id, assignmentType: 'manual', actorId: m.id, createdAt: at(1) } });
     await prisma.inquiryStageHistory.create({ data: { companyId: c, inquiryId: leadId, toStageId: stageA.id, changedById: m.id, changedAt: at(2) } });
     await prisma.followUp.create({ data: { companyId: c, inquiryId: leadId, typeId: visitType.id, notes: 'Called, wants a visit', interactionAt: at(3), scheduledAt: at(60), venue: 'Site office', createdById: m.id } });
     await prisma.inquiryStageHistory.create({ data: { companyId: c, inquiryId: leadId, fromStageId: stageA.id, toStageId: stageB.id, changedById: m.id, changedAt: at(4) } });
@@ -126,7 +126,7 @@ describeIfDb('e2e GET /inquiries/:id/activity', () => {
       expect(status.details).toMatchObject({ from: 'OPEN', to: 'DUMPED', remarks: 'Out of budget', reason: { name: 'Act Budget' } });
       const stage = byType('stage_change').find((i: { details: { from: unknown } }) => i.details.from);
       expect(stage.details).toMatchObject({ from: { name: 'Act New' }, to: { name: 'Act Contacted' }, administrative: false });
-      expect(byType('assignment')[0].details).toMatchObject({ assignmentType: 'MANUAL', to: { name: 'Act Manager' } });
+      expect(byType('assignment')[0].details).toMatchObject({ assignmentType: 'manual', to: { name: 'Act Manager' } });
       expect(JSON.stringify(r)).not.toMatch(/stranger-note|passwordHash|totpSecret|recoveryCodes/);
     });
     it('every item id is unique and prefixed by its kind', async () => {

@@ -26,7 +26,7 @@ A lead's history, newest first, merged from the tables that really record it.
 | `follow_up` | `follow_ups` (time = `interactionAt`) | `followUpId`, `followUpType {id,name}\|null`, `isSiteVisit`, `notes`, `outcome`, `scheduledAt`, `venue`, `nextActionAt` |
 | `stage_change` | `inquiry_stage_history` | `from {id,name}\|null`, `to {id,name}`, `administrative` (true for bulk moves made when a stage is retired) |
 | `status_change` | `inquiry_disposition_history` | `from`, `to` (OPEN/CONTINUED/DUMPED/SUCCESSFUL), `reason {id,name}\|null`, `remarks` |
-| `assignment` | `inquiry_assignments` | `from {id,name}\|null`, `to {id,name}`, `assignmentType`, `reason` |
+| `assignment` | `inquiry_assignments` | `from {id,name}\|null`, `to {id,name}`, `assignmentType` (`manual`, `auto` for round-robin, `creator` when the creator kept the lead), `reason` |
 
 **Not included, on purpose:** messages sent (there is no read permission for communication
 logs and they hold message bodies), call recordings (not stored), and edits to other lead
