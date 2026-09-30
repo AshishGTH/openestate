@@ -192,3 +192,24 @@ Counts for the caller's dashboard, computed by the database, over the same visib
 curl -H "Authorization: Bearer $TOKEN" \
   "https://crm.example.com/api/v1/inquiries/summary?assignedTo=me&dayStart=2026-09-29T18:30:00.000Z&dayEnd=2026-09-30T18:30:00.000Z"
 ```
+
+## Time zone semantics
+
+There are two kinds of "day" here, and the difference matters.
+
+**Bounds you send are absolute instants.** `followUpAfter`, `followUpBefore` (and `from`/`to`, `dayStart`, `dayEnd`,
+`since` on the other endpoints) must carry an explicit offset (`2026-10-01T00:00:00+05:30` or `...Z`). The server does
+not interpret them in any zone: `2026-10-01T00:00:00+05:30` and `2026-09-30T18:30:00Z` are the same request. A value with
+no offset is `400`, never guessed as UTC. The mobile app sends the **device's** local day this way, so "today" in the app
+is the phone's day.
+
+**When you send no day bounds, "today" is the company's day.** `GET /inquiries/summary` without `dayStart`/`dayEnd` uses
+`CompanyConfig.timezone` (an IANA name, default `Asia/Kolkata`) and says so in `period.timeZone`. Local midnight to next
+local midnight, so a day is 24 hours except around a daylight-saving change: 23, 24.5 or 23.5 hours are all real
+(America/Los_Angeles on 8 Mar 2026 is 23 h and on 1 Nov 2026 is 25 h; Australia/Lord_Howe shifts by 30 minutes; in
+Africa/Cairo DST starts at midnight, so the day begins at 01:00). All of these are tested. The value is not validated when
+an admin saves it: an unknown name silently falls back to `Asia/Kolkata`.
+
+Consequence: if a device is in a different zone from the company, the app's dashboard shows the device's day while an API
+client that omits the bounds gets the company's day. Both are internally consistent (each tile equals the list it opens,
+because both use the same bounds); they can differ from each other.

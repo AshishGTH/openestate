@@ -38,3 +38,7 @@ apps/e2e/.fixture-state.json
 # .claude/settings.json (the shared, committed one) and .claude/skills/
 # are unaffected; this pattern only matches the local-override filename.
 .claude/settings.local.json
+
+# Redis dumps (local dev/test servers write these into the cwd)
+*.rdb
+dump.rdb

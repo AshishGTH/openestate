@@ -23,7 +23,7 @@ describeIf('follow_up_types.is_site_visit backfill', () => {
     prisma = createSystemPrismaClient(SYSTEM_URL!) as unknown as PrismaClient;
     const tag = Date.now();
     companyId = (await prisma.company.create({ data: { name: `SV Mig ${tag}`, slug: `sv-mig-${tag}` } })).id;
-    for (const name of ['Site Visit', 'Phone Call', 'Site Visit Follow-up']) {
+    for (const name of ['Site Visit', 'Phone Call', 'Site Visit Follow-up', 'site visit', 'Site Visit ']) {
       await prisma.followUpType.create({ data: { companyId, name } });
     }
   });
@@ -34,17 +34,17 @@ describeIf('follow_up_types.is_site_visit backfill', () => {
     await prisma.$disconnect();
   });
 
-  it('defaults to false and the backfill flags exactly the type named "Site Visit"', async () => {
+  it('defaults to false and the backfill flags the type named "Site Visit" (any case, any surrounding spaces) and nothing that merely contains it', async () => {
     const before = await prisma.followUpType.findMany({ where: { companyId } });
     expect(before.every((t) => t.isSiteVisit === false)).toBe(true);
 
     const sql = readFileSync(join(__dirname, '../prisma/migrations/20260930120000_follow_up_type_is_site_visit/migration.sql'), 'utf8');
-    const update = sql.split(';').map((s) => s.trim()).find((s) => /^UPDATE\s+"follow_up_types"/m.test(s.replace(/^--.*$/gm, '').trim()));
+    const update = sql.replace(/^--.*$/gm, '').split(';').map((s) => s.trim()).find((s) => /^UPDATE\s+"follow_up_types"/.test(s));
     expect(update).toBeDefined();
     // Restricted to this test's company so parallel test files' rows are untouched.
-    await prisma.$executeRawUnsafe(`${update!.replace(/^(--.*\n)+/, '')} AND "company_id" = '${companyId}'::uuid`);
+    await prisma.$executeRawUnsafe(`${update!} AND "company_id" = '${companyId}'::uuid`);
 
     const after = Object.fromEntries((await prisma.followUpType.findMany({ where: { companyId } })).map((t) => [t.name, t.isSiteVisit]));
-    expect(after).toEqual({ 'Site Visit': true, 'Phone Call': false, 'Site Visit Follow-up': false });
+    expect(after).toEqual({ 'Site Visit': true, 'site visit': true, 'Site Visit ': true, 'Phone Call': false, 'Site Visit Follow-up': false });
   });
 });

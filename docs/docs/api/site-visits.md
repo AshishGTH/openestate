@@ -19,8 +19,9 @@ The flag is the identity, not the type's name. Names are admin-editable; a type 
 "Walkthrough" and flagged still counts, and a type still named "Site Visit" but unflagged does not.
 
 - **New installs** are seeded with the "Site Visit" type flagged.
-- **Upgrades** add the column (default false) and flag every type named exactly `Site Visit`
-  once, in the migration. A company that had renamed that type before upgrading must set the
+- **Upgrades** add the column (default false) and flag, once, in the migration, every type named
+  `Site Visit` ignoring case and surrounding spaces (`Site visit`, `Site Visit `). Names that merely contain it
+  (`Site Visit Follow-up`) are not flagged. A company that had renamed that type to something else before upgrading must set the
   flag itself: `PATCH /masters/follow-up-types/:id` with `{ "isSiteVisit": true }`
   (`admin.master.update`). `POST /masters/follow-up-types` accepts the same field.
 - Existing site-visit **reports** still match by the type name; they are unchanged by this release.

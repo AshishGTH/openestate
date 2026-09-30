@@ -48,3 +48,45 @@ describe('dayBoundsInTimeZone', () => {
     expect(isValidTimeZone('Nope/Zone')).toBe(false);
   });
 });
+
+describe('dayBoundsInTimeZone: zones behind UTC, half-hour DST, and transitions at midnight', () => {
+  const hours = (b: { start: Date; end: Date }) => (b.end.getTime() - b.start.getTime()) / 3_600_000;
+  const bounds = (at: string, tz: string) => {
+    const b = dayBoundsInTimeZone(new Date(at), tz);
+    return { start: iso(b.start), end: iso(b.end), hours: hours(b) };
+  };
+  it('behind UTC: America/Los_Angeles is still on the previous day at 03:00Z', () => {
+    expect(bounds('2026-09-30T03:00:00Z', 'America/Los_Angeles')).toEqual({ start: '2026-09-29T07:00:00.000Z', end: '2026-09-30T07:00:00.000Z', hours: 24 });
+  });
+  it('Los_Angeles: 25-hour day on 1 Nov 2026 and 23-hour day on 8 Mar 2026', () => {
+    expect(bounds('2026-11-01T12:00:00Z', 'America/Los_Angeles')).toEqual({ start: '2026-11-01T07:00:00.000Z', end: '2026-11-02T08:00:00.000Z', hours: 25 });
+    expect(bounds('2026-03-08T12:00:00Z', 'America/Los_Angeles')).toEqual({ start: '2026-03-08T08:00:00.000Z', end: '2026-03-09T07:00:00.000Z', hours: 23 });
+  });
+  it('Europe/London: 25 hours on 25 Oct 2026 (BST ends) and 23 on 29 Mar 2026 (BST starts); a day at UTC+0 offset in winter', () => {
+    expect(bounds('2026-10-25T12:00:00Z', 'Europe/London')).toEqual({ start: '2026-10-24T23:00:00.000Z', end: '2026-10-26T00:00:00.000Z', hours: 25 });
+    expect(bounds('2026-03-29T12:00:00Z', 'Europe/London')).toEqual({ start: '2026-03-29T00:00:00.000Z', end: '2026-03-29T23:00:00.000Z', hours: 23 });
+    expect(bounds('2026-01-15T12:00:00Z', 'Europe/London')).toEqual({ start: '2026-01-15T00:00:00.000Z', end: '2026-01-16T00:00:00.000Z', hours: 24 });
+  });
+  it('Australia/Lord_Howe shifts by 30 minutes: 24.5-hour and 23.5-hour days', () => {
+    expect(bounds('2026-04-05T00:00:00Z', 'Australia/Lord_Howe')).toEqual({ start: '2026-04-04T13:00:00.000Z', end: '2026-04-05T13:30:00.000Z', hours: 24.5 });
+    expect(bounds('2026-10-04T00:00:00Z', 'Australia/Lord_Howe')).toEqual({ start: '2026-10-03T13:30:00.000Z', end: '2026-10-04T13:00:00.000Z', hours: 23.5 });
+  });
+  it('Asia/Kathmandu (+05:45)', () => {
+    expect(bounds('2026-09-30T10:00:00Z', 'Asia/Kathmandu')).toEqual({ start: '2026-09-29T18:15:00.000Z', end: '2026-09-30T18:15:00.000Z', hours: 24 });
+  });
+  it('a zone whose DST starts AT midnight (Africa/Cairo, 24 Apr 2026): the day begins at 01:00 local, 23 hours long', () => {
+    expect(bounds('2026-04-24T12:00:00Z', 'Africa/Cairo')).toEqual({ start: '2026-04-23T22:00:00.000Z', end: '2026-04-24T21:00:00.000Z', hours: 23 });
+  });
+  it('an instant is always inside the day it is reported for, in every zone, across a year of hourly samples', () => {
+    for (const tz of ['Asia/Kolkata', 'UTC', 'Pacific/Auckland', 'America/Los_Angeles', 'Europe/London', 'Australia/Lord_Howe', 'Asia/Kathmandu', 'Africa/Cairo', 'America/New_York']) {
+      for (let h = 0; h < 366 * 24; h += 7) {
+        const at = new Date(Date.UTC(2026, 0, 1) + h * 3_600_000);
+        const b = dayBoundsInTimeZone(at, tz);
+        expect(b.start.getTime() <= at.getTime() && at.getTime() < b.end.getTime(), `${tz} ${at.toISOString()}`).toBe(true);
+        const len = (b.end.getTime() - b.start.getTime()) / 3_600_000;
+        expect([23, 23.5, 24, 24.5, 25]).toContain(len);
+      }
+    }
+  });
+});
+
