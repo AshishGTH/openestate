@@ -53,7 +53,7 @@ export class RolesController {
   @ApiOperation({ summary: 'Create role' })
   create(@Body() dto: CreateRoleDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.rolesService.create(user.companyId, dto);
+    return this.rolesService.create(user.companyId, dto, user.sub);
   }
 
   @Patch(':id')
@@ -65,7 +65,7 @@ export class RolesController {
     @Req() req: Request,
   ) {
     const user = req.user as JwtPayload;
-    return this.rolesService.update(user.companyId, id, dto);
+    return this.rolesService.update(user.companyId, id, dto, user.sub);
   }
 
   @Delete(':id')
@@ -73,6 +73,6 @@ export class RolesController {
   @ApiOperation({ summary: 'Delete role' })
   remove(@Param('id') id: string, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.rolesService.remove(user.companyId, id);
+    return this.rolesService.remove(user.companyId, id, user.sub);
   }
 }

@@ -68,8 +68,19 @@ describeIf('Roles API: portal roles hold only portal permissions', () => {
     const adminRole = await systemPrisma.role.create({
       data: { companyId: fx.companyId, name: 'E2E RPG Admin', slug: `e2e-rpg-admin-${TAG}` },
     });
+    // v0.8.2: editing a role now requires the caller to already hold both
+    // the role's current permissions and whatever it's being granted —
+    // the admin fixture needs every permission these tests edit roles
+    // with, not just the ADMIN_ROLE_* pair that lets it call the endpoint.
     await systemPrisma.rolePermission.createMany({
-      data: [PERMISSIONS.ADMIN_ROLE_READ, PERMISSIONS.ADMIN_ROLE_UPDATE].map((key) => ({
+      data: [
+        PERMISSIONS.ADMIN_ROLE_READ,
+        PERMISSIONS.ADMIN_ROLE_UPDATE,
+        PERMISSIONS.PORTAL_BOOKING_READ,
+        PERMISSIONS.PORTAL_TICKET_READ,
+        PERMISSIONS.REPORTS_BROKER_VIEW,
+        PERMISSIONS.ADMIN_USER_READ,
+      ].map((key) => ({
         roleId: adminRole.id,
         permissionId: permByKey.get(key),
       })),
