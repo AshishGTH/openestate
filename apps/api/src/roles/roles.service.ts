@@ -13,6 +13,8 @@ import {
   assertActorIsSuperAdminIfTargetIs,
 } from '../common/permission-subset.util';
 
+const SUPER_ADMIN_SLUG = 'super_admin';
+
 @Injectable()
 export class RolesService {
   constructor(
@@ -68,6 +70,12 @@ export class RolesService {
     const caller = await loadCurrentCaller(this.systemPrisma, callerId);
     assertCallerActive(caller);
 
+    // 'super_admin' is the seeded system role, identified by isSystem + this
+    // slug. Reserved so no API caller can mint a role that borrows its
+    // identity (a company that somehow lacks the seeded row could otherwise).
+    if (data.slug === SUPER_ADMIN_SLUG) {
+      throw new BadRequestException(`The slug '${SUPER_ADMIN_SLUG}' is reserved.`);
+    }
     const existing = await this.systemPrisma.role.findFirst({
       where: { slug: data.slug, companyId },
     });
@@ -128,6 +136,13 @@ export class RolesService {
     const role = await this.findOne(companyId, roleId);
     if (role.isSystem && data.name !== undefined && data.name !== role.name) {
       throw new BadRequestException('Cannot rename system roles');
+    }
+    // super_admin is defined as "every permission"; sync-permissions keeps it
+    // complete. Its permission set is not editable by anyone, super_admin included.
+    if (role.isSystem && role.slug === SUPER_ADMIN_SLUG && data.permissionIds !== undefined) {
+      throw new BadRequestException(
+        `The ${SUPER_ADMIN_SLUG} role's permissions cannot be edited; it always holds every permission.`,
+      );
     }
     // Only an existing role can be a portal role: create() never sets
     // isPortal, so this is the one path that can add grants to one.

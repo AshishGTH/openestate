@@ -14,7 +14,7 @@ import { DATABASE_URL_SYSTEM } from '../playwright.config';
 // permission edit, not just renames — the exact request shape reproduced
 // here. See CLAUDE.md's "v0.2.0 — upgrade-path permission delivery" entry.
 
-test('toggling a permission on a system role persists, and the name field is locked', async ({ page }) => {
+test('the super_admin role cannot be edited: its name is locked and a permission change is refused and not saved', async ({ page }) => {
   const fixture = readFixture('mastersCrud');
 
   await login(page, fixture);
@@ -24,44 +24,27 @@ test('toggling a permission on a system role persists, and the name field is loc
   await row.getByRole('link', { name: 'Edit' }).click();
   await expect(page).toHaveURL(/\/admin\/roles\/.+/);
 
-  // System role's own identity is protected — this is the other half of
-  // the fix (RoleForm.tsx disables the name input when role.isSystem).
+  // System role's own identity is protected (RoleForm disables the name input).
   await expect(page.locator('input[type="text"]').first()).toBeDisabled();
 
   const plcCheckbox = page
     .locator('label', { has: page.getByText('unit.plc-manage', { exact: true }) })
     .locator('input[type="checkbox"]');
-  await expect(plcCheckbox).toBeChecked(); // super_admin's fixture seed grants every permission
+  await expect(plcCheckbox).toBeChecked(); // super_admin holds every permission
 
-  const [uncheckResponse] = await Promise.all([
+  // v0.8.2: super_admin's permission set is immutable — the API refuses, with a reason.
+  const [response] = await Promise.all([
     page.waitForResponse((r) => r.url().includes('/roles/') && r.request().method() === 'PATCH'),
     (async () => {
       await plcCheckbox.uncheck();
       await page.getByRole('button', { name: 'Update Role' }).click();
     })(),
   ]);
-  expect(uncheckResponse.ok()).toBe(true); // pre-fix: this 400'd, "Cannot modify system roles"
-  await expect(page).toHaveURL(/\/admin\/roles$/);
+  expect(response.status()).toBe(400);
+  expect((await response.json()).message).toContain('cannot be edited');
 
-  // Reload the edit page fresh — confirms the removal actually persisted,
-  // not just a 200 with the write silently dropped.
-  await page.getByRole('row', { name: /Super Admin/ }).getByRole('link', { name: 'Edit' }).click();
-  const plcCheckboxReloaded = page
-    .locator('label', { has: page.getByText('unit.plc-manage', { exact: true }) })
-    .locator('input[type="checkbox"]');
-  await expect(plcCheckboxReloaded).not.toBeChecked();
-
-  // Re-grant it — the exact real-world scenario this bug blocked: adding a
-  // permission the role doesn't currently have, to a system role.
-  const [recheckResponse] = await Promise.all([
-    page.waitForResponse((r) => r.url().includes('/roles/') && r.request().method() === 'PATCH'),
-    (async () => {
-      await plcCheckboxReloaded.check();
-      await page.getByRole('button', { name: 'Update Role' }).click();
-    })(),
-  ]);
-  expect(recheckResponse.ok()).toBe(true);
-
+  // Fresh load: nothing was saved.
+  await page.goto('/admin/roles');
   await page.getByRole('row', { name: /Super Admin/ }).getByRole('link', { name: 'Edit' }).click();
   await expect(
     page.locator('label', { has: page.getByText('unit.plc-manage', { exact: true }) }).locator('input[type="checkbox"]'),

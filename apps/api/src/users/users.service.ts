@@ -336,7 +336,7 @@ export class UsersService {
   private async loadRoleForSubsetCheck(
     companyId: string,
     roleId: string,
-  ): Promise<{ slug: string; permissionKeys: string[] }> {
+  ): Promise<{ slug: string; isPortal: boolean; permissionKeys: string[] }> {
     const role = await this.systemPrisma.role.findFirst({
       where: { id: roleId, companyId },
       include: { permissions: { include: { permission: true } } },
@@ -344,6 +344,7 @@ export class UsersService {
     if (!role) throw new BadRequestException('Role not found');
     return {
       slug: role.slug,
+      isPortal: role.isPortal,
       permissionKeys: role.permissions.map((rp: { permission: { key: string } }) => rp.permission.key),
     };
   }
@@ -527,6 +528,12 @@ export class UsersService {
     // v0.8.2: issuing a login credential for another account is an action
     // ON that account — same subset/super-admin-only gate as update().
     const targetRole = await this.loadRoleForSubsetCheck(companyId, user.roleId);
+    // A portal ROLE with no link is still a portal account (v0.8.2 Part C).
+    if (targetRole.isPortal) {
+      throw new BadRequestException(
+        'This is a portal user — portal passwords are reset through the portal, not here.',
+      );
+    }
     assertActorIsSuperAdminIfTargetIs(caller.roleSlug, targetRole.slug);
     assertPermissionSubset(
       caller.permissionKeys,
@@ -625,6 +632,11 @@ export class UsersService {
     // v0.8.2: same subset/super-admin-only gate as forcePasswordReset —
     // clearing a user's second factor is an action on their account.
     const targetRole = await this.loadRoleForSubsetCheck(companyId, user.roleId);
+    if (targetRole.isPortal) {
+      throw new BadRequestException(
+        "This is a portal user — reset their 2FA from their customer or broker record, not here.",
+      );
+    }
     assertActorIsSuperAdminIfTargetIs(caller.roleSlug, targetRole.slug);
     assertPermissionSubset(
       caller.permissionKeys,

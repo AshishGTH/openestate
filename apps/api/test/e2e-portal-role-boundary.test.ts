@@ -178,32 +178,85 @@ describeIf('v0.8.2 portal-role boundary', () => {
       await expect(systemPrisma.user.update({ where: { id }, data: { name: 'renamed', lastLoginAt: new Date() } })).resolves.toBeTruthy();
     });
 
-    it('fails CLOSED on an unresolvable role_id (rejected, not silently allowed)', async () => {
-      // FK would normally catch this first; replica mode skips FKs, leaving only the trigger's own check — so
-      // run it with triggers ON (default) by deferring nothing: the FK error or the trigger error both reject.
+    const insertSql = (email: string, roleId: string) =>
+      `INSERT INTO users (id, company_id, email, password_hash, name, role_id, is_active, force_password_change, updated_at)
+       VALUES (gen_random_uuid(), '${fx.companyId}'::uuid, '${email}', 'x', 'x', '${roleId}'::uuid, true, false, now())`;
+
+    it('the TRIGGER is what rejects: a raw insert by the BYPASSRLS role (RLS cannot be the reason) carries the trigger\'s own text', async () => {
+      const rows = await systemPrisma.$queryRawUnsafe(
+        `SELECT rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+      );
+      expect(rows[0].rolbypassrls).toBe(true);
       await expect(
-        superPrisma.$executeRawUnsafe(
-          `INSERT INTO users (id, company_id, email, password_hash, name, role_id, is_active, force_password_change, updated_at)
-           VALUES (gen_random_uuid(), '${fx.companyId}'::uuid, 'e2e-prb-${TAG}-t4@test.com', 'x', 'x', gen_random_uuid(), true, false, now())`,
-        ),
-      ).rejects.toThrow();
+        systemPrisma.$executeRawUnsafe(insertSql(`e2e-prb-${TAG}-t4@test.com`, portalRoleId)),
+      ).rejects.toThrow(/A portal role requires an applicant_id or broker_id link/);
     });
 
-    it('SECURITY DEFINER: still resolves the role when the session has hostile RLS/tenant context', async () => {
-      // openestate_test_app is RLS-enforced and has set no tenant context here: it can't SELECT roles itself,
-      // yet the trigger must still see the role row (and so reject) rather than fail open.
+    it('fails CLOSED on an unresolvable role_id: the trigger rejects with its own message, before any FK check', async () => {
+      await expect(
+        systemPrisma.$executeRawUnsafe(insertSql(`e2e-prb-${TAG}-t5@test.com`, randomUUID())),
+      ).rejects.toThrow(/does not resolve to a known role/);
+      expect(await systemPrisma.user.count({ where: { email: `e2e-prb-${TAG}-t5@test.com` } })).toBe(0);
+    });
+
+    it('also rejects through the RLS-enforced application role (tenant context set), with the trigger\'s text', async () => {
       const appPrisma = new PrismaClient({ datasourceUrl: APP_URL });
       try {
         await expect(
-          appPrisma.$executeRawUnsafe(
-            `INSERT INTO users (id, company_id, email, password_hash, name, role_id, is_active, force_password_change, updated_at)
-             VALUES (gen_random_uuid(), '${fx.companyId}'::uuid, 'e2e-prb-${TAG}-t5@test.com', 'x', 'x', '${portalRoleId}'::uuid, true, false, now())`,
-          ),
-        ).rejects.toThrow();
-        expect(await systemPrisma.user.count({ where: { email: `e2e-prb-${TAG}-t5@test.com` } })).toBe(0);
+          appPrisma.$transaction(async (tx) => {
+            await tx.$executeRawUnsafe(`SELECT set_config('app.current_company_id', '${fx.companyId}', true)`);
+            await tx.$executeRawUnsafe(insertSql(`e2e-prb-${TAG}-t6@test.com`, portalRoleId));
+          }),
+        ).rejects.toThrow(/A portal role requires an applicant_id or broker_id link/);
       } finally {
         await appPrisma.$disconnect();
       }
+    });
+
+    it('structure: SECURITY DEFINER, owned by a BYPASSRLS role, search_path pinned, bound to INSERT and the three columns', async () => {
+      const [fn] = await systemPrisma.$queryRawUnsafe(
+        `SELECT p.prosecdef, p.proconfig, r.rolbypassrls, r.rolname
+           FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner
+          WHERE p.proname = 'forbid_unlinked_portal_role'`,
+      );
+      expect(fn.prosecdef).toBe(true);
+      expect(fn.rolbypassrls).toBe(true);
+      expect(fn.rolname).toBe('openestate_system');
+      expect(fn.proconfig).toContain('search_path=pg_catalog, public');
+      const [trg] = await systemPrisma.$queryRawUnsafe(
+        `SELECT pg_get_triggerdef(oid) AS def FROM pg_trigger WHERE tgname = 'users_forbid_unlinked_portal_role'`,
+      );
+      expect(trg.def).toMatch(/BEFORE INSERT OR UPDATE OF role_id, applicant_id, broker_id ON (public\.)?users/);
+    });
+  });
+
+  describe('Part C: staff admin actions refuse an unlinked portal-role target', () => {
+    it('force-password-reset and reset-2fa both refuse it (400) and issue nothing', async () => {
+      const adminRole = await systemPrisma.role.create({
+        data: { companyId: fx.companyId, name: 'a', slug: `e2e-prb-admin-${TAG}` },
+      });
+      const keys = ['admin.user.read', 'admin.user.update'];
+      const perms = await systemPrisma.permission.findMany({ where: { key: { in: keys } } });
+      await systemPrisma.rolePermission.createMany({
+        data: perms.map((p: { id: string }) => ({ roleId: adminRole.id, permissionId: p.id })),
+      });
+      const adminEmail = `e2e-prb-${TAG}-admin@test.com`;
+      await systemPrisma.user.create({
+        data: { companyId: fx.companyId, email: adminEmail, passwordHash: hash, name: 'adm', roleId: adminRole.id, forcePasswordChange: false },
+      });
+      const targetId = await plantUnlinkedPortalUser(`e2e-prb-${TAG}-t7@test.com`);
+
+      const agent = request.agent(app.getHttpServer());
+      const login = await agent.post('/api/v1/auth/login').send({ email: adminEmail, password: PW }).expect(200);
+      const csrf = /openestate_csrf=([^;]+)/.exec(String(login.headers['set-cookie']))![1];
+      const post = (path: string) =>
+        agent.post(path).set('Authorization', `Bearer ${login.body.accessToken}`).set('X-CSRF-Token', csrf);
+
+      const reset = await post(`/api/v1/users/${targetId}/force-password-reset`);
+      expect(reset.status).toBe(400);
+      expect(reset.body.message).toMatch(/portal user/);
+      expect((await post(`/api/v1/users/${targetId}/reset-2fa`)).status).toBe(400);
+      expect(await systemPrisma.passwordReset.count({ where: { userId: targetId } })).toBe(0);
     });
   });
 });

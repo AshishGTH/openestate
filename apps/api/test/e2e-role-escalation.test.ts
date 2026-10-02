@@ -17,7 +17,6 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import * as argon2 from '@node-rs/argon2';
 import { ALL_PERMISSIONS, PERMISSIONS } from '@openestate/shared';
 import { makeClients, seedCompany, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
-import { assertSuperAdminNotEmptied } from '../src/common/permission-subset.util';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -40,6 +39,7 @@ describeIf('v0.8.2 role/user escalation boundary', () => {
   let adminRoleId: string;
   let adminRole2Id: string; // identical permission set to adminRole (peer)
   let lowRoleId: string; // holds a strict subset of adminRole
+  let extraRoleId: string; // holds a permission adminRole does NOT
 
   const ADMIN_KEYS = [
     PERMISSIONS.ADMIN_USER_READ,
@@ -99,6 +99,7 @@ describeIf('v0.8.2 role/user escalation boundary', () => {
     adminRoleId = await mkRole(`e2e-esc-admin-${TAG}`, ADMIN_KEYS);
     adminRole2Id = await mkRole(`e2e-esc-admin2-${TAG}`, ADMIN_KEYS);
     lowRoleId = await mkRole(`e2e-esc-low-${TAG}`, LOW_KEYS);
+    extraRoleId = await mkRole(`e2e-esc-extra-${TAG}`, [...LOW_KEYS, PERMISSIONS.INVENTORY_UNIT_PLC_MANAGE]);
   }, 120_000);
 
   afterAll(async () => {
@@ -218,9 +219,9 @@ describeIf('v0.8.2 role/user escalation boundary', () => {
     // low caller has USER_READ/USER_UPDATE only; ROLE_UPDATE missing so route guard 403s too —
     // use adminRole caller against super_admin role instead.
     const adminCaller = await login((await mkUser(adminRoleId)).email);
-    const wipe = await call(adminCaller, 'patch', `/roles/${superRoleId}`, { permissionIds: [] });
+    const wipe = await call(adminCaller, 'patch', `/roles/${extraRoleId}`, { permissionIds: [] });
     expect(wipe.status).toBe(403);
-    expect(await systemPrisma.rolePermission.count({ where: { roleId: superRoleId } })).toBe(ALL_PERMISSIONS.length);
+    expect(await systemPrisma.rolePermission.count({ where: { roleId: extraRoleId } })).toBe(LOW_KEYS.length + 1);
 
     const selfWiden = await call(adminCaller, 'patch', `/roles/${adminRoleId}`, {
       permissionIds: [...ADMIN_KEYS, PERMISSIONS.INVENTORY_UNIT_PLC_MANAGE].map((k) => permId.get(k)),
@@ -229,16 +230,87 @@ describeIf('v0.8.2 role/user escalation boundary', () => {
     expect(s.token).toBeTruthy();
   });
 
-  it('super_admin is judged as holding EVERY permission: unticking one on its own role does not stop it re-granting it', async () => {
+  it('super_admin caller is judged as holding every permission even if its stored rows drift (defence in depth)', async () => {
     const s = await login((await mkUser(superRoleId)).email);
     const key = PERMISSIONS.INVENTORY_UNIT_PLC_MANAGE;
-    const without = ALL_PERMISSIONS.filter((k) => k !== key).map((k) => permId.get(k));
-    expect((await call(s, 'patch', `/roles/${superRoleId}`, { permissionIds: without })).status).toBe(200);
-    const again = await call(s, 'patch', `/roles/${superRoleId}`, {
-      permissionIds: ALL_PERMISSIONS.map((k) => permId.get(k)),
+    await systemPrisma.rolePermission.deleteMany({ where: { roleId: superRoleId, permissionId: permId.get(key) } });
+    try {
+      const grant = await call(s, 'patch', `/roles/${lowRoleId}`, {
+        permissionIds: [...LOW_KEYS, key].map((k) => permId.get(k)),
+      });
+      expect(grant.status).toBe(200);
+    } finally {
+      await systemPrisma.rolePermission.create({ data: { roleId: superRoleId, permissionId: permId.get(key) } });
+      await systemPrisma.rolePermission.deleteMany({ where: { roleId: lowRoleId, permissionId: permId.get(key) } });
+    }
+  });
+
+  it('super_admin role is immutable: no permission edit and no delete, even by a super_admin (400, nothing changes)', async () => {
+    const s = await login((await mkUser(superRoleId)).email);
+    const edit = await call(s, 'patch', `/roles/${superRoleId}`, { permissionIds: [] });
+    expect(edit.status).toBe(400);
+    expect(edit.body.message).toContain('cannot be edited');
+    const edit2 = await call(s, 'patch', `/roles/${superRoleId}`, {
+      permissionIds: ALL_PERMISSIONS.filter((k) => k !== PERMISSIONS.INVENTORY_UNIT_PLC_MANAGE).map((k) => permId.get(k)),
     });
-    expect(again.status).toBe(200);
+    expect(edit2.status).toBe(400);
+    expect((await call(s, 'delete', `/roles/${superRoleId}`)).status).toBe(400);
     expect(await systemPrisma.rolePermission.count({ where: { roleId: superRoleId } })).toBe(ALL_PERMISSIONS.length);
+  });
+
+  it("no custom role can take the slug 'super_admin': create is refused (reserved) and a slug cannot be edited", async () => {
+    const s = await login((await mkUser(superRoleId)).email);
+    const create = await call(s, 'post', '/roles', { name: 'fake', slug: 'super_admin', permissionIds: [] });
+    expect(create.status).toBe(400);
+    const rename = await call(s, 'patch', `/roles/${lowRoleId}`, { slug: 'super_admin' });
+    expect(rename.status).toBe(400);
+    expect((await systemPrisma.role.findUniqueOrThrow({ where: { id: lowRoleId } })).slug).toBe(`e2e-esc-low-${TAG}`);
+    expect(await systemPrisma.role.count({ where: { companyId: fx.companyId, slug: 'super_admin' } })).toBe(1);
+  });
+
+  it('target-subset: each of the six user operations is refused on a target whose non-super role holds permissions the caller lacks', async () => {
+    const s = await login((await mkUser(adminRoleId)).email);
+    const active = await mkUser(extraRoleId);
+    const inactive = await mkUser(extraRoleId, { isActive: false });
+    const email = `e2e-esc-sub-${TAG}-${seq++}@test.com`;
+    const cases: Array<[string, 'post' | 'patch', string, object | undefined]> = [
+      ['create', 'post', '/users', { email, name: 'N', password: PW, roleId: extraRoleId }],
+      ['update', 'patch', `/users/${active.id}`, { name: 'x' }],
+      ['deactivate', 'post', `/users/${active.id}/deactivate`, undefined],
+      ['reactivate', 'post', `/users/${inactive.id}/reactivate`, undefined],
+      ['force-password-reset', 'post', `/users/${active.id}/force-password-reset`, undefined],
+      ['reset-2fa', 'post', `/users/${active.id}/reset-2fa`, undefined],
+    ];
+    for (const [name, method, url, body] of cases) {
+      const res = await call(s, method, url, body);
+      expect(res.status, name).toBe(403);
+      expect(res.body.message, name).toContain('Missing:');
+    }
+    expect(await systemPrisma.user.findFirst({ where: { email } })).toBeNull();
+    expect((await systemPrisma.user.findUniqueOrThrow({ where: { id: active.id } })).isActive).toBe(true);
+    expect((await systemPrisma.user.findUniqueOrThrow({ where: { id: inactive.id } })).isActive).toBe(false);
+  });
+
+  it('new-role check on update: moving a user onto a non-super role holding permissions the caller lacks is refused', async () => {
+    const target = await mkUser(lowRoleId);
+    const res = await call(await login((await mkUser(adminRoleId)).email), 'patch', `/users/${target.id}`, {
+      roleId: extraRoleId,
+    });
+    expect(res.status).toBe(403);
+    expect(res.body.message).toContain('assign a role');
+    expect(await roleOf(target.id)).toBe(lowRoleId);
+  });
+
+  it('role remove: a caller cannot delete a userless role holding permissions they lack (403)', async () => {
+    const roleId = (
+      await systemPrisma.role.create({ data: { companyId: fx.companyId, name: 'rm', slug: `e2e-esc-rm-${TAG}` } })
+    ).id as string;
+    await systemPrisma.rolePermission.create({
+      data: { roleId, permissionId: permId.get(PERMISSIONS.INVENTORY_UNIT_PLC_MANAGE) },
+    });
+    const res = await call(await login((await mkUser(adminRoleId)).email), 'delete', `/roles/${roleId}`);
+    expect(res.status).toBe(403);
+    expect(await systemPrisma.role.findUnique({ where: { id: roleId } })).not.toBeNull();
   });
 
   it('roles: a permitted edit writes a ROLE_PERMS_CHANGED audit row naming the actor', async () => {
@@ -287,27 +359,31 @@ describeIf('v0.8.2 role/user escalation boundary', () => {
     expect((await call(await login(caller.email), 'patch', `/users/${target.id}`, { name: 'ok' })).status).toBe(200);
   });
 
-  it('lockout guard: refuses to leave the company with no active super_admin (and allows it when another remains)', async () => {
+  it('lockout guard: the only active super_admin cannot deactivate themselves (403); with a second one it is allowed', async () => {
     const co = await seedCompany(systemPrisma);
     try {
       const role = await systemPrisma.role.create({
         data: { companyId: co.companyId, name: 'super_admin', slug: 'super_admin', isSystem: true },
       });
-      const mk = async (n: string) =>
-        (
-          await systemPrisma.user.create({
-            data: { companyId: co.companyId, email: `e2e-lock-${TAG}-${n}@test.com`, passwordHash: hash, name: n, roleId: role.id },
-          })
-        ).id as string;
+      await systemPrisma.rolePermission.createMany({
+        data: ALL_PERMISSIONS.map((k) => ({ roleId: role.id, permissionId: permId.get(k) })),
+      });
+      const mk = async (n: string) => {
+        const email = `e2e-lock-${TAG}-${n}@test.com`;
+        const u = await systemPrisma.user.create({
+          data: { companyId: co.companyId, email, passwordHash: hash, name: n, roleId: role.id, forcePasswordChange: false },
+        });
+        return { id: u.id as string, email };
+      };
       const a = await mk('a');
-      const b = await mk('b');
-      await expect(
-        systemPrisma.$transaction((tx: unknown) => assertSuperAdminNotEmptied(tx, co.companyId, a)),
-      ).resolves.toBeUndefined();
-      await systemPrisma.user.update({ where: { id: b }, data: { isActive: false } });
-      await expect(
-        systemPrisma.$transaction((tx: unknown) => assertSuperAdminNotEmptied(tx, co.companyId, a)),
-      ).rejects.toThrow(/no active super_admin/);
+      const sa = await login(a.email);
+      const refused = await call(sa, 'post', `/users/${a.id}/deactivate`);
+      expect(refused.status).toBe(403);
+      expect(refused.body.message).toContain('no active super_admin');
+      expect((await systemPrisma.user.findUniqueOrThrow({ where: { id: a.id } })).isActive).toBe(true);
+
+      await mk('b');
+      expect((await call(sa, 'post', `/users/${a.id}/deactivate`)).status).toBe(200);
     } finally {
       await cleanupCompany(systemPrisma, co.companyId);
     }

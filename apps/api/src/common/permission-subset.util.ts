@@ -38,7 +38,7 @@ export async function loadCurrentCaller(
   // own role lock themselves out of re-granting it (found by the Playwright
   // role-permission-edit spec). Every other role is judged by stored rows.
   const permissionKeys =
-    user.role.slug === 'super_admin'
+    user.role.isSystem && user.role.slug === 'super_admin'
       ? (await systemPrisma.permission.findMany({ select: { key: true } })).map((p) => p.key)
       : user.role.permissions.map((rp) => rp.permission.key);
   return {
