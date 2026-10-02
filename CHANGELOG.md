@@ -5,6 +5,13 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-02
+
+A security fix. **Every install should upgrade.** One migration (a database
+trigger; no table or column changes); no new environment variable; no change
+to install, backup, restore or uninstall. Advisory:
+[GHSA-6qrx-8q6w-hvgj](https://github.com/AshishGTH/openestate/security/advisories/GHSA-6qrx-8q6w-hvgj).
+
 ### Security
 
 - **An administrator could act beyond their own permissions.** Anyone who
@@ -29,10 +36,17 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **The `super_admin` role's permissions can no longer be edited, and the
-  role cannot be deleted.** It always holds every permission (the upgrade
-  keeps it complete), and the slug `super_admin` is reserved. Edit other
-  roles as before.
+- **Behaviour changes to know about:**
+  - Nobody can change their own role (ask another administrator).
+  - Only a `super_admin` can edit, deactivate, reset the password or 2FA of,
+    or change the role of a `super_admin`. The last active `super_admin`
+    cannot be demoted or deactivated.
+  - You can only give a user, or a role, permissions you hold yourself.
+    Two administrators with identical permissions can still act on each other.
+  - **The `super_admin` role's permissions can no longer be edited, and the
+    role cannot be deleted.** It always holds every permission (the upgrade
+    keeps it complete), and the slug `super_admin` is reserved. Edit other
+    roles as before.
 - Editing a role's permissions now writes an audit row (`ROLE_PERMS_CHANGED`).
 
 ### Workarounds (until you can upgrade)
