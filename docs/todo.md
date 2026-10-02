@@ -28,12 +28,69 @@ adding a retry), and the fix is shown by running the test repeatedly
 against the unfixed code first, so it fails reliably, then against the
 fix (CLAUDE.md, "a concurrency test must force its interleaving").
 
-## After v0.8.2 ships: deactivate the owner's two old test accounts
+## v0.8.3: `upgrade-native.sh` must survive diverged local tags and fail loudly
 
-After v0.8.2 ships: owner to deactivate the two legacy unlinked customer-role
-test accounts on the maintainer VM (they appear in the v0.8.2 upgrade findings
-block). v0.8.2 does not change existing rows. Done when both show as inactive
-in Admin → Users.
+The first real `--ref` upgrade of a pre-rewrite clone (the maintainer VM, during
+v0.8.2) stopped after the backup, silently: `git fetch --tags` (line 68, inside
+`set -e`) rejected the 15 tags `v0.1.0`–`v0.7.1` ("would clobber existing tag"),
+and the script printed nothing of its own. Every install cloned before the
+history rewrite will hit this. Documented workaround (proven): `sudo git -C
+/opt/openestate-src fetch --tags --force origin`. Fix in the script: fetch only
+the requested ref with force (e.g. `git fetch --force origin
+"refs/tags/$REF:refs/tags/$REF"`, or the equivalent for a branch or sha), and
+print a clear error and what to do on any fetch failure instead of exiting
+silently. Needs a CI test: a clone with a local tag that points somewhere else
+than origin's, then `upgrade-native.sh --ref <tag>` must succeed. Assigned to
+v0.8.3. Note `fix/native-upgrade-ownership-and-stale-ref` (closed PR #44, never
+merged, pre-rewrite history) reworked the same section; reuse ideas, not the
+branch.
+
+## UI offers actions the server then refuses (found in the v0.8.2 browser run)
+
+The v0.8.2 server checks all held in a real browser, but the screens still
+offer the actions first, and the refusal arrives as a toast. Hide or disable
+them for the user who can't do them. Candidate UI-audit findings:
+
+1. The Super Admin role page offers Edit, enabled permission tickboxes and
+   Update Role, though its permissions are now immutable.
+2. A user's own record offers the role dropdown, including Super Admin, and
+   only then refuses ("You cannot change your own role").
+3. The role editor lets a role holder tick permissions they don't hold.
+4. For a non-super admin, a super_admin's page shows an enabled role dropdown,
+   Update User and Generate reset link, and the Users list shows an enabled
+   Deactivate on that row.
+5. Reset 2FA is correctly disabled when 2FA is off, which means the server's
+   refusal can't be exercised from the UI for such an account.
+6. A refused save shows both a toast and an inline banner at the top of the
+   Edit page; fine, but worth keeping consistent across forms.
+
+## `Failed to create bin ... ENOENT` warnings during upgrade builds
+
+Every `upgrade-native.sh` build prints four pnpm warnings (browserslist,
+webpack, vite and one more) of the form `Failed to create bin at
+.../releases/<id>/api/node_modules/.bin/<name>. ENOENT`. Pre-existing: the
+2026-09-17, -25 and -27 upgrade logs and the v0.8.2 rehearsal log all carry the
+same four. Harmless so far (builds and health checks pass); likely devDependency
+bins pnpm links in the deployed `api` tree that don't exist there. Find out
+which and silence or fix it.
+
+## Remove `SessionSurfaceGuard`'s pre-0.8.1-token fallback (v0.8.3)
+
+The guard still infers a session's surface from `applicantId`/`brokerId` for
+tokens issued before v0.8.1 had a `surface` claim. Removal is in
+`docs/testing/v0.8.3-plan.md`. Not before 2026-10-04 (7 days after v0.8.1
+shipped), and removing it forces a one-time re-login for any session older than
+that and for any install that upgraded straight from v0.8.0.
+
+## The privilege-misuse detection queries are not in the repo
+
+The three read-only queries used for v0.8.2 (reset links and 2FA resets by an
+actor lacking the target's permissions; user role changes, with self-changes
+flagged; role-permission edits; plus a count of role-change/reset rows with no
+actor) live in a script on the maintainer's machine and VM. Consider adding it
+to `deploy/native/`. Its limits are real and belong in its header: it compares
+against roles' current permissions, rows written before 0.7.1 have no actor, and
+edits to a role's permissions were not logged before 0.8.2.
 
 ## Aadhaar guard covers custom-field values only — free text is unchecked
 

@@ -294,6 +294,24 @@ backup the script took at the start, and don't attempt anything destructive
 without understanding what actually failed first — check
 `journalctl -u openestate-api -n 200`.
 
+### If your upgrade stops with "would clobber existing tag"
+
+This affects installs whose source checkout was cloned **before the
+repository's history was rewritten**. On those copies the tags `v0.1.0` to
+`v0.7.1` still point at the old commits, and git refuses to overwrite them.
+`upgrade-native.sh` takes its backup, then exits right after git prints
+`[rejected] ... (would clobber existing tag)`; it prints nothing of its own.
+Nothing has been changed and your current version keeps running. Copies cloned
+after the rewrite are not affected.
+
+Fix: force the tag fetch (the public tags are authoritative, and nothing of
+yours lives in a tag), then run the upgrade again:
+
+```bash
+sudo git -C /opt/openestate-src fetch --tags --force origin
+cd /opt/openestate-src && sudo ./deploy/native/upgrade-native.sh --ref v0.8.2
+```
+
 **Before upgrading a production instance**, read the release notes for
 that version. A major version bump may include breaking changes. If in
 doubt, test the upgrade on a staging copy first (restore your latest

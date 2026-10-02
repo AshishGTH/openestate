@@ -7559,6 +7559,78 @@ accounts could get staff sessions; details in CHANGELOG `[0.8.1]`.
   within a surface, and all tokens share one signing secret (both in
   `docs/todo.md`).
 
+### 0.8.2 — administrators can no longer act beyond what they hold
+
+Released 2026-10-02 (advisory GHSA-6qrx-8q6w-hvgj, High 7.2, PR:H). Plans:
+`docs/testing/v0.8.2-plan.md` (this release) and `v0.8.3-plan.md` (the 71
+dropped foreign keys, deferred).
+
+- **Rule: "you cannot act on, or grant, beyond what you hold."** Every user
+  or role action (create, update, deactivate, reactivate, force password
+  reset, reset 2FA; role create, update, remove) requires the caller to hold a
+  superset of the target's permissions, and of the new role's when a role is
+  being assigned. Shared in `apps/api/src/common/permission-subset.util.ts`.
+  Compared against the stored literal permission rows, never a wildcard.
+- **The caller is loaded fresh from the database on every such action**
+  (`loadCurrentCaller`), never from the JWT, which is a snapshot: a caller
+  demoted or deactivated after signing in is refused with their old token.
+- **`super_admin` is the seeded system role with that slug (`isSystem` + slug,
+  `isSuperAdminRole`).** Its permission set is immutable and it can't be
+  deleted; the slug is reserved at `RolesService.create`; `updateRoleSchema`
+  has no slug field. The loader treats a super_admin caller as holding every
+  permission that exists (that is its definition), as defence in depth. Only a
+  super_admin may act on a super_admin; the last active super_admin can't be
+  demoted or deactivated (locked `SELECT ... FOR UPDATE` in the same
+  transaction). Nobody may change their own role.
+- **Peer administrators with identical permission sets can act on each other.**
+  Deliberate: accountability is the audit log, not prevention.
+  `ROLE_PERMS_CHANGED` is written explicitly (the generic audit extension
+  never fires for `*Many` operations).
+- **The unlinked-portal-role gap:** staff login, `verifyTotp` and
+  `refreshTokens` also refuse `role.isPortal`, and the admin force-reset and
+  2FA-reset refuse portal-role targets. The trigger
+  `forbid_unlinked_portal_role` (migration `20260930000000`) is `SECURITY
+  DEFINER`, owned by `openestate_system`, `search_path` pinned, and fails
+  closed on an unresolvable role. Existing bad rows are left alone;
+  `print_post_migrate_findings()` in `deploy/native/lib.sh` lists them (and any
+  non-system `super_admin` role) after the upgrade's migrate step, as a plain
+  query, not a `RAISE NOTICE`.
+- **Private-fork testing method (replaces "run it on the VM"):** Docker
+  `postgres:16-alpine` + `redis:7-alpine` from a throwaway compose file kept
+  OUTSIDE the repo, `scripts/test-setup.sh` against it, then the full suite,
+  lint/typecheck/build and Playwright locally (Actions don't run on a private
+  advisory fork). Then a VM rehearsal: a `git bundle` of the branch copied over
+  SSH, `upgrade-native.sh` with no `--ref`, scripted PASS/FAIL checks, then a
+  real-browser run. Push to public as a fast-forward (never squash) so the
+  rehearsed commits keep their hashes. Test-only Docker is fine on a dev
+  machine; never put it in the repo.
+- **A test that asserts a refusal must fail against the pre-fix code.** The new
+  tests were mutation-checked against `af9ff7a` (25 of 31 failed there; the other 6
+  were positive cases or controls). Playwright found a real design bug no API test did (a
+  super_admin unticking a permission on its own role could not re-grant it).
+- **Never put a real personal address in a tracked file.** `docs/todo.md`
+  once named the owner's two test accounts; reworded before release.
+- **LESSON: a history rewrite breaks tag fetches on every deployed clone; any
+  future rewrite must ship a tested upgrade workaround first.** The earlier
+  rewrite changed the hashes of tags `v0.1.0`–`v0.7.1`. A clone made before it
+  still holds the old tags, and `upgrade-native.sh --ref ...` runs `git fetch
+  --tags` (line 68, inside `set -e`), which git rejects ("would clobber
+  existing tag"). The script then exits silently after its backup: nothing
+  changed, nothing printed by us. It only surfaced on the first real `--ref`
+  upgrade of a pre-rewrite clone (the maintainer VM). Workaround, proven on that
+  VM: `sudo git -C /opt/openestate-src fetch --tags --force origin`, then the
+  upgrade again. Documented in the v0.8.2 release notes, the published advisory,
+  the CHANGELOG and `docs/docs/installation.md`. The script fix (fetch only the
+  requested ref with `--force`, and a clear error on any fetch failure, with a
+  CI test using a diverged local tag) is assigned to v0.8.3, not shipped now: a
+  fixed script cannot help an install that runs its old one.
+- **Release record:** v0.8.2 went public as a fast-forward of the rehearsed
+  branch (tag `v0.8.2` at `d337a73`); all five CI jobs were green on the first
+  run; the advisory was published, the temporary fork removed by GitHub on
+  publication, the VM upgraded to the public tag, and the two legacy
+  unlinked customer-role accounts on the VM deactivated through the real UI
+  (an `is_active`-only update, which the new trigger correctly does not block).
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

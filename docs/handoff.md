@@ -165,3 +165,37 @@ these boxes don't have curl installed either).
   because the previously-documented value kept ending up in git history.
   If it's ever lost, `deploy/native/reset-admin-password.sh` recovers it
   without needing the old value.
+
+### State as of 2026-10-02 (v0.8.2 released and closed)
+
+- **v0.8.2 is public** (tag `v0.8.2` at `d337a73`, advisory GHSA-6qrx-8q6w-hvgj
+  published, High 7.2; CVE ID not yet assigned at publication). Master is a
+  fast-forward of the rehearsed branch; all five CI jobs were green.
+- **192.168.1.20 (`textopen`) runs v0.8.2** from the public tag: health reports
+  `0.8.2`, `/opt/openestate/current` is `releases/20261002170052-d337a736`,
+  `/opt/openestate-src` is on `v0.8.2`. Reach it with the key already set up:
+  `ssh openestate-vm` (no password; `sudo` still needs the owner to type one,
+  so the owner runs sudo commands in their own PowerShell window with `ssh -t`).
+- **Its source clone predates the history rewrite**, so tags `v0.1.0`–`v0.7.1`
+  pointed at old commits and blocked `upgrade-native.sh --ref`. Fixed there with
+  `sudo git -C /opt/openestate-src fetch --tags --force origin` (the tags now
+  match public). See CLAUDE.md and `docs/docs/installation.md`.
+- **Left on that VM:** `~/uiaudit/` (the diagnostic and rehearsal scripts and
+  `rehearsal-20261002-161919/` with the baseline, the upgrade log and the check
+  output); backups `/var/backups/openestate/20261002-161923` (rehearsal),
+  `-165603` (the upgrade that stopped on the tags) and the one taken by the
+  final upgrade. The git bundle was deleted. Test users still active:
+  `UIAUDIT Company Admin` (company_admin) and `UIAUDIT Sales Exec`
+  (sales_executive), both `@example.invalid`; passwords were typed by the owner
+  and are not recorded anywhere. The two legacy unlinked customer-role accounts
+  were deactivated through the UI.
+- **Dev machine (Windows):** a PostgreSQL 17 and a Redis-on-Windows install were
+  made by mistake during this work; both services are stopped and disabled and
+  can be uninstalled from Windows Settings. Test infrastructure is Docker only:
+  `postgres:16-alpine` and `redis:7-alpine` from a compose file kept outside the
+  repo (containers `oe-test-postgres-1`, `oe-test-redis-1` may still be
+  running), provisioned with `scripts/test-setup.sh`.
+- **Next:** v0.8.3 (`docs/testing/v0.8.3-plan.md`): the 71 dropped foreign keys
+  (restore with `NOT VALID` + `VALIDATE`), a constraint manifest and CI guard,
+  hardening the append-only escape hatch, the upgrade-script tag fix, and
+  removing `SessionSurfaceGuard`'s old-token fallback (not before 2026-10-04).
