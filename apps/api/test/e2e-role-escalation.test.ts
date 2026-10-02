@@ -229,6 +229,18 @@ describeIf('v0.8.2 role/user escalation boundary', () => {
     expect(s.token).toBeTruthy();
   });
 
+  it('super_admin is judged as holding EVERY permission: unticking one on its own role does not stop it re-granting it', async () => {
+    const s = await login((await mkUser(superRoleId)).email);
+    const key = PERMISSIONS.INVENTORY_UNIT_PLC_MANAGE;
+    const without = ALL_PERMISSIONS.filter((k) => k !== key).map((k) => permId.get(k));
+    expect((await call(s, 'patch', `/roles/${superRoleId}`, { permissionIds: without })).status).toBe(200);
+    const again = await call(s, 'patch', `/roles/${superRoleId}`, {
+      permissionIds: ALL_PERMISSIONS.map((k) => permId.get(k)),
+    });
+    expect(again.status).toBe(200);
+    expect(await systemPrisma.rolePermission.count({ where: { roleId: superRoleId } })).toBe(ALL_PERMISSIONS.length);
+  });
+
   it('roles: a permitted edit writes a ROLE_PERMS_CHANGED audit row naming the actor', async () => {
     const actor = await mkUser(adminRoleId);
     const res = await call(await login(actor.email), 'patch', `/roles/${lowRoleId}`, {

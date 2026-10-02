@@ -32,12 +32,21 @@ export async function loadCurrentCaller(
     where: { id: callerId },
     include: { role: { include: { permissions: { include: { permission: true } } } } },
   });
+  // super_admin is DEFINED as every permission that exists (ROLE_PERMISSIONS
+  // in packages/shared), not as whatever rows its role currently has. Using
+  // the stored rows would let a super_admin who unticks a permission on their
+  // own role lock themselves out of re-granting it (found by the Playwright
+  // role-permission-edit spec). Every other role is judged by stored rows.
+  const permissionKeys =
+    user.role.slug === 'super_admin'
+      ? (await systemPrisma.permission.findMany({ select: { key: true } })).map((p) => p.key)
+      : user.role.permissions.map((rp) => rp.permission.key);
   return {
     id: user.id,
     roleId: user.roleId,
     roleSlug: user.role.slug,
     isActive: user.isActive,
-    permissionKeys: user.role.permissions.map((rp) => rp.permission.key),
+    permissionKeys,
   };
 }
 
