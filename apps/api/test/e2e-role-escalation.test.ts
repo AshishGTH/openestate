@@ -359,6 +359,38 @@ describeIf('v0.8.2 role/user escalation boundary', () => {
     expect((await call(await login(caller.email), 'patch', `/users/${target.id}`, { name: 'ok' })).status).toBe(200);
   });
 
+  it("a NON-system role that merely carries the slug 'super_admin' (pre-0.8.2 installs) is not treated as super_admin", async () => {
+    const co = await seedCompany(systemPrisma);
+    try {
+      const mk = async (slug: string, isSystem: boolean) => {
+        const r = await systemPrisma.role.create({ data: { companyId: co.companyId, name: slug, slug, isSystem } });
+        await systemPrisma.rolePermission.createMany({
+          data: ALL_PERMISSIONS.map((k) => ({ roleId: r.id, permissionId: permId.get(k) })),
+        });
+        return r.id as string;
+      };
+      const fakeRoleId = await mk('super_admin', false);
+      const adminLikeId = await mk('e2e-all-perms', false);
+      const user = async (roleId: string, n: string) => {
+        const email = `e2e-fake-${TAG}-${n}@test.com`;
+        const u = await systemPrisma.user.create({
+          data: { companyId: co.companyId, email, passwordHash: hash, name: n, roleId, forcePasswordChange: false },
+        });
+        return { id: u.id as string, email };
+      };
+      const holder = await user(fakeRoleId, 'holder');
+      const caller = await user(adminLikeId, 'caller');
+      // A slug-only check would call the holder a super_admin and refuse this (403).
+      const res = await call(await login(caller.email), 'patch', `/users/${holder.id}`, { name: 'renamed' });
+      expect(res.status).toBe(200);
+      // And the lockout guard has nothing to protect: no SYSTEM super_admin role exists here.
+      const self = await call(await login(holder.email), 'post', `/users/${holder.id}/deactivate`);
+      expect(self.status).toBe(200);
+    } finally {
+      await cleanupCompany(systemPrisma, co.companyId);
+    }
+  });
+
   it('lockout guard: the only active super_admin cannot deactivate themselves (403); with a second one it is allowed', async () => {
     const co = await seedCompany(systemPrisma);
     try {

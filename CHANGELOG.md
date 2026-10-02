@@ -35,6 +35,12 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   roles as before.
 - Editing a role's permissions now writes an audit row (`ROLE_PERMS_CHANGED`).
 
+### Workarounds (until you can upgrade)
+
+Grant user- and role-management permissions (`admin.user.*`, `admin.role.*`)
+only to administrators you fully trust, and review any custom role that
+holds them.
+
 ### After upgrading
 
 Review who holds `super_admin` or `company_admin`, and any custom role with

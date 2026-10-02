@@ -18,6 +18,7 @@ import {
   assertPermissionSubset,
   assertActorIsSuperAdminIfTargetIs,
   assertSuperAdminNotEmptied,
+  isSuperAdminRole,
 } from '../common/permission-subset.util';
 import type {
   CreateUserDto,
@@ -229,7 +230,7 @@ export class UsersService {
     // v0.8.2: you cannot grant a role holding permissions you don't have
     // yourself — the new account's role is what's being GRANTED here.
     const newRole = await this.loadRoleForSubsetCheck(companyId, dto.roleId);
-    assertActorIsSuperAdminIfTargetIs(caller.roleSlug, newRole.slug);
+    assertActorIsSuperAdminIfTargetIs(caller, newRole);
     assertPermissionSubset(
       caller.permissionKeys,
       newRole.permissionKeys,
@@ -285,7 +286,7 @@ export class UsersService {
     // CURRENT role holds before they may touch this account at all —
     // independent of what the edit itself changes.
     const currentRole = await this.loadRoleForSubsetCheck(companyId, user.role.id);
-    assertActorIsSuperAdminIfTargetIs(caller.roleSlug, currentRole.slug);
+    assertActorIsSuperAdminIfTargetIs(caller, currentRole);
     assertPermissionSubset(
       caller.permissionKeys,
       currentRole.permissionKeys,
@@ -300,14 +301,14 @@ export class UsersService {
       // — otherwise a company_admin could launder an escalation by editing
       // a role into something narrower first, then back.
       const newRole = await this.loadRoleForSubsetCheck(companyId, dto.roleId);
-      assertActorIsSuperAdminIfTargetIs(caller.roleSlug, newRole.slug);
+      assertActorIsSuperAdminIfTargetIs(caller, newRole);
       assertPermissionSubset(
         caller.permissionKeys,
         newRole.permissionKeys,
         'You cannot assign a role that holds permissions you do not have.',
       );
 
-      lockoutCheckNeeded = currentRole.slug === 'super_admin' && dto.roleId !== user.role.id;
+      lockoutCheckNeeded = isSuperAdminRole(currentRole) && dto.roleId !== user.role.id;
     }
 
     return runWithTenant({ companyId }, () =>
@@ -336,7 +337,7 @@ export class UsersService {
   private async loadRoleForSubsetCheck(
     companyId: string,
     roleId: string,
-  ): Promise<{ slug: string; isPortal: boolean; permissionKeys: string[] }> {
+  ): Promise<{ slug: string; isSystem: boolean; isPortal: boolean; permissionKeys: string[] }> {
     const role = await this.systemPrisma.role.findFirst({
       where: { id: roleId, companyId },
       include: { permissions: { include: { permission: true } } },
@@ -344,6 +345,7 @@ export class UsersService {
     if (!role) throw new BadRequestException('Role not found');
     return {
       slug: role.slug,
+      isSystem: role.isSystem,
       isPortal: role.isPortal,
       permissionKeys: role.permissions.map((rp: { permission: { key: string } }) => rp.permission.key),
     };
@@ -422,7 +424,7 @@ export class UsersService {
     // v0.8.2: same subset/super-admin-only check as update() — deactivating
     // an account is an action ON it, gated the same way editing it is.
     const currentRole = await this.loadRoleForSubsetCheck(companyId, user.role.id);
-    assertActorIsSuperAdminIfTargetIs(caller.roleSlug, currentRole.slug);
+    assertActorIsSuperAdminIfTargetIs(caller, currentRole);
     assertPermissionSubset(
       caller.permissionKeys,
       currentRole.permissionKeys,
@@ -431,7 +433,7 @@ export class UsersService {
 
     const result = await runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
-        if (currentRole.slug === 'super_admin') {
+        if (isSuperAdminRole(currentRole)) {
           await assertSuperAdminNotEmptied(tx, companyId, userId);
         }
         return tx.user.update({
@@ -471,7 +473,7 @@ export class UsersService {
     const user = await this.findOne(companyId, userId);
 
     const currentRole = await this.loadRoleForSubsetCheck(companyId, user.role.id);
-    assertActorIsSuperAdminIfTargetIs(caller.roleSlug, currentRole.slug);
+    assertActorIsSuperAdminIfTargetIs(caller, currentRole);
     assertPermissionSubset(
       caller.permissionKeys,
       currentRole.permissionKeys,
@@ -534,7 +536,7 @@ export class UsersService {
         'This is a portal user — portal passwords are reset through the portal, not here.',
       );
     }
-    assertActorIsSuperAdminIfTargetIs(caller.roleSlug, targetRole.slug);
+    assertActorIsSuperAdminIfTargetIs(caller, targetRole);
     assertPermissionSubset(
       caller.permissionKeys,
       targetRole.permissionKeys,
@@ -637,7 +639,7 @@ export class UsersService {
         "This is a portal user — reset their 2FA from their customer or broker record, not here.",
       );
     }
-    assertActorIsSuperAdminIfTargetIs(caller.roleSlug, targetRole.slug);
+    assertActorIsSuperAdminIfTargetIs(caller, targetRole);
     assertPermissionSubset(
       caller.permissionKeys,
       targetRole.permissionKeys,

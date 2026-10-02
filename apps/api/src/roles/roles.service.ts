@@ -11,6 +11,7 @@ import {
   assertCallerActive,
   assertPermissionSubset,
   assertActorIsSuperAdminIfTargetIs,
+  isSuperAdminRole,
 } from '../common/permission-subset.util';
 
 const SUPER_ADMIN_SLUG = 'super_admin';
@@ -139,7 +140,7 @@ export class RolesService {
     }
     // super_admin is defined as "every permission"; sync-permissions keeps it
     // complete. Its permission set is not editable by anyone, super_admin included.
-    if (role.isSystem && role.slug === SUPER_ADMIN_SLUG && data.permissionIds !== undefined) {
+    if (isSuperAdminRole(role) && data.permissionIds !== undefined) {
       throw new BadRequestException(
         `The ${SUPER_ADMIN_SLUG} role's permissions cannot be edited; it always holds every permission.`,
       );
@@ -164,7 +165,7 @@ export class RolesService {
     // deliberately: the check is on the role's current permission set, not
     // on who the caller is, so it can't be sidestepped by self-editing.
     const currentKeys = role.permissions.map((rp) => rp.permission.key);
-    assertActorIsSuperAdminIfTargetIs(caller.roleSlug, role.slug);
+    assertActorIsSuperAdminIfTargetIs(caller, role);
     assertPermissionSubset(
       caller.permissionKeys,
       currentKeys,
@@ -248,7 +249,7 @@ export class RolesService {
     // be blocked from reaching 0 users under the same gate in update()/
     // UsersService in the first place.
     const currentKeys = role.permissions.map((rp) => rp.permission.key);
-    assertActorIsSuperAdminIfTargetIs(caller.roleSlug, role.slug);
+    assertActorIsSuperAdminIfTargetIs(caller, role);
     assertPermissionSubset(
       caller.permissionKeys,
       currentKeys,

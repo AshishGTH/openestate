@@ -12,8 +12,20 @@ export interface CallerContext {
   id: string;
   roleId: string;
   roleSlug: string;
+  roleIsSystem: boolean;
   isActive: boolean;
   permissionKeys: string[];
+}
+
+const SUPER_ADMIN_SLUG = 'super_admin';
+
+/**
+ * THE definition of "the super_admin role": the seeded system role with that
+ * slug. Slug alone is not enough (a non-system role could carry the slug on an
+ * install from before the slug was reserved), so every check goes through here.
+ */
+export function isSuperAdminRole(r: { slug: string; isSystem: boolean }): boolean {
+  return r.isSystem && r.slug === SUPER_ADMIN_SLUG;
 }
 
 /**
@@ -38,13 +50,14 @@ export async function loadCurrentCaller(
   // own role lock themselves out of re-granting it (found by the Playwright
   // role-permission-edit spec). Every other role is judged by stored rows.
   const permissionKeys =
-    user.role.isSystem && user.role.slug === 'super_admin'
+    isSuperAdminRole(user.role)
       ? (await systemPrisma.permission.findMany({ select: { key: true } })).map((p) => p.key)
       : user.role.permissions.map((rp) => rp.permission.key);
   return {
     id: user.id,
     roleId: user.roleId,
     roleSlug: user.role.slug,
+    roleIsSystem: user.role.isSystem,
     isActive: user.isActive,
     permissionKeys,
   };
@@ -94,10 +107,11 @@ export function assertPermissionSubset(
  * subset check while still not being the role meant to have this authority.
  */
 export function assertActorIsSuperAdminIfTargetIs(
-  callerRoleSlug: string,
-  targetRoleSlug: string,
+  caller: Pick<CallerContext, 'roleSlug' | 'roleIsSystem'>,
+  targetRole: { slug: string; isSystem: boolean },
 ): void {
-  if (targetRoleSlug === 'super_admin' && callerRoleSlug !== 'super_admin') {
+  const callerIsSuper = isSuperAdminRole({ slug: caller.roleSlug, isSystem: caller.roleIsSystem });
+  if (isSuperAdminRole(targetRole) && !callerIsSuper) {
     throw new ForbiddenException('Only a super_admin may act on a super_admin account.');
   }
 }
@@ -118,7 +132,7 @@ export async function assertSuperAdminNotEmptied(
   companyId: string,
   excludeUserId: string,
 ): Promise<void> {
-  const role = await tx.role.findFirst({ where: { companyId, slug: 'super_admin' } });
+  const role = await tx.role.findFirst({ where: { companyId, slug: SUPER_ADMIN_SLUG, isSystem: true } });
   if (!role) return;
 
   const rows: Array<{ id: string }> = await tx.$queryRaw`

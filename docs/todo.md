@@ -28,6 +28,15 @@ adding a retry), and the fix is shown by running the test repeatedly
 against the unfixed code first, so it fails reliably, then against the
 fix (CLAUDE.md, "a concurrency test must force its interleaving").
 
+## After v0.8.2 ships: deactivate the owner's two old test accounts
+
+The maintainer's verification VM carries two active accounts with a customer
+(portal) role and no applicant or broker link, created before v0.8.1 closed
+that gap: `ashish.alive2@gmail.com` and `mailashish2000sharma@gmail.com`.
+After v0.8.2 is released and the VM is on the public tag, the maintainer
+deactivates both in Admin → Users. v0.8.2 does not change existing rows; the
+upgrade output lists them. Done when both show as inactive.
+
 ## Aadhaar guard covers custom-field values only — free text is unchecked
 
 v0.8.0 checks custom-field VALUES (staff writes) and redacts machine-written
