@@ -30,12 +30,10 @@ fix (CLAUDE.md, "a concurrency test must force its interleaving").
 
 ## After v0.8.2 ships: deactivate the owner's two old test accounts
 
-The maintainer's verification VM carries two active accounts with a customer
-(portal) role and no applicant or broker link, created before v0.8.1 closed
-that gap: `ashish.alive2@gmail.com` and `mailashish2000sharma@gmail.com`.
-After v0.8.2 is released and the VM is on the public tag, the maintainer
-deactivates both in Admin → Users. v0.8.2 does not change existing rows; the
-upgrade output lists them. Done when both show as inactive.
+After v0.8.2 ships: owner to deactivate the two legacy unlinked customer-role
+test accounts on the maintainer VM (they appear in the v0.8.2 upgrade findings
+block). v0.8.2 does not change existing rows. Done when both show as inactive
+in Admin → Users.
 
 ## Aadhaar guard covers custom-field values only — free text is unchecked
 
