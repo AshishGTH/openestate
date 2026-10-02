@@ -129,6 +129,43 @@ describeIf('v0.8.2 portal-role boundary', () => {
     expect(userId).toBeTruthy();
   });
 
+  it('staff 2FA verify refuses an account that became a portal-role account after its 2FA-pending login', async () => {
+    const require = createRequire(import.meta.url);
+    const { TotpService } = require('../dist/auth/totp.service');
+    const totp = new TotpService({ getOrThrow: () => process.env.TOTP_ENCRYPTION_KEY });
+    const { secret } = totp.generateSecret('prb');
+    const recoveryCodes: string[] = totp.generateRecoveryCodes();
+    const staff = await systemPrisma.user.create({
+      data: {
+        companyId: fx.companyId,
+        email: `e2e-prb-${TAG}-2fa@test.com`,
+        passwordHash: hash,
+        name: '2fa',
+        roleId: staffRoleId,
+        forcePasswordChange: false,
+        totpSecret: totp.encrypt(secret),
+        totpEnabled: true,
+        recoveryCodes,
+      },
+    });
+    const agent = request.agent(app.getHttpServer());
+    const login = await agent.post('/api/v1/auth/login').send({ email: staff.email, password: PW }).expect(200);
+    expect(login.body.requiresTwoFactor).toBe(true);
+    const csrf = /openestate_csrf=([^;]+)/.exec(String(login.headers['set-cookie']))![1];
+
+    await superPrisma.$transaction(async (tx) => {
+      await tx.$executeRawUnsafe(`SET LOCAL session_replication_role = replica`);
+      await tx.$executeRawUnsafe(`UPDATE users SET role_id = $1::uuid WHERE id = $2::uuid`, portalRoleId, staff.id);
+    });
+    const res = await agent
+      .post('/api/v1/auth/totp/verify')
+      .set('Authorization', `Bearer ${login.body.tempToken}`)
+      .set('X-CSRF-Token', csrf)
+      .send({ code: recoveryCodes[0] });
+    expect(res.status).toBe(401);
+    expect(res.body.accessToken).toBeUndefined();
+  });
+
   it('control: a linked portal account still cannot use the STAFF login, and a staff account still can', async () => {
     const applicantId = await makeApplicant(systemPrisma, fx.companyId);
     const linkedEmail = `e2e-prb-${TAG}-linked@test.com`;
