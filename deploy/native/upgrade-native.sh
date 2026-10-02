@@ -144,6 +144,10 @@ if ! run_as_superuser "${RELEASE_DIR}/api/node_modules/.bin/prisma" migrate depl
 fi
 rm -f "$MIGRATE_LOG"
 
+# Read-only, never fatal: lists pre-existing accounts the v0.8.2 trigger
+# can't fix retroactively. See lib.sh.
+print_post_migrate_findings || true
+
 # Schema migrations don't cover PERMISSIONS constants — those are
 # application-level rows, not a Prisma model change. seed.ts's own
 # permission-upsert loop never reaches an existing install (it returns

@@ -124,3 +124,43 @@ build_release() {
 
   printf '%s' "$release_dir"
 }
+
+# Prints a plain-English block for any existing staff-surface-shaped problem
+# the v0.8.2 trigger does not (and cannot) fix retroactively: users whose role
+# is a portal role but who carry no applicant_id/broker_id link. Read-only,
+# never fatal. A plain SELECT run by this script rather than a RAISE NOTICE
+# in the migration, because nothing guarantees `prisma migrate deploy`
+# forwards notices to the admin's terminal.
+#
+# Uses the same connection choices as upgrade-native.sh's run_as_superuser:
+# DB_HOST (+ PG_SUPERUSER / PG_SUPERUSER_PASSWORD) for a remote database,
+# otherwise the local `postgres` OS user over the Unix socket.
+print_post_migrate_findings() {
+  local sql="SELECT u.id, u.name, coalesce(u.email, u.phone, '-'), r.slug, u.is_active
+              FROM users u JOIN roles r ON r.id = u.role_id
+             WHERE r.is_portal AND u.applicant_id IS NULL AND u.broker_id IS NULL
+             ORDER BY u.created_at"
+  local rows
+  if [ -n "${DB_HOST:-}" ]; then
+    rows="$(PGPASSWORD="${PG_SUPERUSER_PASSWORD:-}" psql -h "$DB_HOST" -U "${PG_SUPERUSER:-postgres}" -d openestate -tAF ' | ' -c "$sql" 2>/dev/null)" || rows="__QUERY_FAILED__"
+  else
+    rows="$(sudo -u postgres psql -d openestate -tAF ' | ' -c "$sql" 2>/dev/null)" || rows="__QUERY_FAILED__"
+  fi
+  if [ "$rows" = "__QUERY_FAILED__" ]; then
+    warn "Could not run the post-migration check for unlinked portal-role accounts (non-fatal). Run it by hand: SELECT u.id, u.email, r.slug FROM users u JOIN roles r ON r.id=u.role_id WHERE r.is_portal AND u.applicant_id IS NULL AND u.broker_id IS NULL;"
+    return 0
+  fi
+  if [ -z "$rows" ]; then
+    log "Post-migration check: no unlinked portal-role accounts found."
+    return 0
+  fi
+  warn "================================================================"
+  warn "FINDING: these accounts have a customer/broker (portal) role but no"
+  warn "applicant or broker link. Before v0.8.2 such an account could sign in"
+  warn "to the STAFF app; v0.8.2 refuses that, and the database now rejects"
+  warn "creating or editing one. These existing rows were left untouched."
+  warn "Review each in Admin -> Users, then deactivate it or give it a staff role."
+  warn "  id | name | email-or-phone | role | active"
+  printf '%s\n' "$rows" | while IFS= read -r line; do warn "  ${line}"; done
+  warn "================================================================"
+}

@@ -5,6 +5,43 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **An administrator could act beyond their own permissions.** Anyone who
+  could create or edit users, or edit roles, could give any user, including
+  themselves, a role holding permissions they did not have (up to
+  `super_admin`), issue a password-reset link or clear the 2FA of any
+  user they could manage (so the link was shown on their screen and later
+  actions were recorded under the victim's name), deactivate a
+  `super_admin`, or add permissions to a role, including their own.
+  Confined to one company; no cross-tenant access. Every such action is
+  now checked against the caller's **current** permissions in the database
+  (not the token they logged in with): you can only act on a user, or grant
+  a role, whose permissions you already hold; nobody can change their own
+  role; only a `super_admin` can act on a `super_admin`; and the last
+  active `super_admin` cannot be demoted or deactivated.
+- **An account with a customer or broker role but no applicant/broker link
+  could sign in to the staff app** (all versions up to 0.8.1; 0.8.1 only
+  stopped new ones being created). Staff login, 2FA verify and refresh now
+  refuse any account whose role is a portal role, and a database trigger
+  rejects creating or editing such an account. Existing ones are not
+  changed: `upgrade-native.sh` lists them after migrating.
+
+### Changed
+
+- **The `super_admin` role's permissions can no longer be edited, and the
+  role cannot be deleted.** It always holds every permission (the upgrade
+  keeps it complete), and the slug `super_admin` is reserved. Edit other
+  roles as before.
+- Editing a role's permissions now writes an audit row (`ROLE_PERMS_CHANGED`).
+
+### After upgrading
+
+Review who holds `super_admin` or `company_admin`, and any custom role with
+user- or role-management permissions. Review `RESET_LINK_ISSUED` and
+`TOTP_RESET_BY_ADMIN` audit rows. The upgrade output lists any unlinked
+portal-role accounts: deactivate them or give them a staff role.
+
 ## [0.8.1] - 2026-09-27
 
 A security fix. **Every install should upgrade.** One migration (row-level
