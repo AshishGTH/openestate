@@ -29,6 +29,18 @@ cd /opt/openestate-src && sudo git fetch origin
 sudo ./deploy/native/upgrade-native.sh --ref chore/rc-with-deps      # backup -> build -> migrate -> cut over -> health gate
 ```
 
+**Upgrade stops silently after the backup ("would clobber existing tag")?** On a source checkout cloned **before the
+history rewrite**, `upgrade-native.sh --ref ...` runs `git fetch --tags` inside `set -e`, git rejects the old tags
+(`v0.1.0` to `v0.7.1`) with "would clobber existing tag", and the script exits without printing anything of its own, right
+after the backup. Workaround (proven), then rerun the upgrade:
+
+```bash
+sudo git -C /opt/openestate-src fetch --tags --force origin
+sudo ./deploy/native/upgrade-native.sh --ref chore/rc-with-deps
+```
+
+See also `docs/docs/installation.md` (upgrade section) and `docs/todo.md`.
+
 The upgrade makes a backup first (`backup-native.sh`), applies the migration before switching releases, and rolls the code
 back automatically if the health check fails. It never rolls the database back.
 
@@ -66,6 +78,11 @@ sudo nginx -t && sudo systemctl reload nginx
 
 `nginx.conf` passed `nginx -t` on nginx 1.24 in a sandbox after one fix (see `NGINX_LOCAL_CHECK.md`, including what that did
 not cover: IPv6 and the static paths). Run `nginx -t` again on the staging host; it is the first check there.
+
+**One proxy hop only.** The API trusts exactly one proxy in front of it (`trust proxy` = 1 in `apps/api/src/main.ts`), which is
+this nginx. If a CDN, load balancer or tunnel is ever put **in front of nginx**, that setting must change with it. Otherwise
+`req.ip` becomes the address of that extra hop and every client shares **one rate-limit bucket** (and the `Secure` cookie
+decision, which follows `X-Forwarded-Proto`, can be wrong).
 
 ## 4. Health checks
 

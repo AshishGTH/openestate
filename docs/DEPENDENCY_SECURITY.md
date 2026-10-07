@@ -152,3 +152,42 @@ What remains, by advisories: docs-site build tooling 24 (accepted, section 5); r
 
 **Not tested:** these packages on a staging server. Runtime behaviour of the upgraded multer, sharp and qs on a real host is
 `NOT TESTED`.
+
+### Re-verification after merging v0.8.2 (2026-10-07, merge commit `7096686`)
+
+`chore/rc-with-deps` did not contain v0.8.2 (the security release, GHSA-6qrx-8q6w-hvgj). `origin/master` (`a01f0d3`, v0.8.2 plus
+docs) was merged in with a normal merge commit; there were no textual conflicts. The merge changes **no dependency**: the
+lockfile diff between `ab2ad3f` and the merge is 0 lines, and only the `version` fields of the package manifests moved to
+0.8.2 (the patch overrides and bumps from this branch are all still present).
+
+Procedure: delete every `node_modules` and every `dist`, `pnpm install --frozen-lockfile` ("Lockfile is up to date"),
+`scripts/test-setup.sh` (generates the Prisma client and migrates), then typecheck, lint, build, and each suite with
+`CI=true PROPERTY_NUM_RUNS=500`. Counts copied from the runner output:
+
+| Step | Result |
+|---|---|
+| Typecheck / lint / build (turbo) | 15 of 15 / 14 of 14 / 10 of 10 tasks successful |
+| `apps/api` | 124 files / **925** tests passed (was 122 / 892 before the merge) |
+| `packages/db` | 11 files / 81 tests passed |
+| `packages/shared` | 15 files / 215 tests passed |
+| `apps/web` | 3 files / 6 tests passed |
+| `apps/portal` | 2 files / 4 tests passed |
+
+v0.8.2's new and changed tests are among the 925: `e2e-role-escalation` (20 tests), `e2e-portal-role-boundary` (13),
+`e2e-team-scope` (10), `e2e-roles` (3), `e2e-roles-portal-guard` (3), all passing.
+
+**Audit (`pnpm audit --prod`, run 2026-10-07): 39 unique advisories (4 critical, 19 high, 12 moderate, 4 low), up from 29.**
+The increase is **not from the merge**: the pre-merge commit `ab2ad3f` audited the same day also reports 39. These are
+advisories published after 2026-09-30. Split by where they live (first dependency path): docs-site build tooling 33, API
+runtime 6, browser bundles (web, portal) 0.
+
+| Package | Severity | Where | Exposed? | Recommended action |
+|---|---|---|---|---|
+| **proxy-addr 2.0.7** (GHSA-jqcg-44mw-7w3h, IP spoofing via IPv4-mapped IPv6 in a trusted *subnet*) | **critical** | API runtime via express | **No, by reading the code.** The API sets `trust proxy` to the number `1` (`apps/api/src/main.ts`). Express compiles a number into a hop-count function (`function(a, i){ return i < val }`, `express/lib/utils.js`, `compileTrust`), so subnet matching, the vulnerable part, is not used. A config that listed subnets or addresses would be exposed | **REQUIRES APPROVAL: add the override `proxy-addr@^2.0.0 -> 2.0.8`** (same major, patch). Not applied here because the patch set was frozen for this verification |
+| deepmerge-ts 7.1.5 | high | Prisma-internal | not reachable from request input | deferred (unchanged) |
+| @nestjs/core 10.4.22, file-type 20.4.1 (x2), uuid 8.3.2 | moderate | API runtime | as in section 5 | deferred (unchanged) |
+| shell-quote, tinypool (x2) critical; many high | critical/high | `docs` (Docusaurus build tooling) only | No: build time, trusted content | accepted (section 5) |
+
+The "unique production advisories 63 -> 29" figure in the previous section was correct for 2026-09-30 and is kept as history;
+the current number for the same dependency set is 39 because of newly published advisories, not because anything was added.
+

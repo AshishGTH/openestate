@@ -2,12 +2,15 @@
 
 What it proves: for the same requests the existing web app makes, the release-candidate API returns every field the released
 API returned, with the same values, and only adds fields. It is `apps/staff/test-integration/compat.test.ts` in the mobile
-repo, **22 tests**. In this cloud session it passed against the release candidate on a development machine (`Tests 22
-passed (22)`, released API = `master` at `af9ff7a`, test database). That is not a staging result.
+repo, **22 tests**. In this cloud session it passed against the release candidate on a development machine: `Tests 22 passed (22)`, released API
+= **v0.8.2, commit `d337a73`** (the current release, containing the GHSA-6qrx-8q6w-hvgj security fixes), new API =
+`chore/rc-with-deps` at merge commit `7096686`, test database; the whole real-API integration run was 6 files / 101 tests
+passed (auth 10, compat 22, dashboard 20, errors 17, leads 14, schedule 18). An earlier run used `af9ff7a` (v0.8.1+1) as the
+baseline; that baseline is **obsolete**. That is not a staging result.
 
 ## Where the "released" API comes from
 
-The API version that **production runs today**, not a moving branch. Find its commit on the production or staging host:
+The API version that **production runs today**, not a moving branch. As of this writing the current release is **v0.8.2 (`d337a73`)**; if production is still on an older tag, use that tag for the "released" side, because that is the build the upgrade replaces. Find its commit on the production or staging host:
 
 ```bash
 readlink -f /opt/openestate/current            # the running release directory
