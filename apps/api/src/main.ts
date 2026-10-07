@@ -74,7 +74,8 @@ async function bootstrap() {
   }
 
   const port = Number(process.env.PORT ?? 3000);
-  await app.listen(port, '0.0.0.0');
+  // HOST=127.0.0.1 behind nginx (native installs); 0.0.0.0 stays the default for containers.
+  await app.listen(port, process.env.HOST ?? '0.0.0.0');
 }
 
 bootstrap();

@@ -49,7 +49,8 @@ back automatically if the health check fails. It never rolls the database back.
 | Name | Set to |
 |---|---|
 | `NODE_ENV` | `production` |
-| `PORT` | `3000` (nginx proxies to it; bind only on localhost) |
+| `PORT` | `3000` (nginx proxies to it) |
+| `HOST` | `127.0.0.1` (bind only on localhost; unset means `0.0.0.0`, which exposes plain HTTP on every interface). Existing installs: add it to `openestate.env` by hand |
 | `DATABASE_URL` | app role (row-level security enforced) |
 | `DATABASE_URL_SYSTEM` | system role (BYPASSRLS) |
 | `REDIS_URL` | the host's Redis |
