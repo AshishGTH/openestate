@@ -5,8 +5,7 @@
 -- every generated document and every installment / payment plan / receipt /
 -- receipt allocation / ledger row / document dispatch of a booking that broker
 -- sourced. Brokers only need their own commission statements (BROKER_STATEMENT
--- rows carrying their own broker_id), which the generated_documents policy
--- already grants through its direct broker_id branch.
+-- rows carrying their own broker_id).
 --
 -- After: the booking-reachability branch is customer-only (primary applicant or
 -- co-applicant, exactly as before), and the broker branch of generated_documents
@@ -14,84 +13,91 @@
 -- unchanged. Staff sessions (no portal scope) are unchanged: the first
 -- disjunct of every policy.
 --
--- Each policy keeps its name; DROP + CREATE is the only way to change a policy
--- expression that preserves RESTRICTIVE semantics.
+-- ALTER POLICY, never DROP + CREATE: an upgrade runs migrations while the
+-- previous release is still serving requests, and ALTER POLICY swaps the
+-- expression atomically, so there is no moment without a RESTRICTIVE portal
+-- scope. ALTER POLICY keeps each policy's name, its RESTRICTIVE kind, its
+-- command (ALL) and its roles (PUBLIC); it cannot change permissive/restrictive,
+-- so the block below first proves all seven are already RESTRICTIVE, ALL, PUBLIC
+-- (as created in 20260727000000_phase6_portal) and aborts the migration otherwise.
 
--- ALLOW-DROP: replaced below by the same-named policy with the broker branch removed
-DROP POLICY IF EXISTS "installments_portal_scope" ON "installments";
-CREATE POLICY "installments_portal_scope" ON "installments" AS RESTRICTIVE
-  USING (
-    (portal_applicant() IS NULL AND portal_broker() IS NULL)
-    OR (portal_applicant() IS NOT NULL AND portal_broker() IS NULL AND portal_can_access_booking(booking_id))
-  );
+DO $$
+BEGIN
+  IF (
+    SELECT count(*) FROM pg_policies
+    WHERE schemaname = 'public'
+      AND (tablename, policyname) IN (
+        ('installments', 'installments_portal_scope'),
+        ('payment_plans', 'payment_plans_portal_scope'),
+        ('receipts', 'receipts_portal_scope'),
+        ('ledger_entries', 'ledger_entries_portal_scope'),
+        ('receipt_allocations', 'receipt_allocations_portal_scope'),
+        ('document_dispatches', 'document_dispatches_portal_scope'),
+        ('generated_documents', 'generated_documents_portal_scope')
+      )
+      AND permissive = 'RESTRICTIVE'
+      AND cmd = 'ALL'
+      AND roles = '{public}'::name[]
+  ) <> 7 THEN
+    RAISE EXCEPTION 'portal_document_scope: expected 7 RESTRICTIVE / ALL / PUBLIC portal policies; schema differs, not altering';
+  END IF;
+END
+$$;
 
--- ALLOW-DROP: replaced below by the same-named policy with the broker branch removed
-DROP POLICY IF EXISTS "payment_plans_portal_scope" ON "payment_plans";
-CREATE POLICY "payment_plans_portal_scope" ON "payment_plans" AS RESTRICTIVE
-  USING (
-    (portal_applicant() IS NULL AND portal_broker() IS NULL)
-    OR (portal_applicant() IS NOT NULL AND portal_broker() IS NULL AND portal_can_access_booking(booking_id))
-  );
+ALTER POLICY "installments_portal_scope" ON "installments" USING (
+  (portal_applicant() IS NULL AND portal_broker() IS NULL)
+  OR (portal_applicant() IS NOT NULL AND portal_broker() IS NULL AND portal_can_access_booking(booking_id))
+);
 
--- ALLOW-DROP: replaced below by the same-named policy with the broker branch removed
-DROP POLICY IF EXISTS "receipts_portal_scope" ON "receipts";
-CREATE POLICY "receipts_portal_scope" ON "receipts" AS RESTRICTIVE
-  USING (
-    (portal_applicant() IS NULL AND portal_broker() IS NULL)
-    OR (portal_applicant() IS NOT NULL AND portal_broker() IS NULL AND portal_can_access_booking(booking_id))
-  );
+ALTER POLICY "payment_plans_portal_scope" ON "payment_plans" USING (
+  (portal_applicant() IS NULL AND portal_broker() IS NULL)
+  OR (portal_applicant() IS NOT NULL AND portal_broker() IS NULL AND portal_can_access_booking(booking_id))
+);
 
--- ALLOW-DROP: replaced below by the same-named policy with the broker branch removed
-DROP POLICY IF EXISTS "ledger_entries_portal_scope" ON "ledger_entries";
-CREATE POLICY "ledger_entries_portal_scope" ON "ledger_entries" AS RESTRICTIVE
-  USING (
-    (portal_applicant() IS NULL AND portal_broker() IS NULL)
-    OR (portal_applicant() IS NOT NULL AND portal_broker() IS NULL AND portal_can_access_booking(booking_id))
-  );
+ALTER POLICY "receipts_portal_scope" ON "receipts" USING (
+  (portal_applicant() IS NULL AND portal_broker() IS NULL)
+  OR (portal_applicant() IS NOT NULL AND portal_broker() IS NULL AND portal_can_access_booking(booking_id))
+);
+
+ALTER POLICY "ledger_entries_portal_scope" ON "ledger_entries" USING (
+  (portal_applicant() IS NULL AND portal_broker() IS NULL)
+  OR (portal_applicant() IS NOT NULL AND portal_broker() IS NULL AND portal_can_access_booking(booking_id))
+);
 
 -- receipt_allocations has no booking_id of its own: via receipts.
--- ALLOW-DROP: replaced below by the same-named policy with the broker branch removed
-DROP POLICY IF EXISTS "receipt_allocations_portal_scope" ON "receipt_allocations";
-CREATE POLICY "receipt_allocations_portal_scope" ON "receipt_allocations" AS RESTRICTIVE
-  USING (
-    (portal_applicant() IS NULL AND portal_broker() IS NULL)
-    OR (
-      portal_applicant() IS NOT NULL AND portal_broker() IS NULL
-      AND receipt_id IN (SELECT id FROM receipts WHERE portal_can_access_booking(booking_id))
-    )
-  );
+ALTER POLICY "receipt_allocations_portal_scope" ON "receipt_allocations" USING (
+  (portal_applicant() IS NULL AND portal_broker() IS NULL)
+  OR (
+    portal_applicant() IS NOT NULL AND portal_broker() IS NULL
+    AND receipt_id IN (SELECT id FROM receipts WHERE portal_can_access_booking(booking_id))
+  )
+);
 
--- ALLOW-DROP: replaced below by the same-named policy with the broker branch removed
-DROP POLICY IF EXISTS "document_dispatches_portal_scope" ON "document_dispatches";
-CREATE POLICY "document_dispatches_portal_scope" ON "document_dispatches" AS RESTRICTIVE
-  USING (
-    (portal_applicant() IS NULL AND portal_broker() IS NULL)
-    OR (
-      portal_applicant() IS NOT NULL AND portal_broker() IS NULL
-      AND (
-        applicant_id = portal_applicant()
-        OR (booking_id IS NOT NULL AND portal_can_access_booking(booking_id))
-      )
+ALTER POLICY "document_dispatches_portal_scope" ON "document_dispatches" USING (
+  (portal_applicant() IS NULL AND portal_broker() IS NULL)
+  OR (
+    portal_applicant() IS NOT NULL AND portal_broker() IS NULL
+    AND (
+      applicant_id = portal_applicant()
+      OR (booking_id IS NOT NULL AND portal_can_access_booking(booking_id))
     )
-  );
+  )
+);
 
 -- generated_documents: customer = own rows or rows of a booking they can reach
 -- (primary or co-applicant), as before; broker = own BROKER_STATEMENT only.
--- ALLOW-DROP: replaced below by the same-named policy with the broker branch narrowed
-DROP POLICY IF EXISTS "generated_documents_portal_scope" ON "generated_documents";
-CREATE POLICY "generated_documents_portal_scope" ON "generated_documents" AS RESTRICTIVE
-  USING (
-    (portal_applicant() IS NULL AND portal_broker() IS NULL)
-    OR (
-      portal_applicant() IS NOT NULL AND portal_broker() IS NULL
-      AND (
-        applicant_id = portal_applicant()
-        OR (booking_id IS NOT NULL AND portal_can_access_booking(booking_id))
-      )
+ALTER POLICY "generated_documents_portal_scope" ON "generated_documents" USING (
+  (portal_applicant() IS NULL AND portal_broker() IS NULL)
+  OR (
+    portal_applicant() IS NOT NULL AND portal_broker() IS NULL
+    AND (
+      applicant_id = portal_applicant()
+      OR (booking_id IS NOT NULL AND portal_can_access_booking(booking_id))
     )
-    OR (
-      portal_broker() IS NOT NULL AND portal_applicant() IS NULL
-      AND broker_id = portal_broker()
-      AND document_type = 'BROKER_STATEMENT'
-    )
-  );
+  )
+  OR (
+    portal_broker() IS NOT NULL AND portal_applicant() IS NULL
+    AND broker_id = portal_broker()
+    AND document_type = 'BROKER_STATEMENT'
+  )
+);
