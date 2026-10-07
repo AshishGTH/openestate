@@ -69,10 +69,12 @@ needs the API repo's test dependencies on the host. The simplest alternative is 
 
 ## Result table
 
+Staging run 2026-10-07: staging VM 192.168.1.20 (Ubuntu 24.04.5, nginx 1.24.0, Node 20.20.2, PostgreSQL 16.15, Redis 7.0.15), self-signed cert, test data only; upgraded v0.8.2 (`d337a73`) -> `chore/rc-with-deps` (`bf29620`).
+
 | Item | Result |
 |---|---|
-| Released commit/tag identified on the host | NOT TESTED |
-| Released API built and running on 3997 against the migrated staging copy | NOT TESTED |
-| Seed created on the staging copy | NOT TESTED |
-| `compat` file: 22 tests passed, 0 failed, 0 skipped | NOT TESTED |
-| Web app screens (inquiries, follow-ups, reports) load against the RC API | NOT TESTED |
+| Released commit/tag identified on the host | PASS: `/opt/openestate/current` -> `releases/20261002170052-d337a736`, source at `v0.8.2` (`d337a73`) |
+| Released API built and running on 3997 against the migrated staging copy | PASS: `/opt/openestate-released` at `d337a73`, run as the service user with the service env; 3997 reachable only through an SSH tunnel (iptables drop, removed afterwards) |
+| Seed created on the staging copy | PASS, with two adaptations: `SEED_BULK=0` (the seed's own switch), and the two follow-up types inserted without `isSiteVisit` because that column does not exist before the migration (the migration then flagged `Site Visit`). The seed creates **two** companies, not one |
+| `compat` file: 22 tests passed, 0 failed, 0 skipped | PASS: `Tests 22 passed (22)`, RC over HTTPS vs v0.8.2 on 3997. Setup check before the upgrade (v0.8.2 on both sides): 18 passed, 4 failed, exactly the RC-only assertions |
+| Web app screens (inquiries, follow-ups, reports) load against the RC API | NOT TESTED (no browser run in this session) |

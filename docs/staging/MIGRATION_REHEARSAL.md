@@ -5,8 +5,8 @@ Migration: `packages/db/prisma/migrations/20260930120000_follow_up_type_is_site_
 `lower(btrim(name)) = 'site visit'`. It changes no other row and no follow-up.
 
 **Never run this on production data.** Work on a restored copy, on the staging host. Every result cell below is
-**NOT TESTED** until you fill it in. The report script was run only against a small synthetic database (to check the SQL
-itself); it has not been run against a real copy.
+**NOT TESTED** until you fill it in. The report script has been run on the staging host against test data (2026-10-07, section 5);
+it has not been run against a real copy.
 
 ## 1. Make the copy
 
@@ -48,29 +48,31 @@ the `rows_become_site_visit` total from section 5b (before the migration).
 
 ## 5. Record the result
 
+**Test-data rehearsal only.** Staging run 2026-10-07: staging VM 192.168.1.20 (Ubuntu 24.04.5, nginx 1.24.0, Node 20.20.2, PostgreSQL 16.15, Redis 7.0.15), self-signed cert, test data only; upgraded v0.8.2 (`d337a73`) -> `chore/rc-with-deps` (`bf29620`). The VM held no real data (1 company, 16 users, 14 inquiries before the seed), so this was rehearsed on the staging database itself after `backup-native.sh`, with the four name variants inserted as fixtures. **Real-data rehearsal (a restored production backup): NOT TESTED.**
+
 | Item | Value |
 |---|---|
-| Companies | NOT TESTED |
-| Follow-up types in total | NOT TESTED |
-| Existing "Site Visit"-like types (rule matches, before) | NOT TESTED |
-| Auto-flagged (`flagged_total`, after) | NOT TESTED |
-| Left unclassified (`left_unclassified`) | NOT TESTED |
-| Unclassified types that are really site visits (needs a manual flag) | NOT TESTED |
-| Follow-up rows that become site visits (`rows_become_site_visit`, section 5b) | NOT TESTED |
-| of which the old report already counted (`rows_in_legacy_report`) | NOT TESTED |
-| of which only the app will show (`rows_app_only`) | NOT TESTED |
-| Follow-up rows that stay unclassified (`rows_stay_unclassified`) | NOT TESTED |
+| Companies | 3 (1 existing test company + 2 created by the compat seed) |
+| Follow-up types in total | 12 (6 existing, 2 from the seed, 4 variant fixtures) |
+| Existing "Site Visit"-like types (rule matches, before) | 5 |
+| Auto-flagged (`flagged_total`, after) | 5 (all by rule; section 8 `rule_matches_not_flagged` = 0) |
+| Left unclassified (`left_unclassified`) | 7 |
+| Unclassified types that are really site visits (needs a manual flag) | 0 (`Site Visit Follow-up` is the only look-alike, unflagged on purpose) |
+| Follow-up rows that become site visits (`rows_become_site_visit`, section 5b) | 85; after the migration `rows_now_site_visit` = 85 (match) |
+| of which the old report already counted (`rows_in_legacy_report`) | 85 |
+| of which only the app will show (`rows_app_only`) | 0 |
+| Follow-up rows that stay unclassified (`rows_stay_unclassified`) | 23 |
 
 Variants that must behave exactly like this (section 4 shows whether they exist in your data; create them on the copy if
 not, and re-run the migration test path by inserting them before step 3):
 
 | Name | Expected | Result |
 |---|---|---|
-| `Site Visit` | flagged | NOT TESTED |
-| `site visit` | flagged | NOT TESTED |
-| `SITE VISIT` | flagged | NOT TESTED |
-| `Site Visit ` (trailing space) | flagged | NOT TESTED |
-| `Site Visit Follow-up` | **not** flagged | NOT TESTED |
+| `Site Visit` | flagged | PASS (2 types) |
+| `site visit` | flagged | PASS |
+| `SITE VISIT` | flagged | PASS |
+| `Site Visit ` (trailing space) | flagged | PASS |
+| `Site Visit Follow-up` | **not** flagged | PASS (unflagged) |
 
 ## 6. Reports and screens after the migration
 
@@ -79,9 +81,9 @@ With the new API running against the copy, compare with a run on the old API aga
 | Check | Result |
 |---|---|
 | Pre-sales "Site visit" report (Reports menu) returns the same rows as before | NOT TESTED |
-| Other pre-sales reports (funnel, source-wise, staff performance) unchanged | NOT TESTED |
-| `GET /api/v1/site-visits` returns the visits of flagged types and none of the unflagged | NOT TESTED |
-| Web app inquiry detail and follow-up screens load | NOT TESTED |
+| Other pre-sales reports (funnel, source-wise, staff performance) unchanged | Funnel: PASS (compat test, v0.8.2 and RC identical). Source-wise, staff performance: NOT TESTED |
+| `GET /api/v1/site-visits` returns the visits of flagged types and none of the unflagged | PASS: 83 of 83 seeded visits, all of the flagged type; the 20 `Phone Call` follow-ups excluded |
+| Web app inquiry detail and follow-up screens load | NOT TESTED (no browser run) |
 
 Known and expected: the pre-sales **report** still matches the exact name `Site Visit` (report section 6 in the script
 shows the difference). A type named `site visit` is flagged for the app but is not counted by that report until the report is

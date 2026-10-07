@@ -1,7 +1,9 @@
 # Deploying the release candidate to staging
 
-Branch: `chore/rc-with-deps` (release candidate + same-major dependency patches). Nothing here has been run on a staging
-host; every check is **NOT TESTED** until you tick it.
+Branch: `chore/rc-with-deps` (release candidate + same-major dependency patches). Checks are **NOT TESTED** until
+ticked; the 2026-10-07 results are in section 6.
+
+Staging run 2026-10-07: staging VM 192.168.1.20 (Ubuntu 24.04.5, nginx 1.24.0, Node 20.20.2, PostgreSQL 16.15, Redis 7.0.15), self-signed cert, test data only; upgraded v0.8.2 (`d337a73`) -> `chore/rc-with-deps` (`bf29620`). Self-signed-cert results count for server behaviour only; a trusted certificate (real DNS name) is NOT TESTED.
 
 ## 0. What you need
 
@@ -116,15 +118,15 @@ sudo -u postgres psql openestate -c "select migration_name, finished_at from _pr
 
 | Check | Result |
 |---|---|
-| Install or upgrade finished with exit 0 | NOT TESTED |
-| Health endpoint OK over HTTPS, version as expected | NOT TESTED |
-| HTTP redirects to HTTPS; HSTS present | NOT TESTED |
-| `nginx -t` passes with `nginx.conf` on the staging host | NOT TESTED (passed in a sandbox only) |
-| Login returns `Secure` cookies | NOT TESTED |
-| Migration `20260930120000_follow_up_type_is_site_visit` recorded as finished | NOT TESTED |
-| No errors in the service journal after 10 minutes | NOT TESTED |
-| Upload of a 10 MB file succeeds; 12 MB is refused with 413 | NOT TESTED |
-| Mobile build pointed at `https://staging.example.com` (not the mock server) | NOT TESTED |
+| Install or upgrade finished with exit 0 | PASS (2026-10-07): `upgrade-native.sh --ref chore/rc-with-deps`, exit 0, 3 min 10 s; no tag-clobber stop; observed downtime ~6 s (4 x 502 during the restart, 1-2 s polling) |
+| Health endpoint OK over HTTPS, version as expected | PASS: `ok/ok/ok`. Note: the RC packages are still versioned 0.8.2, so `version` reads `0.8.2` before and after; verified by release dir `20261007153217-bf29620d` |
+| HTTP redirects to HTTPS; HSTS present | PASS: 301 to https keeping path and query; `max-age=31536000`. Minor: `/api/` responses carry two HSTS headers (the API's own and nginx's) |
+| `nginx -t` passes with `nginx.conf` on the staging host | PASS on the staging host (nginx 1.24.0, no `http2` warning) |
+| Login returns `Secure` cookies | PASS on v0.8.2 and on the RC: refresh `HttpOnly; Secure; SameSite=Strict; Path=/api/v1/auth`, csrf `Secure; SameSite=Strict` |
+| Migration `20260930120000_follow_up_type_is_site_visit` recorded as finished | PASS: the only migration applied (36 found), finished 2026-10-07 21:05:16 IST |
+| No errors in the service journal after 10 minutes | PASS: 10 min 1 s after cutover, 667 lines, 0 warn/error/fatal, 0 `[audit]` |
+| Upload of a 10 MB file succeeds; 12 MB is refused with 413 | PASS: 10,000,000-byte PDF to `POST /projects/:id/media` -> 201 (deleted afterwards); 12,000,000 bytes -> 413 from nginx |
+| Mobile build pointed at `https://staging.example.com` (not the mock server) | NOT TESTED (no device or app build in this run; only the Node-based compat tests talked to the staging host) |
 
 ## 7. Rollback
 
