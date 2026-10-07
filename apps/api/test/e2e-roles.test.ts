@@ -87,8 +87,18 @@ describeIf('e2e PATCH /roles/:id: system-role permission grants', () => {
     const adminRole = await systemPrisma.role.create({
       data: { companyId: fx.companyId, name: 'E2E Roles Admin', slug: `e2e-roles-admin-${TAG}`, isSystem: true },
     });
+    // v0.8.2: granting a permission to another role now requires the
+    // caller to already hold it themselves — the admin fixture must carry
+    // the two permissions this test grants to systemRole, on top of the
+    // ADMIN_ROLE_* permissions that let it call the endpoints at all.
     await systemPrisma.rolePermission.createMany({
-      data: [PERMISSIONS.ADMIN_ROLE_READ, PERMISSIONS.ADMIN_ROLE_UPDATE, PERMISSIONS.ADMIN_ROLE_DELETE].map((key) => ({
+      data: [
+        PERMISSIONS.ADMIN_ROLE_READ,
+        PERMISSIONS.ADMIN_ROLE_UPDATE,
+        PERMISSIONS.ADMIN_ROLE_DELETE,
+        PERMISSIONS.INVENTORY_UNIT_PLC_MANAGE,
+        PERMISSIONS.INVENTORY_UNIT_CHARGE_MANAGE,
+      ].map((key) => ({
         roleId: adminRole.id,
         permissionId: permByKey.get(key),
       })),

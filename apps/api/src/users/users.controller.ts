@@ -81,7 +81,7 @@ export class UsersController {
   @ApiOperation({ summary: 'Create user' })
   create(@Body() dto: CreateUserDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.usersService.create(user.companyId, dto);
+    return this.usersService.create(user.companyId, dto, user.sub);
   }
 
   @Patch(':id')
@@ -93,7 +93,7 @@ export class UsersController {
     @Req() req: Request,
   ) {
     const user = req.user as JwtPayload;
-    return this.usersService.update(user.companyId, id, dto);
+    return this.usersService.update(user.companyId, id, dto, user.sub);
   }
 
   @Post(':id/deactivate')
@@ -102,7 +102,7 @@ export class UsersController {
   @ApiOperation({ summary: 'Deactivate user (soft delete)' })
   deactivate(@Param('id') id: string, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.usersService.deactivate(user.companyId, id);
+    return this.usersService.deactivate(user.companyId, id, user.sub);
   }
 
   @Post(':id/reactivate')
@@ -111,7 +111,7 @@ export class UsersController {
   @ApiOperation({ summary: 'Reactivate user' })
   reactivate(@Param('id') id: string, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.usersService.reactivate(user.companyId, id);
+    return this.usersService.reactivate(user.companyId, id, user.sub);
   }
 
   @Post(':id/force-password-reset')

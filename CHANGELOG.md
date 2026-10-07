@@ -5,6 +5,80 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-10-02
+
+A security fix. **Every install should upgrade.** One migration (a database
+trigger; no table or column changes); no new environment variable; no change
+to install, backup, restore or uninstall. Advisory:
+[GHSA-6qrx-8q6w-hvgj](https://github.com/AshishGTH/openestate/security/advisories/GHSA-6qrx-8q6w-hvgj).
+
+### If your upgrade stops with "would clobber existing tag"
+
+This affects installs whose source checkout was cloned **before the repository's
+history was rewritten**. On those copies the tags `v0.1.0` to `v0.7.1` still point
+at the old commits, and git refuses to overwrite them. `upgrade-native.sh` takes
+its backup, then exits right after git prints `[rejected] ... (would clobber
+existing tag)`; it prints nothing of its own. Nothing has been changed and your
+current version keeps running. Copies cloned after the rewrite are not affected.
+
+Fix: force the tag fetch (the public tags are authoritative, and nothing of yours
+lives in a tag), then run the upgrade again:
+
+```bash
+sudo git -C /opt/openestate-src fetch --tags --force origin
+cd /opt/openestate-src && sudo ./deploy/native/upgrade-native.sh --ref v0.8.2
+```
+
+### Security
+
+- **An administrator could act beyond their own permissions.** Anyone who
+  could create or edit users, or edit roles, could give any user, including
+  themselves, a role holding permissions they did not have (up to
+  `super_admin`), issue a password-reset link or clear the 2FA of any
+  user they could manage (so the link was shown on their screen and later
+  actions were recorded under the victim's name), deactivate a
+  `super_admin`, or add permissions to a role, including their own.
+  Confined to one company; no cross-tenant access. Every such action is
+  now checked against the caller's **current** permissions in the database
+  (not the token they logged in with): you can only act on a user, or grant
+  a role, whose permissions you already hold; nobody can change their own
+  role; only a `super_admin` can act on a `super_admin`; and the last
+  active `super_admin` cannot be demoted or deactivated.
+- **An account with a customer or broker role but no applicant/broker link
+  could sign in to the staff app** (all versions up to 0.8.1; 0.8.1 only
+  stopped new ones being created). Staff login, 2FA verify and refresh now
+  refuse any account whose role is a portal role, and a database trigger
+  rejects creating or editing such an account. Existing ones are not
+  changed: `upgrade-native.sh` lists them after migrating.
+
+### Changed
+
+- **Behaviour changes to know about:**
+  - Nobody can change their own role (ask another administrator).
+  - Only a `super_admin` can edit, deactivate, reset the password or 2FA of,
+    or change the role of a `super_admin`. The last active `super_admin`
+    cannot be demoted or deactivated.
+  - You can only give a user, or a role, permissions you hold yourself.
+    Two administrators with identical permissions can still act on each other.
+  - **The `super_admin` role's permissions can no longer be edited, and the
+    role cannot be deleted.** It always holds every permission (the upgrade
+    keeps it complete), and the slug `super_admin` is reserved. Edit other
+    roles as before.
+- Editing a role's permissions now writes an audit row (`ROLE_PERMS_CHANGED`).
+
+### Workarounds (until you can upgrade)
+
+Grant user- and role-management permissions (`admin.user.*`, `admin.role.*`)
+only to administrators you fully trust, and review any custom role that
+holds them.
+
+### After upgrading
+
+Review who holds `super_admin` or `company_admin`, and any custom role with
+user- or role-management permissions. Review `RESET_LINK_ISSUED` and
+`TOTP_RESET_BY_ADMIN` audit rows. The upgrade output lists any unlinked
+portal-role accounts: deactivate them or give them a staff role.
+
 ## [0.8.1] - 2026-09-27
 
 A security fix. **Every install should upgrade.** One migration (row-level

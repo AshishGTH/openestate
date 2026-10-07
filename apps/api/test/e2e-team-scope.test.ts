@@ -135,11 +135,13 @@ describeIf('e2e team scoping: manager hierarchy, FollowUp IDOR fix, scoped reass
       // company_admin holds this permission (it takes every admin.* key),
       // so granting it here matches production rather than working around
       // the change.
-      data: [
-        PERMISSIONS.PRESALES_INQUIRY_READ,
-        PERMISSIONS.ADMIN_USER_UPDATE,
-        PERMISSIONS.ADMIN_TEAM_SCOPE_ALL,
-      ].map((key) => ({
+      //
+      // v0.8.2: PATCH /users/:id now requires the caller to hold every
+      // permission the target's CURRENT role holds, even for a managerId-
+      // only edit — so this fixture's admin needs a real superset of
+      // staffRole's permissions (below), not just the 3 keys this test's
+      // own assertions happen to touch directly.
+      data: ALL_PERMISSIONS.map((key) => ({
         roleId: adminRole.id,
         permissionId: permByKey.get(key),
       })),

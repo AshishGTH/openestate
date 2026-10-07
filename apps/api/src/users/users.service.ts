@@ -12,6 +12,14 @@ import { TENANT_PRISMA, SYSTEM_PRISMA } from '../database/database.module';
 import { TokenService } from '../auth/token.service';
 import { TOTP_CLEARED } from '../auth/totp-lockout';
 import { authAuditData } from '../auth/auth-audit';
+import {
+  loadCurrentCaller,
+  assertCallerActive,
+  assertPermissionSubset,
+  assertActorIsSuperAdminIfTargetIs,
+  assertSuperAdminNotEmptied,
+  isSuperAdminRole,
+} from '../common/permission-subset.util';
 import type {
   CreateUserDto,
   UpdateUserDto,
@@ -203,7 +211,10 @@ export class UsersService {
     return user;
   }
 
-  async create(companyId: string, dto: CreateUserDto) {
+  async create(companyId: string, dto: CreateUserDto, callerId: string) {
+    const caller = await loadCurrentCaller(this.systemPrisma, callerId);
+    assertCallerActive(caller);
+
     const existing = await this.systemPrisma.user.findFirst({
       where: { email: dto.email, companyId },
     });
@@ -215,6 +226,16 @@ export class UsersService {
     }
     // This endpoint only creates staff accounts.
     await this.assertRoleFitsAccount(companyId, dto.roleId, false);
+
+    // v0.8.2: you cannot grant a role holding permissions you don't have
+    // yourself — the new account's role is what's being GRANTED here.
+    const newRole = await this.loadRoleForSubsetCheck(companyId, dto.roleId);
+    assertActorIsSuperAdminIfTargetIs(caller, newRole);
+    assertPermissionSubset(
+      caller.permissionKeys,
+      newRole.permissionKeys,
+      'You cannot create a user with a role that holds permissions you do not have.',
+    );
 
     const hash = await argon2.hash(dto.password, { algorithm: argon2.Algorithm.Argon2id });
 
@@ -244,18 +265,58 @@ export class UsersService {
     );
   }
 
-  async update(companyId: string, userId: string, dto: UpdateUserDto) {
+  async update(companyId: string, userId: string, dto: UpdateUserDto, callerId: string) {
+    const caller = await loadCurrentCaller(this.systemPrisma, callerId);
+    assertCallerActive(caller);
+
+    // v0.8.2: no user may change their own role, independent of the
+    // subset check below — closes the most direct escalation path found
+    // (a caller editing their own user row) on its own, even if the
+    // subset check has a bug.
+    if (userId === callerId && dto.roleId !== undefined) {
+      throw new BadRequestException('You cannot change your own role.');
+    }
+
     const user = await this.findOne(companyId, userId);
     if (dto.managerId !== undefined) {
       await this.assertValidManager(companyId, userId, dto.managerId);
     }
+
+    // v0.8.2: the caller must already hold every permission the target's
+    // CURRENT role holds before they may touch this account at all —
+    // independent of what the edit itself changes.
+    const currentRole = await this.loadRoleForSubsetCheck(companyId, user.role.id);
+    assertActorIsSuperAdminIfTargetIs(caller, currentRole);
+    assertPermissionSubset(
+      caller.permissionKeys,
+      currentRole.permissionKeys,
+      'You cannot edit a user whose role holds permissions you do not have.',
+    );
+
+    let lockoutCheckNeeded = false;
     if (dto.roleId !== undefined) {
       await this.assertRoleFitsAccount(companyId, dto.roleId, !!(user.applicantId || user.brokerId));
+
+      // The caller must ALSO hold a superset of the NEW role's permissions
+      // — otherwise a company_admin could launder an escalation by editing
+      // a role into something narrower first, then back.
+      const newRole = await this.loadRoleForSubsetCheck(companyId, dto.roleId);
+      assertActorIsSuperAdminIfTargetIs(caller, newRole);
+      assertPermissionSubset(
+        caller.permissionKeys,
+        newRole.permissionKeys,
+        'You cannot assign a role that holds permissions you do not have.',
+      );
+
+      lockoutCheckNeeded = isSuperAdminRole(currentRole) && dto.roleId !== user.role.id;
     }
 
     return runWithTenant({ companyId }, () =>
-      withTenantTx(this.tenantPrisma, companyId, (tx) =>
-        tx.user.update({
+      withTenantTx(this.tenantPrisma, companyId, async (tx) => {
+        if (lockoutCheckNeeded) {
+          await assertSuperAdminNotEmptied(tx, companyId, userId);
+        }
+        return tx.user.update({
           where: { id: userId },
           data: dto,
           select: {
@@ -267,9 +328,27 @@ export class UsersService {
             updatedAt: true,
             role: { select: { id: true, name: true, slug: true } },
           },
-        }),
-      ),
+        });
+      }),
     );
+  }
+
+  /** Loads a role's slug + fully-expanded permission keys, for the v0.8.2 subset checks. */
+  private async loadRoleForSubsetCheck(
+    companyId: string,
+    roleId: string,
+  ): Promise<{ slug: string; isSystem: boolean; isPortal: boolean; permissionKeys: string[] }> {
+    const role = await this.systemPrisma.role.findFirst({
+      where: { id: roleId, companyId },
+      include: { permissions: { include: { permission: true } } },
+    });
+    if (!role) throw new BadRequestException('Role not found');
+    return {
+      slug: role.slug,
+      isSystem: role.isSystem,
+      isPortal: role.isPortal,
+      permissionKeys: role.permissions.map((rp: { permission: { key: string } }) => rp.permission.key),
+    };
   }
 
   /**
@@ -336,17 +415,33 @@ export class UsersService {
     }
   }
 
-  async deactivate(companyId: string, userId: string) {
-    await this.findOne(companyId, userId);
+  async deactivate(companyId: string, userId: string, callerId: string) {
+    const caller = await loadCurrentCaller(this.systemPrisma, callerId);
+    assertCallerActive(caller);
+
+    const user = await this.findOne(companyId, userId);
+
+    // v0.8.2: same subset/super-admin-only check as update() — deactivating
+    // an account is an action ON it, gated the same way editing it is.
+    const currentRole = await this.loadRoleForSubsetCheck(companyId, user.role.id);
+    assertActorIsSuperAdminIfTargetIs(caller, currentRole);
+    assertPermissionSubset(
+      caller.permissionKeys,
+      currentRole.permissionKeys,
+      'You cannot deactivate a user whose role holds permissions you do not have.',
+    );
 
     const result = await runWithTenant({ companyId }, () =>
-      withTenantTx(this.tenantPrisma, companyId, (tx) =>
-        tx.user.update({
+      withTenantTx(this.tenantPrisma, companyId, async (tx) => {
+        if (isSuperAdminRole(currentRole)) {
+          await assertSuperAdminNotEmptied(tx, companyId, userId);
+        }
+        return tx.user.update({
           where: { id: userId },
           data: { isActive: false },
           select: { id: true, isActive: true },
-        }),
-      ),
+        });
+      }),
     );
 
     // A deactivated user's existing access token stays valid until it
@@ -371,8 +466,19 @@ export class UsersService {
     return result;
   }
 
-  async reactivate(companyId: string, userId: string) {
-    await this.findOne(companyId, userId);
+  async reactivate(companyId: string, userId: string, callerId: string) {
+    const caller = await loadCurrentCaller(this.systemPrisma, callerId);
+    assertCallerActive(caller);
+
+    const user = await this.findOne(companyId, userId);
+
+    const currentRole = await this.loadRoleForSubsetCheck(companyId, user.role.id);
+    assertActorIsSuperAdminIfTargetIs(caller, currentRole);
+    assertPermissionSubset(
+      caller.permissionKeys,
+      currentRole.permissionKeys,
+      'You cannot reactivate a user whose role holds permissions you do not have.',
+    );
 
     return runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>
@@ -405,6 +511,9 @@ export class UsersService {
     userId: string,
     adminUserId: string,
   ): Promise<{ token: string; expiresAt: Date }> {
+    const caller = await loadCurrentCaller(this.systemPrisma, adminUserId);
+    assertCallerActive(caller);
+
     const user = await this.systemPrisma.user.findFirst({ where: { id: userId, companyId } });
     if (!user) throw new NotFoundException('User not found');
     if (!user.isActive) {
@@ -417,6 +526,22 @@ export class UsersService {
         'This is a portal user — portal passwords are reset through the portal, not here.',
       );
     }
+
+    // v0.8.2: issuing a login credential for another account is an action
+    // ON that account — same subset/super-admin-only gate as update().
+    const targetRole = await this.loadRoleForSubsetCheck(companyId, user.roleId);
+    // A portal ROLE with no link is still a portal account (v0.8.2 Part C).
+    if (targetRole.isPortal) {
+      throw new BadRequestException(
+        'This is a portal user — portal passwords are reset through the portal, not here.',
+      );
+    }
+    assertActorIsSuperAdminIfTargetIs(caller, targetRole);
+    assertPermissionSubset(
+      caller.permissionKeys,
+      targetRole.permissionKeys,
+      'You cannot reset the password of a user whose role holds permissions you do not have.',
+    );
 
     const token = randomUUID();
     const tokenHash = createHash('sha256').update(token).digest('hex');
@@ -492,9 +617,12 @@ export class UsersService {
         'You cannot reset your own 2FA here. Use Settings → Disable 2FA instead.',
       );
     }
+    const caller = await loadCurrentCaller(this.systemPrisma, adminUserId);
+    assertCallerActive(caller);
+
     const user = await this.systemPrisma.user.findFirst({
       where: { id: userId, companyId },
-      select: { applicantId: true, brokerId: true },
+      select: { applicantId: true, brokerId: true, roleId: true },
     });
     if (!user) throw new NotFoundException('User not found');
     if (user.applicantId || user.brokerId) {
@@ -502,6 +630,21 @@ export class UsersService {
         "This is a portal user — reset their 2FA from their customer or broker record, not here.",
       );
     }
+
+    // v0.8.2: same subset/super-admin-only gate as forcePasswordReset —
+    // clearing a user's second factor is an action on their account.
+    const targetRole = await this.loadRoleForSubsetCheck(companyId, user.roleId);
+    if (targetRole.isPortal) {
+      throw new BadRequestException(
+        "This is a portal user — reset their 2FA from their customer or broker record, not here.",
+      );
+    }
+    assertActorIsSuperAdminIfTargetIs(caller, targetRole);
+    assertPermissionSubset(
+      caller.permissionKeys,
+      targetRole.permissionKeys,
+      'You cannot reset 2FA for a user whose role holds permissions you do not have.',
+    );
 
     const wasEnabled = await this.systemPrisma.$transaction(async (tx) => {
       // Locked so wasEnabled is accurate when two admins reset at once: the

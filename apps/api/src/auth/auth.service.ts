@@ -56,8 +56,12 @@ export class AuthService {
     // A portal account (customer/broker) must never authenticate on the staff
     // surface. Mirrors the portal side's staff-exclusion at login. Same
     // 'Invalid credentials' message as a missing user, so staff login does
-    // not reveal that a given identifier is a portal account.
-    if (user.applicantId || user.brokerId) {
+    // not reveal that a given identifier is a portal account. Checked two
+    // ways, not one: applicantId/brokerId catches the ordinary case; role.isPortal
+    // catches a portal-ROLE account that has no link at all (v0.8.2 finding —
+    // POST /users had no portal/staff shape check before v0.8.1's
+    // assertRoleFitsAccount, so such an account can exist from before then).
+    if (user.applicantId || user.brokerId || user.role.isPortal) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -125,8 +129,9 @@ export class AuthService {
     });
 
     // Defence in depth: a staff full token must only ever be minted for a
-    // staff account, whatever the pending token claimed.
-    if (user.applicantId || user.brokerId) {
+    // staff account, whatever the pending token claimed. Same two-way check
+    // as login() — see its comment.
+    if (user.applicantId || user.brokerId || user.role.isPortal) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -255,7 +260,9 @@ export class AuthService {
       },
     });
 
-    if (!user || !user.isActive || user.applicantId || user.brokerId) return null;
+    // Same two-way portal-exclusion check as login()/verifyTotp() — a
+    // staff-surface refresh for the same account shape must be refused too.
+    if (!user || !user.isActive || user.applicantId || user.brokerId || user.role.isPortal) return null;
 
     const permissions = user.role.permissions.map(
       (rp) => rp.permission.key,

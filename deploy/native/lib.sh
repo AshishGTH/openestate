@@ -124,3 +124,70 @@ build_release() {
 
   printf '%s' "$release_dir"
 }
+
+# Prints a plain-English block for any existing staff-surface-shaped problem
+# the v0.8.2 trigger does not (and cannot) fix retroactively: users whose role
+# is a portal role but who carry no applicant_id/broker_id link. Read-only,
+# never fatal. A plain SELECT run by this script rather than a RAISE NOTICE
+# in the migration, because nothing guarantees `prisma migrate deploy`
+# forwards notices to the admin's terminal.
+#
+# Uses the same connection choices as upgrade-native.sh's run_as_superuser:
+# DB_HOST (+ PG_SUPERUSER / PG_SUPERUSER_PASSWORD) for a remote database,
+# otherwise the local `postgres` OS user over the Unix socket.
+_findings_rows() {
+  # $1 = SQL. Prints rows; prints __QUERY_FAILED__ if the query could not run.
+  if [ -n "${DB_HOST:-}" ]; then
+    PGPASSWORD="${PG_SUPERUSER_PASSWORD:-}" psql -h "$DB_HOST" -U "${PG_SUPERUSER:-postgres}" -d openestate -tAF ' | ' -c "$1" 2>/dev/null || echo "__QUERY_FAILED__"
+  else
+    sudo -u postgres psql -d openestate -tAF ' | ' -c "$1" 2>/dev/null || echo "__QUERY_FAILED__"
+  fi
+}
+
+print_post_migrate_findings() {
+  local portal_sql="SELECT u.id, u.name, coalesce(u.email, u.phone, '-'), r.slug, u.is_active
+                      FROM users u JOIN roles r ON r.id = u.role_id
+                     WHERE r.is_portal AND u.applicant_id IS NULL AND u.broker_id IS NULL
+                     ORDER BY u.created_at"
+  # A NON-system role carrying the slug 'super_admin' is possible on installs
+  # from before 0.8.2 whose company lacked the seeded row. v0.8.2 does not
+  # treat such a role as super_admin (the seeded system role is identified by
+  # isSystem + slug), so an admin should know it exists.
+  local fake_sql="SELECT r.id, r.company_id, r.name, (SELECT count(*) FROM users u WHERE u.role_id = r.id)
+                    FROM roles r WHERE r.slug = 'super_admin' AND NOT r.is_system ORDER BY r.created_at"
+  local rows fake
+  rows="$(_findings_rows "$portal_sql")"
+  fake="$(_findings_rows "$fake_sql")"
+
+  if [ "$rows" = "__QUERY_FAILED__" ] || [ "$fake" = "__QUERY_FAILED__" ]; then
+    warn "Could not run the post-migration checks (non-fatal). Run them by hand in psql against the openestate database:"
+    warn "  unlinked portal-role accounts: SELECT u.id, u.email, r.slug FROM users u JOIN roles r ON r.id=u.role_id WHERE r.is_portal AND u.applicant_id IS NULL AND u.broker_id IS NULL;"
+    warn "  non-system roles named super_admin: SELECT id, company_id, name FROM roles WHERE slug='super_admin' AND NOT is_system;"
+    return 0
+  fi
+
+  if [ -z "$rows" ] && [ -z "$fake" ]; then
+    log "Post-migration checks: no unlinked portal-role accounts and no non-system 'super_admin' roles found."
+    return 0
+  fi
+  if [ -n "$rows" ]; then
+    warn "================================================================"
+    warn "FINDING: these accounts have a customer/broker (portal) role but no"
+    warn "applicant or broker link. Before v0.8.2 such an account could sign in"
+    warn "to the STAFF app; v0.8.2 refuses that, and the database now rejects"
+    warn "creating or editing one. These existing rows were left untouched."
+    warn "Review each in Admin -> Users, then deactivate it or give it a staff role."
+    warn "  id | name | email-or-phone | role | active"
+    printf '%s\n' "$rows" | while IFS= read -r line; do warn "  ${line}"; done
+    warn "================================================================"
+  fi
+  if [ -n "$fake" ]; then
+    warn "================================================================"
+    warn "FINDING: these roles are named 'super_admin' but are NOT the seeded"
+    warn "system role. v0.8.2 does not treat them as super_admin. Review who"
+    warn "holds them in Admin -> Roles / Users."
+    warn "  role id | company id | name | users holding it"
+    printf '%s\n' "$fake" | while IFS= read -r line; do warn "  ${line}"; done
+    warn "================================================================"
+  fi
+}
