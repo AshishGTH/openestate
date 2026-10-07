@@ -296,21 +296,27 @@ without understanding what actually failed first — check
 
 ### If your upgrade stops with "would clobber existing tag"
 
-This affects installs whose source checkout was cloned **before the
-repository's history was rewritten**. On those copies the tags `v0.1.0` to
-`v0.7.1` still point at the old commits, and git refuses to overwrite them.
-`upgrade-native.sh` takes its backup, then exits right after git prints
-`[rejected] ... (would clobber existing tag)`; it prints nothing of its own.
-Nothing has been changed and your current version keeps running. Copies cloned
-after the rewrite are not affected.
+This only affects the **first upgrade** of an install whose source checkout was
+cloned **before the repository's history was rewritten**, when the upgrade is
+run with the script your install already has. On those copies the tags
+`v0.1.0` to `v0.7.1` still point at the old commits, and git refuses to
+overwrite them. The old `upgrade-native.sh` takes its backup, then exits right
+after git prints `[rejected] ... (would clobber existing tag)`; it prints
+nothing of its own. Nothing has been changed and your current version keeps
+running. Copies cloned after the rewrite are not affected.
 
 Fix: force the tag fetch (the public tags are authoritative, and nothing of
 yours lives in a tag), then run the upgrade again:
 
 ```bash
 sudo git -C /opt/openestate-src fetch --tags --force origin
-cd /opt/openestate-src && sudo ./deploy/native/upgrade-native.sh --ref v0.8.2
+cd /opt/openestate-src && sudo ./deploy/native/upgrade-native.sh --ref v0.8.3
 ```
+
+From v0.8.3 on the script does this itself: `--ref` fetches only that one
+version, forced, and a download failure stops the upgrade with a plain message
+("Could not download ...") before anything is changed. So you only ever need the
+manual command above once, to get onto a version that has the fixed script.
 
 **Before upgrading a production instance**, read the release notes for
 that version. A major version bump may include breaking changes. If in

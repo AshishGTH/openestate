@@ -61,6 +61,20 @@ jobs:
           done
           exit $fail
 
+      # The upgrade script's fetch step, against throwaway git repos, in
+      # seconds and before any install. The second command runs the SAME test
+      # against the old `git fetch --tags && git checkout` line and must fail,
+      # which proves the test can detect the bug it guards (a diverged local
+      # tag stopped upgrades silently on clones made before the history
+      # rewrite).
+      - name: Test the upgrade script's ref checkout (diverged tag)
+        run: |
+          bash deploy/native/test-checkout-ref.sh
+          if CHECKOUT_REF_IMPL=old bash deploy/native/test-checkout-ref.sh >/dev/null 2>&1; then
+            echo "::error::test-checkout-ref.sh passed against the OLD fetch line, so it can no longer detect the bug it guards"
+            exit 1
+          fi
+
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
