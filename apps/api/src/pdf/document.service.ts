@@ -24,6 +24,20 @@ import {
   type BrokerStatementPdfContext,
 } from './document-templates';
 
+/** Which portal principal is asking for a stored document (see
+ * getDocumentBytesForPortal). */
+export type PortalDocumentSession = { kind: 'customer' } | { kind: 'broker'; brokerId: string };
+
+/** The document types each portal exposes. The list endpoint and the download
+ * endpoint both read these, so what can be fetched by ID always equals what
+ * is listed. Allotment/reminder letters stay staff-only surfaces. */
+const CUSTOMER_PORTAL_DOCUMENT_TYPES = [
+  GENERATED_DOCUMENT_TYPE.STATEMENT,
+  GENERATED_DOCUMENT_TYPE.RECEIPT,
+  GENERATED_DOCUMENT_TYPE.DEMAND_LETTER,
+] as const;
+const BROKER_PORTAL_DOCUMENT_TYPES = [GENERATED_DOCUMENT_TYPE.BROKER_STATEMENT] as const;
+
 @Injectable()
 export class DocumentService {
   constructor(
@@ -381,9 +395,24 @@ export class DocumentService {
    * the same "RLS is the primary IDOR defense" discipline as every other
    * portal read. Never regenerates: same stored bytes as the staff path.
    */
-  async getDocumentBytesForPortal(companyId: string, id: string): Promise<{ buffer: Buffer; mimeType: string; originalName: string }> {
+  async getDocumentBytesForPortal(
+    companyId: string,
+    id: string,
+    session: PortalDocumentSession,
+  ): Promise<{ buffer: Buffer; mimeType: string; originalName: string }> {
+    // Per-session-type allow-list, the same set the matching list endpoint
+    // returns, so a document the portal never lists can't be fetched by ID
+    // either (customer: statement/receipt/demand letter; broker: own
+    // commission statements only). A broker is also filtered by its own
+    // brokerId here as defence in depth behind the RLS policy; a customer's
+    // ownership (primary applicant or co-applicant) is decided by RLS alone,
+    // since a co-applicant's documents carry the primary's applicantId.
+    const where =
+      session.kind === 'broker'
+        ? { id, brokerId: session.brokerId, documentType: { in: [...BROKER_PORTAL_DOCUMENT_TYPES] } }
+        : { id, documentType: { in: [...CUSTOMER_PORTAL_DOCUMENT_TYPES] } };
     const doc = await withTenantTx(this.tenantPrisma, companyId, (tx) =>
-      tx.generatedDocument.findFirst({ where: { id } }),
+      tx.generatedDocument.findFirst({ where }),
     );
     if (!doc) throw new NotFoundException('Document not found');
     const filePath = this.uploadService.pathFor('document', doc.storedName);
@@ -402,7 +431,7 @@ export class DocumentService {
       tx.generatedDocument.findMany({
         where: {
           applicantId,
-          documentType: { in: [GENERATED_DOCUMENT_TYPE.STATEMENT, GENERATED_DOCUMENT_TYPE.RECEIPT, GENERATED_DOCUMENT_TYPE.DEMAND_LETTER] },
+          documentType: { in: [...CUSTOMER_PORTAL_DOCUMENT_TYPES] },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -418,7 +447,7 @@ export class DocumentService {
   async listForBrokerPortal(companyId: string, brokerId: string) {
     return withTenantTx(this.tenantPrisma, companyId, (tx) =>
       tx.generatedDocument.findMany({
-        where: { brokerId, documentType: GENERATED_DOCUMENT_TYPE.BROKER_STATEMENT },
+        where: { brokerId, documentType: { in: [...BROKER_PORTAL_DOCUMENT_TYPES] } },
         orderBy: { createdAt: 'desc' },
       }),
     );

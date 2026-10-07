@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Param, Req, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, NotFoundException, Get, Param, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { PERMISSIONS } from '@openestate/shared';
@@ -27,7 +27,10 @@ export class PortalBrokerDocumentsController {
   @ApiOperation({ summary: 'Download a stored commission statement — never regenerated (Phase 6 decisions)' })
   async download(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const user = req.user as JwtPayload;
-    const { buffer, mimeType, originalName } = await this.documents.getDocumentBytesForPortal(user.companyId, id);
+    // Broker-only (mirror of the customer route): a customer session gets the
+    // same 404 as a missing document.
+    if (!user.brokerId) throw new NotFoundException('Document not found');
+    const { buffer, mimeType, originalName } = await this.documents.getDocumentBytesForPortal(user.companyId, id, { kind: 'broker', brokerId: user.brokerId });
     res.set({
       'Content-Type': mimeType,
       'Content-Disposition': `inline; filename="${originalName}"`,

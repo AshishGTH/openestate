@@ -1,4 +1,4 @@
-import { BadRequestException, Controller, Get, Param, Req, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, NotFoundException, Get, Param, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Request, Response } from 'express';
 import { PERMISSIONS } from '@openestate/shared';
@@ -37,10 +37,13 @@ export class PortalAccountController {
 
   @Get('documents/:id/download')
   @RequirePermissions(PERMISSIONS.PORTAL_DOCUMENT_READ)
-  @ApiOperation({ summary: 'Download a stored document — never regenerated (Phase 6 decisions)' })
+  @ApiOperation({ summary: 'Download a stored document of an allowed type — never regenerated (Phase 6 decisions)' })
   async download(@Param('id') id: string, @Req() req: Request, @Res() res: Response) {
     const user = req.user as JwtPayload;
-    const { buffer, mimeType, originalName } = await this.documents.getDocumentBytesForPortal(user.companyId, id);
+    // Customer-only. A broker session gets the same 404 as a missing document,
+    // so the route can't be used to learn whether a document ID exists.
+    if (!user.applicantId) throw new NotFoundException('Document not found');
+    const { buffer, mimeType, originalName } = await this.documents.getDocumentBytesForPortal(user.companyId, id, { kind: 'customer' });
     res.set({
       'Content-Type': mimeType,
       'Content-Disposition': `inline; filename="${originalName}"`,

@@ -276,7 +276,7 @@ describeIf('Phase 6 customer-portal (commit 2)', () => {
     expect(doc.applicantId).toBe(primaryId);
 
     const downloaded = await asPortalApplicant(coApplicantId, () =>
-      documents.getDocumentBytesForPortal(fx.companyId, doc.id),
+      documents.getDocumentBytesForPortal(fx.companyId, doc.id, { kind: 'customer' }),
     );
     expect(downloaded.buffer.length).toBeGreaterThan(0);
   });
@@ -290,8 +290,8 @@ describeIf('Phase 6 customer-portal (commit 2)', () => {
 
     const doc = await documents.generateStatementPdf(fx.companyId, bookingId, fx.userId);
 
-    const first = await asPortalApplicant(applicantId, () => documents.getDocumentBytesForPortal(fx.companyId, doc.id));
-    const second = await asPortalApplicant(applicantId, () => documents.getDocumentBytesForPortal(fx.companyId, doc.id));
+    const first = await asPortalApplicant(applicantId, () => documents.getDocumentBytesForPortal(fx.companyId, doc.id, { kind: 'customer' }));
+    const second = await asPortalApplicant(applicantId, () => documents.getDocumentBytesForPortal(fx.companyId, doc.id, { kind: 'customer' }));
 
     const hash1 = createHash('sha256').update(first.buffer).digest('hex');
     const hash2 = createHash('sha256').update(second.buffer).digest('hex');
@@ -337,7 +337,7 @@ describeIf('Phase 6 customer-portal (commit 2)', () => {
       installment.id,
     );
 
-    const first = await asPortalApplicant(applicantId, () => documents.getDocumentBytesForPortal(fx.companyId, doc.id));
+    const first = await asPortalApplicant(applicantId, () => documents.getDocumentBytesForPortal(fx.companyId, doc.id, { kind: 'customer' }));
     const hashBefore = createHash('sha256').update(first.buffer).digest('hex');
 
     // Master data edit AFTER generation — if the portal endpoint ever
@@ -348,7 +348,7 @@ describeIf('Phase 6 customer-portal (commit 2)', () => {
       data: { subject: 'COMPLETELY DIFFERENT SUBJECT', body: 'This body was edited after generation.' },
     });
 
-    const second = await asPortalApplicant(applicantId, () => documents.getDocumentBytesForPortal(fx.companyId, doc.id));
+    const second = await asPortalApplicant(applicantId, () => documents.getDocumentBytesForPortal(fx.companyId, doc.id, { kind: 'customer' }));
     const hashAfter = createHash('sha256').update(second.buffer).digest('hex');
 
     expect(hashAfter).toBe(hashBefore);

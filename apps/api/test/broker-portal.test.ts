@@ -200,14 +200,14 @@ describeIf('Phase 6 broker-portal (commit 3)', () => {
     const listA = await asPortalBroker(brokerA, () => documents.listForBrokerPortal(fx.companyId, brokerA));
     expect(listA.map((d: { id: string }) => d.id)).toEqual([docA.id]);
 
-    const first = await asPortalBroker(brokerA, () => documents.getDocumentBytesForPortal(fx.companyId, docA.id));
-    const second = await asPortalBroker(brokerA, () => documents.getDocumentBytesForPortal(fx.companyId, docA.id));
+    const first = await asPortalBroker(brokerA, () => documents.getDocumentBytesForPortal(fx.companyId, docA.id, { kind: 'broker', brokerId: brokerA }));
+    const second = await asPortalBroker(brokerA, () => documents.getDocumentBytesForPortal(fx.companyId, docA.id, { kind: 'broker', brokerId: brokerA }));
     expect(first.buffer.equals(second.buffer)).toBe(true);
 
     // Broker B's own token cannot reach A's statement — RLS's broker
     // branch on generated_documents_portal_scope (Phase 6 commit 2).
     await expect(
-      asPortalBroker(brokerB, () => documents.getDocumentBytesForPortal(fx.companyId, docA.id)),
+      asPortalBroker(brokerB, () => documents.getDocumentBytesForPortal(fx.companyId, docA.id, { kind: 'broker', brokerId: brokerB })),
     ).rejects.toThrow();
   });
 
