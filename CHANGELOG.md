@@ -5,6 +5,17 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Security
+
+- **A token without a `surface` claim is now refused.** Since v0.8.1 every
+  access and 2FA-pending token carries a signed `surface` claim (`staff` or
+  `portal`). The guard still guessed the surface of a claim-less token from its
+  customer or broker ids, so that sessions issued before v0.8.1 would keep
+  working. That window has passed: a token with no valid claim now gets 401
+  ("Your session is out of date. Please sign in again.") on every route. Access
+  tokens live 15 minutes, so in practice nothing is visible: the browser's silent
+  refresh issues a token with the claim. Tokens that carry a claim are unaffected;
+  a wrong-surface or inconsistent claim is still 403.
 ### Fixed
 
 - **`upgrade-native.sh --ref` no longer stops silently on a diverged tag.** It
