@@ -14,6 +14,33 @@ rand_hex_32() {
   openssl rand -hex 32
 }
 
+# checkout_ref SRC_DIR REF
+#
+# Fetches exactly REF (a tag, branch or commit) from origin and checks it out,
+# detached. Never `git fetch --tags`: a clone made before the history rewrite
+# holds tags (v0.1.0 to v0.7.1) that point at old commits, git refuses to
+# overwrite them ("would clobber existing tag"), and under `set -e` the old
+# one-liner then stopped the whole upgrade without printing a word. A tag is
+# fetched with a forced refspec for that one name only; anything else is
+# fetched plainly. Any failure stops the upgrade here, in plain English, before
+# anything is built or changed.
+checkout_ref() {
+  local src_dir="$1" ref="$2" out
+  if out="$(cd "$src_dir" && git fetch --force --no-tags origin "+refs/tags/${ref}:refs/tags/${ref}" 2>&1)"; then
+    if ! out="$(cd "$src_dir" && git checkout --quiet --detach "refs/tags/${ref}" 2>&1)"; then
+      die "Could not switch to version '${ref}' after downloading it. git said: ${out}. Nothing was changed and the previous release is still running. If you edited files in ${src_dir}, undo or save those edits and run the upgrade again."
+    fi
+    return 0
+  fi
+  if out="$(cd "$src_dir" && git fetch --force --no-tags origin "$ref" 2>&1)"; then
+    if ! out="$(cd "$src_dir" && git checkout --quiet --detach FETCH_HEAD 2>&1)"; then
+      die "Could not switch to '${ref}' after downloading it. git said: ${out}. Nothing was changed and the previous release is still running. If you edited files in ${src_dir}, undo or save those edits and run the upgrade again."
+    fi
+    return 0
+  fi
+  die "Could not download '${ref}' from the source repository. git said: ${out}. Nothing was changed and the previous release is still running. Check that this server can reach the internet (and the remote named 'origin' in ${src_dir}) and that the version name is spelled exactly as published, then run the upgrade again."
+}
+
 # wait_for_health URL [max_tries]
 wait_for_health() {
   local url="$1" tries=0 max="${2:-60}"

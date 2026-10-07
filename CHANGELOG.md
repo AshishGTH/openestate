@@ -5,6 +5,19 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`upgrade-native.sh --ref` no longer stops silently on a diverged tag.** It
+  used `git fetch --tags && git checkout`, which git refuses on a clone made
+  before the history rewrite (tags `v0.1.0` to `v0.7.1` point at old commits:
+  "would clobber existing tag"); the script then exited after its backup without
+  saying why. It now fetches only the requested tag or branch, forced, and any
+  download failure stops the upgrade with a plain-English message before
+  anything is built or changed. A CI test covers a diverged local tag and is
+  itself checked against the old line. Limit: an install still running the old
+  script needs the one-time `git fetch --tags --force origin` (see the
+  installation guide) to reach this version.
+
 ## [0.8.2] - 2026-10-02
 
 A security fix. **Every install should upgrade.** One migration (a database

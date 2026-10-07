@@ -37,10 +37,13 @@ while [ $# -gt 0 ]; do
     -h|--help)
       cat <<'USAGE'
 Usage: sudo ./upgrade-native.sh [--ref TAG_OR_BRANCH] [--no-backup] [--db-host HOST]
-  --ref REF        git ref to check out in the source checkout before
-                    building (default: whatever is currently checked out —
-                    run `git fetch --tags` and `git checkout vX.Y.Z`
-                    yourself first if you'd rather control this directly).
+  --ref REF        tag, branch or commit to download from origin and check
+                    out in the source checkout before building (default:
+                    whatever is currently checked out). Only that one ref is
+                    fetched, forced, so a tag that changed upstream (a clone
+                    made before the history rewrite) no longer stops the
+                    upgrade; a download failure stops it with a plain
+                    message before anything is changed.
   --no-backup      Skip the automatic pre-upgrade backup (for scripted
                     upgrades that already snapshot elsewhere).
   --db-host HOST   Same meaning as install-native.sh — only needed for a
@@ -65,7 +68,7 @@ fi
 
 if [ -n "$REF" ]; then
   log "Checking out ${REF}..."
-  (cd "$SRC_DIR" && git fetch --tags && git checkout "$REF")
+  checkout_ref "$SRC_DIR" "$REF"
 fi
 
 log "Building new release..."
