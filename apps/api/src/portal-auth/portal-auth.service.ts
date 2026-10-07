@@ -340,7 +340,7 @@ export class PortalAuthService {
       >`
         UPDATE portal_invites
         SET wrong_attempts = wrong_attempts + 1,
-            consumed_at = CASE WHEN wrong_attempts + 1 >= ${INVITE_WRONG_ATTEMPT_CAP} THEN now() ELSE consumed_at END,
+            consumed_at = CASE WHEN wrong_attempts + 1 >= ${INVITE_WRONG_ATTEMPT_CAP} THEN now() AT TIME ZONE 'UTC' ELSE consumed_at END,
             invalidated_reason = CASE WHEN wrong_attempts + 1 >= ${INVITE_WRONG_ATTEMPT_CAP} THEN 'TOO_MANY_ATTEMPTS' ELSE invalidated_reason END
         WHERE id = ${inviteId}::uuid AND consumed_at IS NULL
         RETURNING wrong_attempts, consumed_at, invalidated_reason
@@ -356,7 +356,7 @@ export class PortalAuthService {
     // Correct token — atomically claim the row so a concurrent correct-token
     // request can't also succeed (only one caller creates the User below).
     const claimed = await this.prisma.$queryRaw<Array<{ id: string }>>`
-      UPDATE portal_invites SET consumed_at = now()
+      UPDATE portal_invites SET consumed_at = now() AT TIME ZONE 'UTC'
       WHERE id = ${inviteId}::uuid AND consumed_at IS NULL
       RETURNING id
     `;
@@ -470,7 +470,7 @@ export class PortalAuthService {
     }
 
     const claimed = await this.prisma.$queryRaw<Array<{ id: string }>>`
-      UPDATE portal_password_resets SET consumed_at = now()
+      UPDATE portal_password_resets SET consumed_at = now() AT TIME ZONE 'UTC'
       WHERE id = ${reset.id}::uuid AND consumed_at IS NULL
       RETURNING id
     `;

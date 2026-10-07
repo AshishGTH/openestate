@@ -190,6 +190,10 @@ async function writeAuditRow(
   const beforeJson = before ? toJson(before) : null;
   const afterJson = after ? toJson(after) : null;
 
+  // audit_logs.created_at is TIMESTAMP without time zone and the app reads every
+  // such column as UTC. A bare NOW() stores the SESSION's local clock, off by the
+  // zone offset (5 h 30 min on an Asia/Kolkata server), so it is converted
+  // explicitly (same pattern as the TOTP lockout).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (store.tx as any).$executeRaw`
     INSERT INTO audit_logs (id, company_id, user_id, entity_type, entity_id, action, before, after, ip_address, created_at)
@@ -203,7 +207,7 @@ async function writeAuditRow(
       ${beforeJson}::jsonb,
       ${afterJson}::jsonb,
       ${ipAddress},
-      NOW()
+      NOW() AT TIME ZONE 'UTC'
     )`;
 }
 

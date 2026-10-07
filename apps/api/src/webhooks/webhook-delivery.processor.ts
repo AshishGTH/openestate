@@ -130,7 +130,7 @@ export class WebhookDeliveryProcessor extends WorkerHost {
       `UPDATE webhook_endpoints SET
          consecutive_failures = consecutive_failures + 1,
          is_active = CASE WHEN consecutive_failures + 1 >= $2 THEN false ELSE is_active END,
-         disabled_at = CASE WHEN consecutive_failures + 1 >= $2 AND is_active THEN now() ELSE disabled_at END,
+         disabled_at = CASE WHEN consecutive_failures + 1 >= $2 AND is_active THEN now() AT TIME ZONE 'UTC' ELSE disabled_at END,
          disabled_reason = CASE WHEN consecutive_failures + 1 >= $2 AND is_active THEN $3 ELSE disabled_reason END
        WHERE id = $1::uuid`,
       endpoint.id,

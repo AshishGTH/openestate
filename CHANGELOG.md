@@ -16,6 +16,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   tokens live 15 minutes, so in practice nothing is visible: the browser's silent
   refresh issues a token with the claim. Tokens that carry a claim are unaffected;
   a wrong-surface or inconsistent claim is still 403.
+
 ### Fixed
 
 - **`upgrade-native.sh --ref` no longer stops silently on a diverged tag.** It
@@ -28,6 +29,24 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   itself checked against the old line. Limit: an install still running the old
   script needs the one-time `git fetch --tags --force origin` (see the
   installation guide) to reach this version.
+
+- **Audit log times were wrong by the server's time zone offset.** Rows written
+  by the generic audit trail (every create, update and delete on a record) took
+  the database session's local clock instead of UTC, while the application reads
+  those columns as UTC. On a server whose PostgreSQL time zone is not UTC (for
+  example Asia/Kolkata) they were stamped 5 h 30 min in the future, so the Audit
+  Log showed wrong times and, because it sorts by that value, an out-of-order
+  timeline next to the correctly stamped sign-in and password events. New rows
+  are now written in UTC. **Rows written before this upgrade are not changed**:
+  on a server not in UTC, older create/update/delete entries may still show times
+  offset by the server's time zone (by 5 h 30 min on Asia/Kolkata); nothing is
+  lost, and a server running in UTC is unaffected. The same fix applies to five
+  other raw timestamps: when a staff or portal password-reset link, a portal
+  invite or an invite burned by too many wrong attempts is marked used, when the
+  round-robin assignment last picked a team member, and when a webhook endpoint
+  was auto-disabled. (On a non-UTC server, round-robin order may favour members
+  already assigned before the upgrade for up to the zone offset in hours, then
+  settles.) `number_sequences` timestamps are deliberately unchanged.
 
 ## [0.8.2] - 2026-10-02
 
