@@ -75,7 +75,7 @@ export class AssignmentService {
       if (rows.length > 0) {
         const picked = rows[0];
         await tx.$executeRaw`
-          UPDATE project_assignment_pools SET last_assigned_at = clock_timestamp()
+          UPDATE project_assignment_pools SET last_assigned_at = clock_timestamp() AT TIME ZONE 'UTC'
           WHERE id = ${picked.id}::uuid
         `;
         return picked.user_id;

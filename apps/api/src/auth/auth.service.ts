@@ -350,7 +350,7 @@ export class AuthService {
     }
 
     const claimed = await this.prisma.$queryRaw<Array<{ id: string }>>`
-      UPDATE password_resets SET consumed_at = now()
+      UPDATE password_resets SET consumed_at = now() AT TIME ZONE 'UTC'
       WHERE id = ${reset.id}::uuid AND consumed_at IS NULL
       RETURNING id
     `;
