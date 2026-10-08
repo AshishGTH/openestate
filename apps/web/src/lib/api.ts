@@ -1,9 +1,22 @@
+import { SESSION_ENDED_MESSAGE } from '@openestate/shared';
 import { toast } from './toast';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000';
 
 let accessToken: string | null = null;
 let refreshPromise: Promise<string | null> | null = null;
+let sessionEndedHandler: ((message: string) => void) | null = null;
+
+/**
+ * Registered by AuthProvider. Called when a request is refused because the
+ * session has ended (deactivated, password changed elsewhere, role changed...)
+ * and the refresh token can't renew it either, so the user is sent to the
+ * sign-in page with the server's message instead of being left on a page whose
+ * every request now fails.
+ */
+export function onSessionEnded(handler: ((message: string) => void) | null) {
+  sessionEndedHandler = handler;
+}
 
 export function setAccessToken(token: string | null) {
   accessToken = token;
@@ -83,8 +96,10 @@ export async function api<T = unknown>(
     credentials: 'include',
   });
 
+  let refreshFailed = false;
   if (res.status === 401 && accessToken) {
     const newToken = await refreshSession();
+    if (!newToken) refreshFailed = true;
     if (newToken) {
       headers.set('Authorization', `Bearer ${newToken}`);
       // /auth/refresh rotates the CSRF cookie (a new random value on every
@@ -107,6 +122,10 @@ export async function api<T = unknown>(
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    if (res.status === 401 && refreshFailed && body.message === SESSION_ENDED_MESSAGE) {
+      accessToken = null;
+      sessionEndedHandler?.(SESSION_ENDED_MESSAGE);
+    }
     const err = new Error(body.message ?? `API error ${res.status}`);
     (err as ApiError).status = res.status;
     (err as ApiError).body = body;

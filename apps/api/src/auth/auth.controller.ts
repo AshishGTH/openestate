@@ -154,7 +154,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Confirm TOTP setup with a code' })
   async confirmTotp(@Body() dto: TotpVerifyDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.authService.confirmTotp(user.sub, dto.code);
+    return this.authService.confirmTotp(user.sub, dto.code, req.cookies?.[REFRESH_COOKIE]);
   }
 
   @Post('totp/disable')
@@ -162,7 +162,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Disable TOTP 2FA' })
   async disableTotp(@Req() req: Request) {
     const user = req.user as JwtPayload;
-    await this.authService.disableTotp(user.sub, user.companyId);
+    await this.authService.disableTotp(user.sub, user.companyId, req.cookies?.[REFRESH_COOKIE]);
   }
 
   @Public()

@@ -90,6 +90,10 @@ export const totpSetupResponseSchema = z.object({
 
 export type TotpSetupResponse = z.infer<typeof totpSetupResponseSchema>;
 
+/** The 401 message SessionVersionGuard sends, and the cue both web apps use to
+ * return the user to the sign-in page with that message. */
+export const SESSION_ENDED_MESSAGE = 'Your session has ended. Please sign in again.';
+
 export interface JwtPayload {
   sub: string;
   companyId: string;
@@ -109,6 +113,12 @@ export interface JwtPayload {
   // without it. Optional in the type only because the claim is read off an
   // untrusted, already-signed payload and a missing one must be representable.
   surface?: 'staff' | 'portal';
+  // Session authorisation version (users.authz_version) at the moment this
+  // token was issued. SessionVersionGuard refuses the token once the user's
+  // current version differs (deactivated, role or role permissions changed,
+  // password changed or reset, 2FA reset). Optional in the type only because it
+  // is read off a signed payload and a missing one must be representable.
+  av?: number;
   // Phase 6: set only on a portal (customer/broker) token — a superset
   // field, never present on a staff token. Exactly one is set when
   // either is set.

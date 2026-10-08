@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { JwtPayload } from '@openestate/shared';
-import { api, setAccessToken, refreshSession } from './api';
+import { api, setAccessToken, refreshSession, onSessionEnded } from './api';
 
 interface AuthState {
   user: JwtPayload | null;
@@ -16,6 +16,9 @@ interface AuthState {
 }
 
 interface AuthContextValue extends AuthState {
+  /** Set when the server ended this session (see api.ts onSessionEnded); the
+   * sign-in page shows it. Cleared once the user signs in again. */
+  sessionEndedMessage: string | null;
   login: (
     identifier: string,
     password: string,
@@ -42,6 +45,20 @@ function decodeJwt(token: string): JwtPayload | null {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ user: null, isLoading: true });
+  const [sessionEndedMessage, setSessionEndedMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    onSessionEnded((message) => {
+      setAccessToken(null);
+      setSessionEndedMessage(message);
+      setState({ user: null, isLoading: false });
+    });
+    return () => onSessionEnded(null);
+  }, []);
+
+  useEffect(() => {
+    if (state.user) setSessionEndedMessage(null);
+  }, [state.user]);
 
   useEffect(() => {
     // refreshSession() — see apps/web/src/lib/auth.tsx's identical fix for
@@ -111,8 +128,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo(
-    () => ({ ...state, login, verifyTotp, logout, hasPermission }),
-    [state, login, verifyTotp, logout, hasPermission],
+    () => ({ ...state, sessionEndedMessage, login, verifyTotp, logout, hasPermission }),
+    [state, sessionEndedMessage, login, verifyTotp, logout, hasPermission],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

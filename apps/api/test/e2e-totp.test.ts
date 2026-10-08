@@ -161,12 +161,17 @@ describeIf('e2e TOTP 2FA: real HTTP through the full guard pipeline', () => {
       .expect(200);
     expect(confirm.body.recoveryCodes).toHaveLength(8);
 
+    // Enabling 2FA ends every access token, this one included (Part H); the
+    // browser refreshes once. Do the same before cleaning up.
+    const refreshed = await agent.post('/api/v1/auth/refresh').set('X-CSRF-Token', csrf).expect(200);
+    const refreshedCsrf = extractCookie(refreshed.headers['set-cookie'], 'openestate_csrf') ?? csrf;
+
     // Cleanup: disable so later tests in this file start from a known
     // (2FA-off) state regardless of `it` execution order.
     await agent
       .post('/api/v1/auth/totp/disable')
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-CSRF-Token', csrf)
+      .set('Authorization', `Bearer ${refreshed.body.accessToken}`)
+      .set('X-CSRF-Token', refreshedCsrf)
       .expect(204);
   });
 

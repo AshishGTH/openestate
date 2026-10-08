@@ -1,3 +1,4 @@
+import { AuthzVersionService } from '../auth/authz-version.service';
 import {
   BadRequestException,
   ConflictException,
@@ -48,6 +49,7 @@ export class UsersService {
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
     private readonly tokenService: TokenService,
+    private readonly authzVersions: AuthzVersionService,
   ) {}
 
   async findAll(companyId: string, query: PaginationQuery) {
@@ -311,7 +313,7 @@ export class UsersService {
       lockoutCheckNeeded = isSuperAdminRole(currentRole) && dto.roleId !== user.role.id;
     }
 
-    return runWithTenant({ companyId }, () =>
+    const updated = await runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, async (tx) => {
         if (lockoutCheckNeeded) {
           await assertSuperAdminNotEmptied(tx, companyId, userId);
@@ -331,6 +333,14 @@ export class UsersService {
         });
       }),
     );
+
+    // A role change ends the user's existing sessions at once (their tokens
+    // carry the old permissions). The browser's refresh then issues a token
+    // with the new role's permissions.
+    if (dto.roleId !== undefined && dto.roleId !== user.role.id) {
+      await this.authzVersions.bumpUsers([userId]);
+    }
+    return updated;
   }
 
   /** Loads a role's slug + fully-expanded permission keys, for the v0.8.2 subset checks. */
@@ -444,12 +454,13 @@ export class UsersService {
       }),
     );
 
-    // A deactivated user's existing access token stays valid until it
-    // expires (JwtStrategy does no DB lookup) — but their refresh tokens
-    // must die here so they can't renew. Same pattern as
-    // AuthService.forceChangePassword: DB write first, revoke after,
-    // outside the tenant transaction (TokenService uses SYSTEM_PRISMA).
+    // Refresh tokens die so they can't renew, and the authorisation version
+    // moves on so an access token already issued is refused on its very next
+    // request (SessionVersionGuard). Same pattern as
+    // AuthService.forceChangePassword: DB write first, revoke after, outside
+    // the tenant transaction (TokenService uses SYSTEM_PRISMA).
     await this.tokenService.revokeAllForUser(userId);
+    await this.authzVersions.bumpUsers([userId]);
 
     // Outstanding reset links die too, staff and portal tables both (this
     // endpoint deactivates either kind of user), so reactivation can't bring
@@ -480,7 +491,7 @@ export class UsersService {
       'You cannot reactivate a user whose role holds permissions you do not have.',
     );
 
-    return runWithTenant({ companyId }, () =>
+    const result = await runWithTenant({ companyId }, () =>
       withTenantTx(this.tenantPrisma, companyId, (tx) =>
         tx.user.update({
           where: { id: userId },
@@ -489,6 +500,10 @@ export class UsersService {
         }),
       ),
     );
+    // Every change to isActive moves the version, so no token from either side
+    // of a deactivate/reactivate pair is ever valid again.
+    await this.authzVersions.bumpUsers([userId]);
+    return result;
   }
 
   /**
@@ -599,10 +614,9 @@ export class UsersService {
    * reset-link redemption refuses it since v0.6.0). Requiring reactivation
    * first would add an ordering step with no security gain.
    *
-   * Sessions: revokeAllForUser stops every refresh token from renewing, but
-   * an access token already issued stays valid until it expires — up to
-   * JWT_ACCESS_EXPIRES_IN, 15 minutes by default — because JwtStrategy
-   * checks only the signature and expiry, with no database lookup.
+   * Sessions: revokeAllForUser stops every refresh token from renewing, and
+   * the authorisation-version bump makes an access token already issued fail
+   * on its next request (SessionVersionGuard).
    *
    * The audit row is written even when 2FA was already off (wasEnabled:
    * false): the admin's action is itself worth recording.
@@ -666,8 +680,9 @@ export class UsersService {
     });
 
     // After the transaction, like deactivate(): TokenService writes through
-    // its own client.
+    // its own client. The version bump ends sessions already signed in.
     await this.tokenService.revokeAllForUser(userId);
+    await this.authzVersions.bumpUsers([userId]);
     return { wasEnabled };
   }
 }

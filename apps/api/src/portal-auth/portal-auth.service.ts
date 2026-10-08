@@ -1,3 +1,4 @@
+import { AuthzVersionService } from '../auth/authz-version.service';
 import {
   BadRequestException,
   ConflictException,
@@ -59,6 +60,7 @@ export class PortalAuthService {
     private readonly tokenService: TokenService,
     private readonly totpService: TotpService,
     @InjectQueue(PORTAL_QUEUE) private readonly portalQueue: Queue,
+    private readonly authzVersions: AuthzVersionService,
   ) {}
 
   async login(dto: PortalLoginDto): Promise<PortalLoginResult> {
@@ -90,7 +92,7 @@ export class PortalAuthService {
     });
 
     if (user.totpEnabled && user.totpSecret) {
-      const tempToken = this.tokenService.signTwoFactorPendingToken({
+      const tempToken = await this.tokenService.signTwoFactorPendingToken({
         sub: user.id,
         companyId: user.companyId,
         email: user.email,
@@ -178,7 +180,7 @@ export class PortalAuthService {
     return { secret, otpauthUrl, qrDataUrl };
   }
 
-  async confirmTotp(userId: string, code: string) {
+  async confirmTotp(userId: string, code: string, currentRefreshToken?: string) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     if (!user.totpSecret) throw new BadRequestException('TOTP setup not started');
 
@@ -197,10 +199,11 @@ export class PortalAuthService {
         }),
       }),
     ]);
+    await this.endOtherSessions(userId, currentRefreshToken);
     return { recoveryCodes };
   }
 
-  async disableTotp(userId: string, companyId: string) {
+  async disableTotp(userId: string, companyId: string, currentRefreshToken?: string) {
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: userId },
@@ -213,6 +216,7 @@ export class PortalAuthService {
         }),
       }),
     ]);
+    await this.endOtherSessions(userId, currentRefreshToken);
   }
 
   async refreshTokens(rawRefreshToken: string) {
@@ -227,7 +231,7 @@ export class PortalAuthService {
     if (!user || !user.isActive || (!user.applicantId && !user.brokerId)) return null;
 
     const permissions = user.role.permissions.map((rp) => rp.permission.key);
-    const accessToken = this.tokenService.signAccessToken({
+    const accessToken = await this.tokenService.signAccessToken({
       sub: user.id,
       companyId: user.companyId,
       email: user.email,
@@ -279,6 +283,9 @@ export class PortalAuthService {
     } else {
       await this.tokenService.revokeAllForUser(userId);
     }
+    // Mirrors AuthService.changePassword: every issued access token is refused
+    // from the next request; this browser refreshes, other sessions don't.
+    await this.authzVersions.bumpUsers([userId]);
   }
 
   /**
@@ -436,6 +443,14 @@ export class PortalAuthService {
           include: { role: { include: { permissions: { include: { permission: true } } } } },
         });
 
+    // Re-inviting an existing account replaces its password: like any password
+    // change, every other session of that account ends (refresh tokens revoked,
+    // access tokens refused). The token issued below reads the new version.
+    if (existingUser) {
+      await this.tokenService.revokeAllForUser(existingUser.id);
+      await this.authzVersions.bumpUsers([existingUser.id]);
+    }
+
     const tokens = await this.issueTokens(user);
     return { requiresTwoFactor: false as const, ...tokens };
   }
@@ -496,6 +511,7 @@ export class PortalAuthService {
       });
     });
     await this.tokenService.revokeAllForUser(reset.userId);
+    await this.authzVersions.bumpUsers([reset.userId]);
   }
 
   /**
@@ -656,6 +672,7 @@ export class PortalAuthService {
     });
 
     await this.tokenService.revokeAllForUser(user.id);
+    await this.authzVersions.bumpUsers([user.id]);
     return { wasEnabled };
   }
 
@@ -682,7 +699,7 @@ export class PortalAuthService {
       (rp: any) => rp.permission.key,
     );
 
-    const accessToken = this.tokenService.signAccessToken({
+    const accessToken = await this.tokenService.signAccessToken({
       sub: user.id,
       companyId: user.companyId,
       email: user.email,
@@ -707,5 +724,20 @@ export class PortalAuthService {
     const lockedUntil =
       attempts >= MAX_FAILED_ATTEMPTS ? new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000) : null;
     await this.prisma.user.update({ where: { id: userId }, data: { failedLoginAttempts: attempts, lockedUntil } });
+  }
+
+  /**
+   * Turning 2FA on or off changes how the account signs in, so every OTHER
+   * session ends (refresh tokens revoked, access tokens refused on their next
+   * request). This browser's refresh token survives, so it refreshes once and
+   * carries on. Same shape as changePassword.
+   */
+  private async endOtherSessions(userId: string, currentRefreshToken?: string) {
+    if (currentRefreshToken) {
+      await this.tokenService.revokeAllForUserExceptToken(userId, currentRefreshToken);
+    } else {
+      await this.tokenService.revokeAllForUser(userId);
+    }
+    await this.authzVersions.bumpUsers([userId]);
   }
 }

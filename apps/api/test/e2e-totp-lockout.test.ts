@@ -379,14 +379,22 @@ describeIf('totp/verify lockout, staff and portal', () => {
         // complete a login to get there.
         const session = await pending(user);
         const ok = await verify(session, totpCode(user.secret)).expect(200);
-        const csrf = cookieValue(ok.headers['set-cookie'], CSRF[surface])!;
+        let csrf = cookieValue(ok.headers['set-cookie'], CSRF[surface])!;
+        let token = ok.body.accessToken as string;
         const withSession = (r: request.Test) =>
-          r.set('Authorization', `Bearer ${ok.body.accessToken}`).set('X-CSRF-Token', csrf);
+          r.set('Authorization', `Bearer ${token}`).set('X-CSRF-Token', csrf);
+        // Turning 2FA off ends every access token (Part H); the browser refreshes once.
+        const refresh = async () => {
+          const r = await session.agent.post(`${AUTH[surface]}/refresh`).set('X-CSRF-Token', csrf).expect(200);
+          token = r.body.accessToken;
+          csrf = cookieValue(r.headers['set-cookie'], CSRF[surface]) ?? csrf;
+        };
 
         await lockOut(await pending(user));
         expect((await state(user.id)).totpLockedUntil).not.toBeNull();
 
         await withSession(session.agent.post(`${AUTH[surface]}/totp/disable`)).expect(204);
+        await refresh();
         const cleared = await state(user.id);
         expect(cleared.failedTotpAttempts).toBe(0);
         expect(cleared.totpLockedUntil).toBeNull();

@@ -56,6 +56,9 @@ export default async function globalSetup() {
     // each turns 2FA on for an account and then has an admin clear it.
     staffTotpReset: await seedE2eFixture(DATABASE_URL_SYSTEM),
     portalTotpReset: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
+    // Its own company and portal user: session-ended-portal.spec.ts deactivates
+    // that portal user.
+    portalSessionEnded: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),
     // Its own company: role-permission-edit.spec.ts edits this company's
     // Customer portal role, which other specs' portal users depend on.
     rolesPortal: await seedE2eFixture(DATABASE_URL_SYSTEM, { withPortalTicketSetup: true }),

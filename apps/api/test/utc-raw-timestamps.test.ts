@@ -21,6 +21,7 @@ import type { ConfigService } from '@nestjs/config';
 import { createTenantPrismaClient, createSystemPrismaClient, runWithTenant, withTenantTx } from '@openestate/db';
 import { TokenService } from '../src/auth/token.service';
 import { TotpService } from '../src/auth/totp.service';
+import { AuthzVersionService } from '../src/auth/authz-version.service';
 import { AuthService } from '../src/auth/auth.service';
 import { PortalAuthService } from '../src/portal-auth/portal-auth.service';
 import { AssignmentService } from '../src/presales/assignment.service';
@@ -70,6 +71,7 @@ describeIf('raw now() writes store UTC under a non-UTC database session', () => 
   let totpService: TotpService;
   let portalAuth: PortalAuthService;
   let staffAuth: AuthService;
+  let authzVersions: AuthzVersionService;
   let server: http.Server;
   let serverUrl: string;
 
@@ -86,8 +88,9 @@ describeIf('raw now() writes store UTC under a non-UTC database session', () => 
     totpService = new TotpService(config);
     // The queue is only used by requestPasswordReset, which these tests do not call.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    portalAuth = new PortalAuthService(istSystem, tokenService, totpService, {} as any);
-    staffAuth = new AuthService(istSystem, tokenService, totpService);
+    authzVersions = new AuthzVersionService(istSystem, process.env.REDIS_TEST_URL ?? 'redis://localhost:6379');
+    portalAuth = new PortalAuthService(istSystem, tokenService, totpService, {} as any, authzVersions);
+    staffAuth = new AuthService(istSystem, tokenService, totpService, authzVersions);
 
     server = http.createServer((_req, res) => {
       res.writeHead(500).end('server error');
@@ -99,6 +102,7 @@ describeIf('raw now() writes store UTC under a non-UTC database session', () => 
   });
 
   afterAll(async () => {
+    await authzVersions.onModuleDestroy();
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())));
     await normalSystem.projectAssignmentPool.deleteMany({ where: { companyId: fx.companyId } });
     await cleanupCompany(normalSystem, fx.companyId);

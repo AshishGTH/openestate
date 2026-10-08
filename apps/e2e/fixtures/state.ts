@@ -16,6 +16,7 @@ interface AllFixtures {
   staffTotpReset: E2eFixture;
   portalTotpReset: E2eFixture;
   rolesPortal: E2eFixture;
+  portalSessionEnded: E2eFixture;
 }
 
 /** Reads the named fixture global-setup.ts wrote before any spec ran. */

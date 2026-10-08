@@ -1,3 +1,4 @@
+import { AuthzVersionService } from './authz-version.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -24,6 +25,7 @@ export class AuthService {
     @Inject(SYSTEM_PRISMA) private readonly prisma: PrismaClient,
     private readonly tokenService: TokenService,
     private readonly totpService: TotpService,
+    private readonly authzVersions: AuthzVersionService,
   ) {}
 
   async login(
@@ -87,7 +89,7 @@ export class AuthService {
     });
 
     if (user.totpEnabled && user.totpSecret) {
-      const tempToken = this.tokenService.signTwoFactorPendingToken({
+      const tempToken = await this.tokenService.signTwoFactorPendingToken({
         sub: user.id,
         companyId: user.companyId,
         email: user.email,
@@ -192,7 +194,7 @@ export class AuthService {
     return { secret, otpauthUrl, qrDataUrl };
   }
 
-  async confirmTotp(userId: string, code: string) {
+  async confirmTotp(userId: string, code: string, currentRefreshToken?: string) {
     const user = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
     });
@@ -220,11 +222,12 @@ export class AuthService {
         }),
       }),
     ]);
+    await this.endOtherSessions(userId, currentRefreshToken);
 
     return { recoveryCodes };
   }
 
-  async disableTotp(userId: string, companyId: string) {
+  async disableTotp(userId: string, companyId: string, currentRefreshToken?: string) {
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: userId },
@@ -237,6 +240,7 @@ export class AuthService {
         }),
       }),
     ]);
+    await this.endOtherSessions(userId, currentRefreshToken);
   }
 
   async refreshTokens(
@@ -268,7 +272,7 @@ export class AuthService {
       (rp) => rp.permission.key,
     );
 
-    const accessToken = this.tokenService.signAccessToken({
+    const accessToken = await this.tokenService.signAccessToken({
       sub: user.id,
       companyId: user.companyId,
       email: user.email,
@@ -333,6 +337,10 @@ export class AuthService {
     } else {
       await this.tokenService.revokeAllForUser(userId);
     }
+    // Every access token already issued (this one included) is refused from
+    // the next request on; this browser's refresh token survives above, so it
+    // silently gets a fresh token and stays signed in. Other sessions don't.
+    await this.authzVersions.bumpUsers([userId]);
   }
 
   /**
@@ -379,6 +387,7 @@ export class AuthService {
       });
     });
     await this.tokenService.revokeAllForUser(reset.userId);
+    await this.authzVersions.bumpUsers([reset.userId]);
   }
 
   async forceChangePassword(userId: string, companyId: string, newPassword: string) {
@@ -400,6 +409,7 @@ export class AuthService {
       }),
     ]);
     await this.tokenService.revokeAllForUser(userId);
+    await this.authzVersions.bumpUsers([userId]);
   }
 
   /**
@@ -429,7 +439,7 @@ export class AuthService {
       (rp: any) => rp.permission.key,
     );
 
-    const accessToken = this.tokenService.signAccessToken({
+    const accessToken = await this.tokenService.signAccessToken({
       sub: user.id,
       companyId: user.companyId,
       email: user.email,
@@ -459,5 +469,20 @@ export class AuthService {
       where: { id: userId },
       data: { failedLoginAttempts: attempts, lockedUntil },
     });
+  }
+
+  /**
+   * Turning 2FA on or off changes how the account signs in, so every OTHER
+   * session ends (refresh tokens revoked, access tokens refused on their next
+   * request). This browser's refresh token survives, so it refreshes once and
+   * carries on. Same shape as changePassword.
+   */
+  private async endOtherSessions(userId: string, currentRefreshToken?: string) {
+    if (currentRefreshToken) {
+      await this.tokenService.revokeAllForUserExceptToken(userId, currentRefreshToken);
+    } else {
+      await this.tokenService.revokeAllForUser(userId);
+    }
+    await this.authzVersions.bumpUsers([userId]);
   }
 }

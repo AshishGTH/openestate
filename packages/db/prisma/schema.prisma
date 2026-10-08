@@ -148,6 +148,13 @@ model User {
   // apps/api/src/auth/totp-lockout.ts has the why.
   failedTotpAttempts Int       @default(0) @map("failed_totp_attempts")
   totpLockedUntil    DateTime? @map("totp_locked_until")
+  // Session authorisation version. Every access token carries the value it was
+  // issued with (`av`); SessionVersionGuard refuses a token whose `av` differs
+  // from this column. Incremented on deactivate/reactivate, role change, an edit
+  // to the role's permissions, a password change or admin reset, and an admin
+  // 2FA reset (AuthzVersionService), so an already-issued token stops working on
+  // its very next request instead of living out its 15 minutes.
+  authzVersion       Int       @default(0) @map("authz_version")
 
   failedLoginAttempts Int       @default(0) @map("failed_login_attempts")
   lockedUntil         DateTime? @map("locked_until")
