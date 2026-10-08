@@ -104,10 +104,10 @@ export interface JwtPayload {
   // staff-only field, omitted rather than false" convention as
   // applicantId/brokerId below, just inverted).
   forcePasswordChange?: boolean;
-  // Phase 6 security: which login surface minted this token. 'staff' or
-  // 'portal'. Older tokens (pre-fix) omit it; the SessionSurfaceGuard
-  // falls back to inferring surface from applicantId/brokerId so those
-  // tokens are still classified correctly and no re-login is forced.
+  // Phase 6 security: which login surface minted this token, 'staff' or
+  // 'portal'. Required in practice: SessionSurfaceGuard refuses (401) a token
+  // without it. Optional in the type only because the claim is read off an
+  // untrusted, already-signed payload and a missing one must be representable.
   surface?: 'staff' | 'portal';
   // Phase 6: set only on a portal (customer/broker) token — a superset
   // field, never present on a staff token. Exactly one is set when

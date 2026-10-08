@@ -16,26 +16,30 @@ export function routeSurface(path: string): Surface {
 }
 
 /**
- * The surface a TOKEN belongs to. Prefer the explicit claim; for older
- * tokens that predate it, infer from the portal-only id fields (exactly
- * one of applicantId/brokerId is set on a portal token, neither on a
- * staff token). This keeps pre-fix sessions valid and correctly classified.
+ * The surface a TOKEN belongs to: its signed `surface` claim, or null when the
+ * claim is missing or not one of the two known values. There is deliberately no
+ * fallback that infers it from applicantId/brokerId: that existed only so
+ * sessions issued before v0.8.1 (which carried no claim) stayed valid, and an
+ * access token lives 15 minutes, so none can still be live. A claim-less token
+ * is refused (SessionSurfaceGuard answers 401, the client refreshes and gets a
+ * token with the claim).
  */
-export function tokenSurface(user: JwtPayload): Surface {
-  if (user.surface === 'staff' || user.surface === 'portal') return user.surface;
-  return user.applicantId || user.brokerId ? 'portal' : 'staff';
+export function tokenSurface(user: JwtPayload): Surface | null {
+  return user.surface === 'staff' || user.surface === 'portal' ? user.surface : null;
 }
 
 /**
- * A token is internally consistent iff its surface matches its id fields:
- * a portal token carries exactly one of applicantId/brokerId; a staff
+ * A token is internally consistent iff its claimed surface matches its id
+ * fields: a portal token carries exactly one of applicantId/brokerId; a staff
  * token carries neither. Rejecting inconsistent tokens stops a crafted or
- * mis-issued token from claiming staff surface while carrying portal ids
- * or vice versa.
+ * mis-issued token from claiming staff surface while carrying portal ids or
+ * vice versa. A token with no valid claim is never consistent.
  */
 export function tokenIsConsistent(user: JwtPayload): boolean {
+  const surface = tokenSurface(user);
+  if (!surface) return false;
   const hasPortalId = !!(user.applicantId || user.brokerId);
   const hasBothIds = !!(user.applicantId && user.brokerId);
   if (hasBothIds) return false;
-  return tokenSurface(user) === 'portal' ? hasPortalId : !hasPortalId;
+  return surface === 'portal' ? hasPortalId : !hasPortalId;
 }

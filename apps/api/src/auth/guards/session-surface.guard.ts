@@ -1,4 +1,4 @@
-import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
+import { CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import type { JwtPayload } from '@openestate/shared';
@@ -34,6 +34,11 @@ export class SessionSurfaceGuard implements CanActivate {
     // No authenticated user: not this guard's concern; JwtAuthGuard handles it.
     if (!user) return true;
 
+    const held = tokenSurface(user);
+    if (!held) {
+      throw new UnauthorizedException('Your session is out of date. Please sign in again.');
+    }
+
     if (!tokenIsConsistent(user)) {
       throw new ForbiddenException('Token surface is inconsistent with its account type.');
     }
@@ -41,7 +46,6 @@ export class SessionSurfaceGuard implements CanActivate {
     // req.path excludes the query string. It includes the global prefix
     // (/api/v1/...), which is what PORTAL_PATH_PREFIX is written against.
     const wanted = routeSurface(req.path);
-    const held = tokenSurface(user);
     if (wanted !== held) {
       throw new ForbiddenException('This session type may not access this route.');
     }
