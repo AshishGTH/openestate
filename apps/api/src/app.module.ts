@@ -26,6 +26,8 @@ import { NotificationModule } from './notifications/notification.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { TwoFactorPendingGuard } from './auth/guards/two-factor-pending.guard';
 import { SessionSurfaceGuard } from './auth/guards/session-surface.guard';
+import { SessionVersionGuard } from './auth/guards/session-version.guard';
+import { AuthzVersionModule } from './auth/authz-version.service';
 import { DefaultThrottlerGuard } from './auth/guards/default-throttler.guard';
 import { TenantContextInterceptor } from './auth/interceptors/tenant-context.interceptor';
 import { PermissionsGuard } from './auth/guards/permissions.guard';
@@ -42,6 +44,7 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
 
 @Module({
   imports: [
+    AuthzVersionModule,
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
@@ -179,6 +182,10 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     // totp/verify, before CSRF or permissions are even looked at. Global,
     // so no controller can opt out — see the guard's doc comment.
     { provide: APP_GUARD, useClass: TwoFactorPendingGuard },
+    // Ends a session the moment it stops being authorised (deactivated, role or
+    // its permissions changed, password changed or reset, 2FA reset) instead of
+    // letting the access token live out its 15 minutes. See the guard.
+    { provide: APP_GUARD, useClass: SessionVersionGuard },
     { provide: APP_GUARD, useClass: SessionSurfaceGuard },
     { provide: APP_GUARD, useClass: CsrfGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },

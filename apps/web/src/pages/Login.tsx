@@ -7,7 +7,7 @@ import { Navigate } from 'react-router-dom';
 import TotpVerify from './TotpVerify';
 
 export default function Login() {
-  const { user, login, isLoading } = useAuth();
+  const { user, login, isLoading, sessionEndedMessage } = useAuth();
   const [error, setError] = useState('');
   const [totpState, setTotpState] = useState<{ tempToken: string } | null>(null);
 
@@ -49,6 +49,12 @@ export default function Login() {
         <div className="rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
           <h1 className="text-xl font-semibold text-slate-900 text-center">OpenEstate</h1>
           <p className="mt-1 text-sm text-slate-500 text-center">Sign in to your account</p>
+
+          {sessionEndedMessage && !error && (
+            <div role="status" className="mt-4 rounded-md bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+              {sessionEndedMessage}
+            </div>
+          )}
 
           {error && (
             <div className="mt-4 rounded-md bg-red-50 border border-red-200 p-3 text-sm text-red-700">

@@ -117,6 +117,12 @@ export async function syncSuperAdminPermissions(
         data: missing.map((p) => ({ roleId: role.id, permissionId: p.id })),
         skipDuplicates: true,
       });
+      // The role's permissions changed, so its users' existing tokens (which
+      // carry the old list) must end: same rule as an edit in the Roles screen.
+      // This script cannot reach the API's Redis cache; the cached version
+      // expires within 60 s (AUTHZ_VERSION_TTL_SECONDS), and the API restarts
+      // after an upgrade anyway.
+      await client.$executeRaw`UPDATE users SET authz_version = authz_version + 1 WHERE role_id = ${role.id}::uuid`;
       granted += missing.length;
     } catch (err) {
       if (isForeignKeyViolation(err)) {
@@ -254,6 +260,8 @@ export async function stripStaffPermissionsFromPortalRoles(
       client.rolePermission.deleteMany({
         where: { roleId, permissionId: { in: roleGrants.map((g) => g.permissionId) } },
       }),
+      // Ends the existing sessions of the role's users (see syncSuperAdminPermissions).
+      client.$executeRaw`UPDATE users SET authz_version = authz_version + 1 WHERE role_id = ${roleId}::uuid`,
       client.auditLog.create({
         data: {
           companyId,

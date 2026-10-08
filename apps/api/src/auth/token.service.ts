@@ -24,8 +24,22 @@ export class TokenService {
       Number(this.config.get('REFRESH_REUSE_GRACE_SECONDS') ?? 30) * 1000;
   }
 
-  signAccessToken(payload: Omit<JwtPayload, 'iat' | 'exp'>): string {
-    return this.jwt.sign(payload);
+  /**
+   * Every token carries the user's CURRENT authorisation version (`av`), read
+   * here from the database at the moment of issue rather than taken from the
+   * caller, so a caller holding a user row loaded before a version bump can never
+   * mint a token that is stale on arrival. SessionVersionGuard compares it on
+   * every request.
+   */
+  async signAccessToken(payload: Omit<JwtPayload, 'iat' | 'exp' | 'av'>): Promise<string> {
+    return this.jwt.sign({ ...payload, av: await this.currentAuthzVersion(payload.sub) });
+  }
+
+  private async currentAuthzVersion(userId: string): Promise<number> {
+    const rows = await this.prisma.$queryRaw<Array<{ authz_version: number }>>`
+      SELECT authz_version FROM users WHERE id = ${userId}::uuid`;
+    if (!rows.length) throw new Error('Cannot issue a token for a user that does not exist');
+    return rows[0].authz_version;
   }
 
   /**
@@ -33,11 +47,11 @@ export class TokenService {
    * totp/verify and nothing else (TwoFactorPendingGuard). One signer for
    * staff and portal, so the marker and the lifetime can't drift apart.
    */
-  signTwoFactorPendingToken(
-    payload: Omit<JwtPayload, 'iat' | 'exp' | 'permissions' | 'forcePasswordChange'>,
-  ): string {
+  async signTwoFactorPendingToken(
+    payload: Omit<JwtPayload, 'iat' | 'exp' | 'permissions' | 'forcePasswordChange' | 'av'>,
+  ): Promise<string> {
     return this.jwt.sign(
-      { ...payload, permissions: [TWO_FACTOR_PENDING_PERMISSION] },
+      { ...payload, permissions: [TWO_FACTOR_PENDING_PERMISSION], av: await this.currentAuthzVersion(payload.sub) },
       { expiresIn: TWO_FACTOR_PENDING_TTL_SECONDS },
     );
   }

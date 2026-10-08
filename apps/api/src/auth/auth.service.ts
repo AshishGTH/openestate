@@ -1,3 +1,4 @@
+import { AuthzVersionService } from './authz-version.service';
 import {
   BadRequestException,
   ForbiddenException,
@@ -24,6 +25,7 @@ export class AuthService {
     @Inject(SYSTEM_PRISMA) private readonly prisma: PrismaClient,
     private readonly tokenService: TokenService,
     private readonly totpService: TotpService,
+    private readonly authzVersions: AuthzVersionService,
   ) {}
 
   async login(
@@ -87,7 +89,7 @@ export class AuthService {
     });
 
     if (user.totpEnabled && user.totpSecret) {
-      const tempToken = this.tokenService.signTwoFactorPendingToken({
+      const tempToken = await this.tokenService.signTwoFactorPendingToken({
         sub: user.id,
         companyId: user.companyId,
         email: user.email,
@@ -268,7 +270,7 @@ export class AuthService {
       (rp) => rp.permission.key,
     );
 
-    const accessToken = this.tokenService.signAccessToken({
+    const accessToken = await this.tokenService.signAccessToken({
       sub: user.id,
       companyId: user.companyId,
       email: user.email,
@@ -333,6 +335,10 @@ export class AuthService {
     } else {
       await this.tokenService.revokeAllForUser(userId);
     }
+    // Every access token already issued (this one included) is refused from
+    // the next request on; this browser's refresh token survives above, so it
+    // silently gets a fresh token and stays signed in. Other sessions don't.
+    await this.authzVersions.bumpUsers([userId]);
   }
 
   /**
@@ -379,6 +385,7 @@ export class AuthService {
       });
     });
     await this.tokenService.revokeAllForUser(reset.userId);
+    await this.authzVersions.bumpUsers([reset.userId]);
   }
 
   async forceChangePassword(userId: string, companyId: string, newPassword: string) {
@@ -400,6 +407,7 @@ export class AuthService {
       }),
     ]);
     await this.tokenService.revokeAllForUser(userId);
+    await this.authzVersions.bumpUsers([userId]);
   }
 
   /**
@@ -429,7 +437,7 @@ export class AuthService {
       (rp: any) => rp.permission.key,
     );
 
-    const accessToken = this.tokenService.signAccessToken({
+    const accessToken = await this.tokenService.signAccessToken({
       sub: user.id,
       companyId: user.companyId,
       email: user.email,

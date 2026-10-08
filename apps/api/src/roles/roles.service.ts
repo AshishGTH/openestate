@@ -1,3 +1,4 @@
+import { AuthzVersionService } from '../auth/authz-version.service';
 import {
   BadRequestException,
   Inject,
@@ -24,6 +25,7 @@ export class RolesService {
     private readonly tenantPrisma: any,
     @Inject(SYSTEM_PRISMA)
     private readonly systemPrisma: PrismaClient,
+    private readonly authzVersions: AuthzVersionService,
   ) {}
 
   async findAll(companyId: string) {
@@ -227,7 +229,13 @@ export class RolesService {
           },
         });
       }),
-    );
+    ).then(async (updated) => {
+      // Editing a role's permissions ends the sessions of everyone holding it:
+      // their tokens carry the old permission list. Their browsers refresh into
+      // tokens with the new list. Other roles are untouched.
+      if (data.permissionIds) await this.authzVersions.bumpRole(roleId);
+      return updated;
+    });
   }
 
   async remove(companyId: string, roleId: string, callerId: string) {

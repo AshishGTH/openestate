@@ -7,6 +7,30 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Security
 
+- **A session now ends the moment it stops being authorised (UA-116).** Until
+  now an access token stayed valid until it expired (up to 15 minutes), because
+  the token was never checked against the database: a deactivated user could keep
+  working in an open browser. Every signed-in request (staff and portal) is now
+  refused with 401 "Your session has ended. Please sign in again." once, since the
+  token was issued, the user was deactivated, their role changed, their role's
+  permissions were edited, their password was changed or reset by an admin, or an
+  admin reset their 2FA; re-inviting an existing portal account (which replaces
+  its password) counts as a password change. The browser first tries to refresh:
+  a session that is still allowed (for example after a role edit) carries on with
+  a new token; one that is not lands on the sign-in page with that message. A
+  self-service password change keeps the browser it was made in signed in and
+  ends every other session, as before. Each user carries an authorisation version
+  (one new column, `users.authz_version`), copied into every token and compared on
+  each request through a Redis cache shared by all API instances (updated in the
+  same code that changes the version; about 1 ms per request locally). If Redis
+  is unavailable the check reads the database; it never lets a request through
+  unchecked. Limits: `reset-admin-password.sh` and the upgrade's permission sync
+  change the version in the database but cannot reach Redis, so a session they end
+  stops within 60 seconds instead of at once. Every session open at the moment of
+  upgrade is asked to refresh once (tokens issued before this version carry no
+  authorisation version); nothing is visible unless the refresh token has also
+  expired.
+
 - **A token without a `surface` claim is now refused.** Since v0.8.1 every
   access and 2FA-pending token carries a signed `surface` claim (`staff` or
   `portal`). The guard still guessed the surface of a claim-less token from its

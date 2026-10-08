@@ -13,6 +13,7 @@ import * as argon2 from '@node-rs/argon2';
 import { SYSTEM_ROLES } from '@openestate/shared';
 import { TokenService } from '../src/auth/token.service';
 import { TotpService } from '../src/auth/totp.service';
+import { AuthzVersionService } from '../src/auth/authz-version.service';
 import { PortalAuthService } from '../src/portal-auth/portal-auth.service';
 import { PortalPasswordResetProcessor, PROCESS_PASSWORD_RESET_JOB } from '../src/portal-auth/portal-password-reset.processor';
 import type { CommunicationProvider, CommunicationMessage, CommunicationSendResult } from '../src/queues/communication-provider';
@@ -66,6 +67,7 @@ describeIf('Phase 6 portal-auth (invite consume, password reset)', () => {
   let queue: Queue;
   let worker: Worker;
   let provider: CapturingProvider;
+  let authzVersions: AuthzVersionService;
 
   beforeAll(async () => {
     ({ tenantPrisma, systemPrisma } = makeClients());
@@ -84,10 +86,12 @@ describeIf('Phase 6 portal-auth (invite consume, password reset)', () => {
     const processor = new PortalPasswordResetProcessor(systemPrisma, provider);
     worker = new Worker(queueName, (job) => processor.process(job), { connection: newRedis() });
 
-    portalAuth = new PortalAuthService(systemPrisma, tokenService, totpService, queue);
+    authzVersions = new AuthzVersionService(systemPrisma, REDIS_TEST_URL);
+    portalAuth = new PortalAuthService(systemPrisma, tokenService, totpService, queue, authzVersions);
   });
 
   afterAll(async () => {
+    await authzVersions.onModuleDestroy();
     await worker.close();
     await queue.obliterate({ force: true }).catch(() => {});
     await queue.close();

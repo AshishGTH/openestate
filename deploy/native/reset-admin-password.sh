@@ -121,7 +121,8 @@ log "Updating database..."
 # and the audit row commit together or not at all.
 psql "$DATABASE_URL_SYSTEM" -v ON_ERROR_STOP=1 -c "
   UPDATE users SET password_hash = '${HASH_ESC}', force_password_change = false,
-    failed_login_attempts = 0, locked_until = NULL WHERE id = '${USER_ID}';
+    failed_login_attempts = 0, locked_until = NULL, authz_version = authz_version + 1
+    WHERE id = '${USER_ID}';
   UPDATE refresh_tokens SET is_revoked = true WHERE user_id = '${USER_ID}' AND is_revoked = false;${CLEAR_2FA_SQL}
 " >/dev/null
 
