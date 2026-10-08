@@ -175,9 +175,17 @@ describeIf('auth audit rows, staff and portal', () => {
     const body = who.surface === 'staff' ? { email: who.identifier, password } : { identifier: who.identifier, password };
     const login = await agent.post(`${BASE[who.surface]}/login`).send(body).expect(200);
     expect(login.body.accessToken).toBeTruthy();
-    const csrf = cookieValue(login.headers['set-cookie'], CSRF[who.surface])!;
-    const auth = (r: request.Test) => r.set('Authorization', `Bearer ${login.body.accessToken}`).set('X-CSRF-Token', csrf);
-    return { agent, auth };
+    let csrf = cookieValue(login.headers['set-cookie'], CSRF[who.surface])!;
+    let token = login.body.accessToken as string;
+    const auth = (r: request.Test) => r.set('Authorization', `Bearer ${token}`).set('X-CSRF-Token', csrf);
+    // Turning 2FA on or off ends every session's access token (Part H); the
+    // browser refreshes once and carries on. This does the same.
+    const refresh = async () => {
+      const r = await agent.post(`${BASE[who.surface]}/refresh`).set('X-CSRF-Token', csrf).expect(200);
+      token = r.body.accessToken;
+      csrf = cookieValue(r.headers['set-cookie'], CSRF[who.surface]) ?? csrf;
+    };
+    return { agent, auth, refresh };
   }
 
   const rows = (userId: string, action: string) =>
@@ -233,6 +241,7 @@ describeIf('auth audit rows, staff and portal', () => {
       expect(text).not.toContain(setup.body.secret);
       for (const code of confirm.body.recoveryCodes as string[]) expect(text).not.toContain(code);
 
+      await s.refresh();
       await s.auth(s.agent.post(`${BASE[surface]}/totp/disable`)).expect(204);
       await expectOneRow(who.id, 'TOTP_DISABLED', { surface });
     });

@@ -25,6 +25,7 @@ import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
 import * as argon2 from '@node-rs/argon2';
+import * as OTPAuth from 'otpauth';
 import { ALL_PERMISSIONS, ROLE_PERMISSIONS, SYSTEM_ROLES, SESSION_ENDED_MESSAGE } from '@openestate/shared';
 import { makeClients, seedCompany, makePortalRole, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
 
@@ -314,6 +315,79 @@ describeIf('session authorisation version (UA-116), staff and portal', () => {
     await expectEnded(await portalProbe(t.token));
     expect((await t.agent.post('/api/v1/portal/auth/refresh').set('X-CSRF-Token', t.csrf)).status).toBe(401);
     expect((await portalProbe(consumed.body.accessToken)).status).toBe(200);
+  });
+
+  // ── self-service 2FA enable and disable: other sessions end, this one refreshes ──
+
+  const totpCode = (secret: string) => new OTPAuth.TOTP({ secret: OTPAuth.Secret.fromBase32(secret) }).generate();
+
+  /**
+   * Enables 2FA from session `here` through the real routes, checks the other
+   * session ended, then refreshes `here` (as the browser does) and disables 2FA
+   * from it, checking a second other session ended too.
+   */
+  async function enableThenDisable(
+    surface: 'staff' | 'portal',
+    sessionFor: () => Promise<{ agent: ReturnType<typeof request.agent>; token: string; csrf: string }>,
+  ) {
+    const base = surface === 'staff' ? '/api/v1/auth' : '/api/v1/portal/auth';
+    const probe = surface === 'staff' ? staffProbe : portalProbe;
+    const here = await sessionFor();
+    const elsewhere = await sessionFor();
+    const setup = await here.agent
+      .post(`${base}/totp/setup`)
+      .set('Authorization', `Bearer ${here.token}`)
+      .set('X-CSRF-Token', here.csrf)
+      .expect((r) => expect([200, 201]).toContain(r.status));
+    await here.agent
+      .post(`${base}/totp/confirm`)
+      .set('Authorization', `Bearer ${here.token}`)
+      .set('X-CSRF-Token', here.csrf)
+      .send({ code: totpCode(setup.body.secret) })
+      .expect(200);
+    // The other session is refused and cannot renew.
+    await expectEnded(await probe(elsewhere.token));
+    expect((await elsewhere.agent.post(`${base}/refresh`).set('X-CSRF-Token', elsewhere.csrf)).status).toBe(401);
+    // This browser refreshes once and carries on.
+    await expectEnded(await probe(here.token));
+    const refreshed = await here.agent.post(`${base}/refresh`).set('X-CSRF-Token', here.csrf).expect(200);
+    const hereCsrf = cookieValue(refreshed.headers['set-cookie'], surface === 'staff' ? 'openestate_csrf' : 'openestate_portal_csrf') ?? here.csrf;
+    expect((await probe(refreshed.body.accessToken)).status).toBe(200);
+
+    // A second session (now needs the code), then disable from this browser.
+    const loginPath = surface === 'staff' ? '/api/v1/auth/login' : '/api/v1/portal/auth/login';
+    const second = request.agent(app.getHttpServer());
+    const pending = await second.post(loginPath).send(await credentialsFor()).expect(200);
+    expect(pending.body.requiresTwoFactor).toBe(true);
+    const verified = await second
+      .post(`${base}/totp/verify`)
+      .set('Authorization', `Bearer ${pending.body.tempToken}`)
+      .set('X-CSRF-Token', cookieValue(pending.headers['set-cookie'], surface === 'staff' ? 'openestate_csrf' : 'openestate_portal_csrf')!)
+      .send({ code: totpCode(setup.body.secret) })
+      .expect(200);
+    expect((await probe(verified.body.accessToken)).status).toBe(200);
+    await here.agent
+      .post(`${base}/totp/disable`)
+      .set('Authorization', `Bearer ${refreshed.body.accessToken}`)
+      .set('X-CSRF-Token', hereCsrf)
+      .expect(204);
+    await expectEnded(await probe(verified.body.accessToken));
+    const again = await here.agent.post(`${base}/refresh`).set('X-CSRF-Token', hereCsrf).expect(200);
+    expect((await probe(again.body.accessToken)).status).toBe(200);
+  }
+
+  let credentialsFor: () => Promise<object> = async () => ({});
+
+  it('staff, own 2FA enabled then disabled: each time the other session ends and this one refreshes', async () => {
+    const target = await createStaff(await makeRole('Exec self2fa', execPerms));
+    credentialsFor = async () => ({ email: target.email, password: PASSWORD });
+    await enableThenDisable('staff', () => staffSession(target.email));
+  });
+
+  it('portal, own 2FA enabled then disabled: each time the other session ends and this one refreshes', async () => {
+    const target = await createCustomer();
+    credentialsFor = async () => ({ identifier: target.phone, password: PASSWORD });
+    await enableThenDisable('portal', () => portalSession(target.phone));
   });
 
   it('cache is write-through: right after a bump, Redis already holds the new version', async () => {

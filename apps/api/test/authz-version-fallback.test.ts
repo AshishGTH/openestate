@@ -36,6 +36,7 @@ describeIf('session authorisation version: Redis unavailable, and the cost per r
     fx = await seedCompany(systemPrisma);
     downService = new AuthzVersionService(systemPrisma, DEAD_REDIS);
     upService = new AuthzVersionService(systemPrisma, REDIS_URL);
+    await upService.ready();
   });
 
   afterAll(async () => {
@@ -72,6 +73,29 @@ describeIf('session authorisation version: Redis unavailable, and the cost per r
       await broken.onModuleDestroy();
       await deadDb.$disconnect();
     }
+  });
+
+  it('a failed cache write after the bump deletes the key, so the old token is refused at once (not after the TTL)', async () => {
+    const before = await version();
+    // The cache holds the current (soon to be old) version.
+    expect(await upService.current(fx.userId)).toBe(before);
+    // Redis is reachable, but the write of the new value fails once.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const redis = (upService as any).redis;
+    expect(await redis.get(`authz:v:${fx.userId}`)).toBe(String(before)); // precondition: the old value is cached
+    const realEval = redis.eval.bind(redis);
+    redis.eval = () => Promise.reject(new Error('simulated cache write failure'));
+    try {
+      await upService.bumpUsers([fx.userId]);
+    } finally {
+      redis.eval = realEval;
+    }
+    const after = await version();
+    expect(after).toBe(before + 1);
+    expect(await redis.get(`authz:v:${fx.userId}`)).toBeNull(); // deleted, not left stale
+    const guard = new SessionVersionGuard(upService);
+    await expect(guard.canActivate(ctx({ sub: fx.userId, av: before }))).rejects.toBeInstanceOf(UnauthorizedException);
+    await expect(guard.canActivate(ctx({ sub: fx.userId, av: after }))).resolves.toBe(true);
   });
 
   it('cost per request: one Redis GET on a cache hit (measured)', async () => {

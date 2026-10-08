@@ -330,10 +330,12 @@ describeIf('e2e CSRF token rotation: real HTTP, real CsrfGuard, real cookie rota
 
     // Cleanup so this staff account doesn't stay 2FA-locked for other
     // tests/runs against the same seeded company.
-    await agent
+    // From the session signed in AFTER 2FA was enabled: enabling it ended the
+    // earlier session's access token (Part H).
+    await loginAgent
       .post('/api/v1/auth/totp/disable')
-      .set('Authorization', `Bearer ${token}`)
-      .set('X-CSRF-Token', csrf)
+      .set('Authorization', `Bearer ${verifyRes.body.accessToken}`)
+      .set('X-CSRF-Token', postVerifyCsrf)
       .expect(204);
   });
 
@@ -379,10 +381,11 @@ describeIf('e2e CSRF token rotation: real HTTP, real CsrfGuard, real cookie rota
       .send({ categoryId: ticketCategoryId, subject: 'E2E CSRF portal 2FA ticket', body: 'Testing mutation after portal 2FA login.' })
       .expect(201);
 
-    await loginAgent1
+    // From the session signed in AFTER 2FA was enabled (see the staff test).
+    await loginAgent2
       .post('/api/v1/portal/auth/totp/disable')
-      .set('Authorization', `Bearer ${loginRes1.body.accessToken}`)
-      .set('X-CSRF-Token', csrf1)
+      .set('Authorization', `Bearer ${verifyRes.body.accessToken}`)
+      .set('X-CSRF-Token', postVerifyCsrf)
       .expect(204);
   });
 });

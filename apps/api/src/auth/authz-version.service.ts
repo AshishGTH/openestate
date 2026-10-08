@@ -1,4 +1,4 @@
-import { Global, Inject, Injectable, Logger, Module, OnModuleDestroy, Optional } from '@nestjs/common';
+import { Global, Inject, Injectable, Logger, Module, OnModuleDestroy, OnModuleInit, Optional } from '@nestjs/common';
 import Redis from 'ioredis';
 import { PrismaClient } from '@openestate/db';
 import { SYSTEM_PRISMA } from '../database/database.module';
@@ -39,7 +39,7 @@ return cur
  * next request; the 60 s TTL only bounds staleness if a write to Redis failed.
  */
 @Injectable()
-export class AuthzVersionService implements OnModuleDestroy {
+export class AuthzVersionService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AuthzVersionService.name);
   private readonly redis: Redis;
 
@@ -56,6 +56,31 @@ export class AuthzVersionService implements OnModuleDestroy {
     });
     this.redis.on('error', () => {
       // Reconnection is automatic; each failed command is logged at its call.
+    });
+  }
+
+  /**
+   * Commands are not queued while disconnected (enableOfflineQueue: false), so
+   * until the first connection is up every read goes to the database and every
+   * cache write fails. Waiting here (bounded, so a down Redis never blocks
+   * startup) means a bump made right after startup reaches the cache, rather
+   * than leaving a value cached before a restart in place until the TTL.
+   */
+  async onModuleInit() {
+    await this.ready(2000);
+  }
+
+  /** Resolves once connected, or after `timeoutMs` (then reads use the database). */
+  ready(timeoutMs = 2000): Promise<void> {
+    if (this.redis.status === 'ready') return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.redis.off('ready', done);
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      this.redis.once('ready', done);
     });
   }
 
@@ -108,15 +133,27 @@ export class AuthzVersionService implements OnModuleDestroy {
     return rows.length ? rows[0].authz_version : null;
   }
 
+  /**
+   * Runs only after the version UPDATE has committed: bumpUsers/bumpRole issue
+   * it as its own statement (autocommit) and every caller invokes them after its
+   * own business transaction has resolved, i.e. committed. If the cache write
+   * fails while Redis is reachable, the key is deleted (best effort), so a read
+   * goes back to the database instead of trusting a stale, lower value for up to
+   * the TTL. If Redis is unreachable, reads already go to the database.
+   */
   private async writeThrough(rows: Array<{ id: string; authz_version: number }>): Promise<void> {
     for (const r of rows) {
       try {
         await this.redis.eval(SET_MAX, 1, KEY(r.id), String(r.authz_version), String(AUTHZ_VERSION_TTL_SECONDS));
       } catch (err) {
-        // The database already holds the new version. If Redis is down, reads
-        // fall back to the database; if it comes back holding the old value,
-        // the TTL bounds how long that can last.
-        this.logger.warn(`authz version cache write failed for one user (${(err as Error).message})`);
+        this.logger.warn(`authz version cache write failed for one user; deleting the key (${(err as Error).message})`);
+        try {
+          await this.redis.del(KEY(r.id));
+        } catch (delErr) {
+          this.logger.error(
+            `authz version cache key could not be deleted either; it expires within ${AUTHZ_VERSION_TTL_SECONDS} s (${(delErr as Error).message})`,
+          );
+        }
       }
     }
   }

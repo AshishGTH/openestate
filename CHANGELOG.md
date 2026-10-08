@@ -14,7 +14,9 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   refused with 401 "Your session has ended. Please sign in again." once, since the
   token was issued, the user was deactivated, their role changed, their role's
   permissions were edited, their password was changed or reset by an admin, or an
-  admin reset their 2FA; re-inviting an existing portal account (which replaces
+  admin reset their 2FA, or the user turned their own 2FA on or off (other
+  sessions end; the browser it was done in refreshes once); re-inviting an
+  existing portal account (which replaces
   its password) counts as a password change. The browser first tries to refresh:
   a session that is still allowed (for example after a role edit) carries on with
   a new token; one that is not lands on the sign-in page with that message. A

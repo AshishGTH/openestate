@@ -180,7 +180,7 @@ export class PortalAuthService {
     return { secret, otpauthUrl, qrDataUrl };
   }
 
-  async confirmTotp(userId: string, code: string) {
+  async confirmTotp(userId: string, code: string, currentRefreshToken?: string) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     if (!user.totpSecret) throw new BadRequestException('TOTP setup not started');
 
@@ -199,10 +199,11 @@ export class PortalAuthService {
         }),
       }),
     ]);
+    await this.endOtherSessions(userId, currentRefreshToken);
     return { recoveryCodes };
   }
 
-  async disableTotp(userId: string, companyId: string) {
+  async disableTotp(userId: string, companyId: string, currentRefreshToken?: string) {
     await this.prisma.$transaction([
       this.prisma.user.update({
         where: { id: userId },
@@ -215,6 +216,7 @@ export class PortalAuthService {
         }),
       }),
     ]);
+    await this.endOtherSessions(userId, currentRefreshToken);
   }
 
   async refreshTokens(rawRefreshToken: string) {
@@ -722,5 +724,20 @@ export class PortalAuthService {
     const lockedUntil =
       attempts >= MAX_FAILED_ATTEMPTS ? new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000) : null;
     await this.prisma.user.update({ where: { id: userId }, data: { failedLoginAttempts: attempts, lockedUntil } });
+  }
+
+  /**
+   * Turning 2FA on or off changes how the account signs in, so every OTHER
+   * session ends (refresh tokens revoked, access tokens refused on their next
+   * request). This browser's refresh token survives, so it refreshes once and
+   * carries on. Same shape as changePassword.
+   */
+  private async endOtherSessions(userId: string, currentRefreshToken?: string) {
+    if (currentRefreshToken) {
+      await this.tokenService.revokeAllForUserExceptToken(userId, currentRefreshToken);
+    } else {
+      await this.tokenService.revokeAllForUser(userId);
+    }
+    await this.authzVersions.bumpUsers([userId]);
   }
 }

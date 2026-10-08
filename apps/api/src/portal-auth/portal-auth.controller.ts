@@ -148,7 +148,7 @@ export class PortalAuthController {
   @ApiOperation({ summary: 'Confirm portal TOTP setup with a code' })
   async confirmTotp(@Body() dto: TotpVerifyDto, @Req() req: Request) {
     const user = req.user as JwtPayload;
-    return this.portalAuthService.confirmTotp(user.sub, dto.code);
+    return this.portalAuthService.confirmTotp(user.sub, dto.code, req.cookies?.[PORTAL_REFRESH_COOKIE]);
   }
 
   @Post('totp/disable')
@@ -156,7 +156,7 @@ export class PortalAuthController {
   @ApiOperation({ summary: 'Disable portal TOTP 2FA' })
   async disableTotp(@Req() req: Request) {
     const user = req.user as JwtPayload;
-    await this.portalAuthService.disableTotp(user.sub, user.companyId);
+    await this.portalAuthService.disableTotp(user.sub, user.companyId, req.cookies?.[PORTAL_REFRESH_COOKIE]);
   }
 
   @Public()

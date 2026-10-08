@@ -426,12 +426,20 @@ describeIf('tempToken scope — regression suite for the 2FA bypass', () => {
       const { secret } = await enableStaffTotp(); // setup + confirm from a 2FA-off session
       const pending = await staffPending();
       const verify = await staffVerify(pending, totpCode(secret)).expect(200);
-      const csrf = cookieValue(verify.headers['set-cookie'], STAFF_CSRF)!;
-      const withSession = (r: request.Test) => r.set('Authorization', `Bearer ${verify.body.accessToken}`).set('X-CSRF-Token', csrf);
+      let csrf = cookieValue(verify.headers['set-cookie'], STAFF_CSRF)!;
+      let token = verify.body.accessToken as string;
+      const withSession = (r: request.Test) => r.set('Authorization', `Bearer ${token}`).set('X-CSRF-Token', csrf);
+      // Enabling 2FA ends every access token (Part H); the browser refreshes once.
+      const refresh = async () => {
+        const r = await pending.agent.post('/api/v1/auth/refresh').set('X-CSRF-Token', csrf).expect(200);
+        token = r.body.accessToken;
+        csrf = cookieValue(r.headers['set-cookie'], STAFF_CSRF) ?? csrf;
+      };
 
       // Re-enrol a new device from the post-2FA session…
       const setup = await withSession(pending.agent.post('/api/v1/auth/totp/setup')).expect(200);
       await withSession(pending.agent.post('/api/v1/auth/totp/confirm')).send({ code: totpCode(setup.body.secret) }).expect(200);
+      await refresh();
       expect((await withSession(pending.agent.get('/api/v1/auth/me')).expect(200)).body.totpEnabled).toBe(true);
 
       // …then turn 2FA off.
@@ -610,11 +618,19 @@ describeIf('tempToken scope — regression suite for the 2FA bypass', () => {
       const { secret } = await enablePortalTotp();
       const pending = await portalPending();
       const verify = await portalVerify(pending, totpCode(secret)).expect(200);
-      const csrf = cookieValue(verify.headers['set-cookie'], PORTAL_CSRF)!;
-      const withSession = (r: request.Test) => r.set('Authorization', `Bearer ${verify.body.accessToken}`).set('X-CSRF-Token', csrf);
+      let csrf = cookieValue(verify.headers['set-cookie'], PORTAL_CSRF)!;
+      let token = verify.body.accessToken as string;
+      const withSession = (r: request.Test) => r.set('Authorization', `Bearer ${token}`).set('X-CSRF-Token', csrf);
+      // Enabling 2FA ends every access token (Part H); the browser refreshes once.
+      const refresh = async () => {
+        const r = await pending.agent.post('/api/v1/portal/auth/refresh').set('X-CSRF-Token', csrf).expect(200);
+        token = r.body.accessToken;
+        csrf = cookieValue(r.headers['set-cookie'], PORTAL_CSRF) ?? csrf;
+      };
 
       const setup = await withSession(pending.agent.post('/api/v1/portal/auth/totp/setup')).expect(200);
       await withSession(pending.agent.post('/api/v1/portal/auth/totp/confirm')).send({ code: totpCode(setup.body.secret) }).expect(200);
+      await refresh();
       expect((await withSession(pending.agent.get('/api/v1/portal/auth/me')).expect(200)).body.totpEnabled).toBe(true);
 
       await withSession(pending.agent.post('/api/v1/portal/auth/totp/disable')).expect(204);
