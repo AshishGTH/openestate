@@ -9,18 +9,13 @@ they're expected to land. Each entry should say *what*, *why deferred*, and
 Each is written up, with its fix and tests, in
 [`docs/testing/v0.8.3-plan.md`](testing/v0.8.3-plan.md) (the v0.8.4 parts):
 
-- **Part M:** the API listens on every network interface (`0.0.0.0:3000`), so
-  nginx can be bypassed and a client can choose its own IP address; make it listen
-  on loopback and trust forwarded headers only from the local proxy. Medium.
-- **Part N:** `upgrade-native.sh` must refuse to deploy code older than the
-  database, and confirm the checkout equals what was fetched. The v0.8.2 script,
-  given a branch name, installs a stale local branch; until Part N ships the rule
-  is "give a release tag".
-- **Part O:** a CI job that upgrades a populated database from the previous
-  release tag with that release's own `upgrade-native.sh`. Today's job starts from
-  v0.1.2 and does not prove the previous-release path.
-- **Part P:** investigate the "Failed to create bin" build warnings (including
-  `prisma`); see the two older entries about them further down.
+- **Parts M, N, O, P and I: built on the v0.8.4 branch (unreleased, 2026-10-10).**
+  M: the API listens on 127.0.0.1 (HOST to change) and trusts only loopback
+  proxies. N: the upgrade refuses an older version or a database ahead of the
+  checkout. O: CI upgrades from the previous release tag with its own script
+  (clean, orphan, lock-timeout). P: pnpm deploy's stray bin warnings hidden and
+  the stray tree removed. I: system-role permission sync with a per-role seed
+  baseline. Still to do: the VM rehearsal from `v0.8.3-clean`.
 
 ## Deferred from v0.8.4 items A and G (architect decisions, 2026-10-10)
 
@@ -42,7 +37,7 @@ Each is written up, with its fix and tests, in
   changes, which for most of these parents (users, masters) is rare.
 - **Done on the v0.8.4 branch (unreleased):** Parts G, A and B, and the
   `forbid_unlinked_portal_role()` ownership fix (now owned by the NOLOGIN role
-  `openestate_guard_owner`). Still to do for v0.8.4: M, N, O, P and I.
+  `openestate_guard_owner`). M, N, O, P and I followed (see the top of this file).
 - **A restored foreign key can be left NOT VALID on a real install** (orphan
   rows). The upgrade prints them and `deploy/native/check-foreign-keys.sh` lists
   them; nothing resolves them yet (see "No orphan-fix script" above). Check the

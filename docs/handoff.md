@@ -134,8 +134,8 @@ _prisma_migrations`); never assume.
    and -10.
 5. **Rotate all test-VM passwords.** One password was exposed in a chat session.
    Do this together with the tunnel token above.
-6. **The API listens on `0.0.0.0:3000`** on every install (Part M in the plan); until
-   it ships, advise operators to firewall port 3000 (see the installation guide).
+6. **The API listens on `0.0.0.0:3000`** on every install up to v0.8.3. Part M (v0.8.4
+   branch) makes it 127.0.0.1; until v0.8.4 ships, advise operators to firewall port 3000.
 7. **The mobile-app staging self-signed certificate expires 2026-11-06.**
 8. **The UIAUDIT test data is the kept regression test bed. Do not delete it.** It
    is the company, project, units and bookings, and the accounts exec-a, exec-b,
