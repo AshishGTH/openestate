@@ -11,7 +11,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
-    "test": "turbo run test",
+    "test": "turbo run test test:serial",
     "typecheck": "turbo run typecheck",
     "seed": "pnpm --filter @openestate/db run seed",
     "seed:demo": "pnpm --filter @openestate/db run seed:demo",

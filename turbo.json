@@ -26,6 +26,16 @@
         "FC_SEED"
       ]
     },
+    "test:serial": {
+      "dependsOn": ["test", "^test"],
+      "env": [
+        "CI",
+        "DATABASE_URL_TEST",
+        "DATABASE_URL_TEST_SYSTEM",
+        "DATABASE_URL_TEST_SUPER",
+        "REDIS_TEST_URL"
+      ]
+    },
     "typecheck": {
       "dependsOn": ["^build"]
     }

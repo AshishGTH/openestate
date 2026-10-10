@@ -254,8 +254,6 @@ describeIf('v0.8.4 Part G: append-only escape hatch is superuser-only', () => {
     expect(allowed).toEqual([]);
   });
 
-  it('7b. control: the same statements DO succeed for the superuser (so test 7 can tell allowed from refused)', async () => {
-    const r = await attempt(sup, (tx) => tx.$executeRawUnsafe(`ALTER TABLE ledger_entries DISABLE TRIGGER ledger_entries_no_delete`));
-    expect(r.ok).toBe(true);
-  });
+  // 7b, the superuser control for test 7, is in
+  // exclusive-lock-controls.serial.test.ts: when it succeeds it locks ledger_entries.
 });

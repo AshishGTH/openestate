@@ -22,6 +22,7 @@ import {
   TEST_SUPER_URL,
   type CompanyFixture,
 } from './helpers/postsales-harness';
+import { PORTAL_GUARD_STATEMENTS } from './helpers/guard-statements';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -49,19 +50,7 @@ async function attempt(client: PrismaClient, fn: (tx: Tx) => Promise<unknown>): 
 }
 
 const ROLES = ['openestate_app', 'openestate_system', 'openestate_test_app', 'openestate_test_system'];
-const STATEMENTS: Array<[string, string]> = [
-  ['DROP FUNCTION', 'DROP FUNCTION forbid_unlinked_portal_role()'],
-  ['DROP FUNCTION CASCADE', 'DROP FUNCTION forbid_unlinked_portal_role() CASCADE'],
-  ['ALTER FUNCTION SECURITY INVOKER', 'ALTER FUNCTION forbid_unlinked_portal_role() SECURITY INVOKER'],
-  ['ALTER FUNCTION RESET search_path', 'ALTER FUNCTION forbid_unlinked_portal_role() RESET search_path'],
-  ['ALTER FUNCTION RENAME', 'ALTER FUNCTION forbid_unlinked_portal_role() RENAME TO zz_renamed'],
-  [
-    'CREATE OR REPLACE',
-    `CREATE OR REPLACE FUNCTION forbid_unlinked_portal_role() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NEW; END'`,
-  ],
-  ['DROP TRIGGER', 'DROP TRIGGER users_forbid_unlinked_portal_role ON users'],
-  ['DISABLE TRIGGER', 'ALTER TABLE users DISABLE TRIGGER users_forbid_unlinked_portal_role'],
-];
+const STATEMENTS = PORTAL_GUARD_STATEMENTS;
 
 describeIf('v0.8.4: the portal-link check is not owned by a login role', () => {
   let fx: CompanyFixture;
@@ -104,12 +93,8 @@ describeIf('v0.8.4: the portal-link check is not owned by a login role', () => {
     expect(allowed).toEqual([]);
   });
 
-  it('control: the same statements succeed for the superuser (plain DROP FUNCTION aside: the trigger depends on it)', async () => {
-    for (const [label, sql] of STATEMENTS) {
-      if (label === 'DROP FUNCTION') continue;
-      expect(await attempt(sup, (tx) => tx.$executeRawUnsafe(sql)), label).toBe('ALLOWED');
-    }
-  });
+  // The superuser control for these statements is in
+  // exclusive-lock-controls.serial.test.ts: when they succeed they lock users.
 
   it('the function is owned by a role that cannot log in, has no members and is not a superuser', async () => {
     const rows = await sup.$queryRawUnsafe<
