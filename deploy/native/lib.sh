@@ -25,20 +25,77 @@ rand_hex_32() {
 # fetched plainly. Any failure stops the upgrade here, in plain English, before
 # anything is built or changed.
 checkout_ref() {
-  local src_dir="$1" ref="$2" out
+  local src_dir="$1" ref="$2" out fetched
   if out="$(cd "$src_dir" && git fetch --force --no-tags origin "+refs/tags/${ref}:refs/tags/${ref}" 2>&1)"; then
+    fetched="$(cd "$src_dir" && git rev-parse "refs/tags/${ref}^{commit}")"
     if ! out="$(cd "$src_dir" && git checkout --quiet --detach "refs/tags/${ref}" 2>&1)"; then
       die "Could not switch to version '${ref}' after downloading it. git said: ${out}. Nothing was changed and the previous release is still running. If you edited files in ${src_dir}, undo or save those edits and run the upgrade again."
     fi
-    return 0
-  fi
-  if out="$(cd "$src_dir" && git fetch --force --no-tags origin "$ref" 2>&1)"; then
+  elif out="$(cd "$src_dir" && git fetch --force --no-tags origin "$ref" 2>&1)"; then
+    fetched="$(cd "$src_dir" && git rev-parse "FETCH_HEAD^{commit}")"
     if ! out="$(cd "$src_dir" && git checkout --quiet --detach FETCH_HEAD 2>&1)"; then
       die "Could not switch to '${ref}' after downloading it. git said: ${out}. Nothing was changed and the previous release is still running. If you edited files in ${src_dir}, undo or save those edits and run the upgrade again."
     fi
-    return 0
+  else
+    die "Could not download '${ref}' from the source repository. git said: ${out}. Nothing was changed and the previous release is still running. Check that this server can reach the internet (and the remote named 'origin' in ${src_dir}) and that the version name is spelled exactly as published, then run the upgrade again."
   fi
-  die "Could not download '${ref}' from the source repository. git said: ${out}. Nothing was changed and the previous release is still running. Check that this server can reach the internet (and the remote named 'origin' in ${src_dir}) and that the version name is spelled exactly as published, then run the upgrade again."
+  # v0.8.4 Part N: what is checked out must be exactly what was downloaded.
+  local head
+  head="$(cd "$src_dir" && git rev-parse HEAD)"
+  if [ "$head" != "$fetched" ]; then
+    die "After downloading '${ref}' (commit ${fetched}), the source folder ${src_dir} is at a different commit (${head}). Nothing was built or changed and the previous release is still running. Check ${src_dir} for local changes or git hooks, then run the upgrade again."
+  fi
+  log "Deploying ${head} (${ref})"
+}
+
+# version_is_older A B: true when version A (x.y.z, optionally -suffix) is
+# older than B. A version with a suffix (0.9.0-rc1) is older than the plain
+# release of the same number, which `sort -V` gets wrong.
+version_is_older() {
+  node -e '
+    const p = (v) => { const [n, pre] = String(v).trim().split("-", 2); return { n: n.split(".").map(Number), pre }; };
+    const a = p(process.argv[1]), b = p(process.argv[2]);
+    for (let i = 0; i < 3; i++) if ((a.n[i] || 0) !== (b.n[i] || 0)) process.exit((a.n[i] || 0) < (b.n[i] || 0) ? 0 : 1);
+    if (a.pre && !b.pre) process.exit(0);
+    if (a.pre && b.pre && a.pre < b.pre) process.exit(0);
+    process.exit(1);
+  ' "$1" "$2"
+}
+
+# migrations_not_in MIGRATIONS_DIR: reads applied migration names on stdin and
+# prints each one that has no folder in MIGRATIONS_DIR.
+migrations_not_in() {
+  local dir="$1" name
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    [ -d "${dir}/${name}" ] || printf '%s\n' "$name"
+  done
+}
+
+# guard_upgrade SRC_DIR RUNNING_RELEASE_DIR APPLIED_MIGRATIONS
+#
+# v0.8.4 Part N. Returns non-zero, with a plain message on stderr, when the
+# checked-out code would be older than what runs now: an older version number,
+# or a database that already has migrations this checkout does not contain.
+# There is deliberately no override: going back means restoring a backup.
+guard_upgrade() {
+  local src="$1" running="$2" applied="$3" target current extra
+  target="$(node -p 'require(process.argv[1]).version' "${src}/apps/api/package.json")"
+  if [ -f "${running}/api/package.json" ]; then
+    current="$(node -p 'require(process.argv[1]).version' "${running}/api/package.json")"
+    if version_is_older "$target" "$current"; then
+      printf '%s\n' "This would install version ${target}, but this server runs ${current}. An upgrade cannot go back to an older version. Nothing was changed and ${current} is still running. To return to an older version, restore the backup taken before your last upgrade (restore-native.sh), or give the release tag of ${current} or newer." >&2
+      return 1
+    fi
+  fi
+  extra="$(printf '%s\n' "$applied" | migrations_not_in "${src}/packages/db/prisma/migrations")"
+  if [ -n "$extra" ]; then
+    printf '%s\n' "The database already has these changes, which version ${target} does not contain:" >&2
+    printf '  %s\n' $extra >&2
+    printf '%s\n' "Installing ${target} would run older code against a newer database. Nothing was changed and the current version is still running. Give a newer release tag that contains these changes, or restore the backup or snapshot taken before they were applied." >&2
+    return 1
+  fi
+  return 0
 }
 
 # wait_for_health URL [max_tries]

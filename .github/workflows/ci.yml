@@ -75,6 +75,11 @@ jobs:
             exit 1
           fi
 
+      # v0.8.4 Part N: the upgrade guard (refuses an older version, or a
+      # database with migrations the checkout lacks), against throwaway folders.
+      - name: Test the upgrade script's downgrade guard
+        run: bash deploy/native/test-upgrade-guard.sh
+
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}

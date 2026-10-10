@@ -59,16 +59,43 @@ done
 [ -L "$CURRENT_LINK" ] || die "${CURRENT_LINK} is not a symlink — is OpenEstate installed via install-native.sh?"
 PREVIOUS_RELEASE="$(readlink -f "$CURRENT_LINK")"
 
+if [ -n "$REF" ]; then
+  log "Checking out ${REF}..."
+  checkout_ref "$SRC_DIR" "$REF"
+fi
+
+# v0.8.4 Part N: refuse code older than what runs now (version, or migrations
+# the database has that this checkout lacks), before anything is backed up,
+# built or changed. Reads _prisma_migrations as the same superuser the
+# migrate step uses; psql runs from / so it never stats the checkout.
+applied_migrations() {
+  local sql="SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY 1"
+  if [ -n "$DB_HOST" ]; then
+    (cd / && PGPASSWORD="${PG_SUPERUSER_PASSWORD:?Set PG_SUPERUSER_PASSWORD when using --db-host}" \
+      psql -h "$DB_HOST" -U "${PG_SUPERUSER:-postgres}" -d openestate -AtX -v ON_ERROR_STOP=1 -c "$sql")
+  else
+    (cd / && sudo -u postgres psql -d openestate -AtX -v ON_ERROR_STOP=1 -c "$sql")
+  fi
+}
+APPLIED_MIGRATIONS="$(applied_migrations)" \
+  || die "Could not read the list of database changes already applied. Nothing was changed and the previous release is still running."
+if ! guard_upgrade "$SRC_DIR" "$PREVIOUS_RELEASE" "$APPLIED_MIGRATIONS"; then
+  # Put the source folder back on the running release's commit (the release
+  # directory is named <timestamp>-<short sha>), so the next run starts clean.
+  RUNNING_SHA="${PREVIOUS_RELEASE##*-}"
+  if (cd "$SRC_DIR" && git checkout --quiet --detach "$RUNNING_SHA" 2>/dev/null); then
+    warn "The source folder ${SRC_DIR} was returned to the running release (${RUNNING_SHA})."
+  else
+    warn "The source folder ${SRC_DIR} is still on the refused version; the next upgrade will fetch the version you name."
+  fi
+  exit 1
+fi
+
 if [ "$NO_BACKUP" -eq 1 ]; then
   warn "Skipping pre-upgrade backup (--no-backup)."
 else
   log "Taking a pre-upgrade backup..."
   "${SCRIPT_DIR}/backup-native.sh" --env-file "$ENV_FILE"
-fi
-
-if [ -n "$REF" ]; then
-  log "Checking out ${REF}..."
-  checkout_ref "$SRC_DIR" "$REF"
 fi
 
 log "Building new release..."

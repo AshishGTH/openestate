@@ -92,5 +92,25 @@ check "unreachable origin: non-zero exit" "$([ "$RC" -ne 0 ] && echo nonzero || 
 case "$OUT" in *"Could not download 'vX'"*"Nothing was changed"*) ok "unreachable origin: plain-English error";; *) bad "unreachable origin: message missing (got: $OUT)";; esac
 check "unreachable origin: checkout unchanged" "$(G -C "$WORK" rev-parse HEAD)" "$BEFORE"
 
+# 6. v0.8.4 Part N: a branch name whose LOCAL copy is behind origin deploys the
+#    fetched commit, not the stale local branch, and says which commit it is.
+G -C "$WORK" remote set-url origin "$ORIGIN"
+G -C "$WORK" branch -f main "$C1" >/dev/null 2>&1
+run_checkout "$WORK" main
+check "stale local branch: exit status 0" "$RC" "0"
+check "stale local branch: checked out origin main (c2), not the local c1" "$(G -C "$WORK" rev-parse HEAD)" "$C2"
+if [ "${CHECKOUT_REF_IMPL:-new}" != "old" ]; then
+  case "$OUT" in *"Deploying $C2 (main)"*) ok "stale local branch: logs the full commit being deployed";; *) bad "stale local branch: no 'Deploying' line (got: $OUT)";; esac
+fi
+
+# 7. v0.8.4 Part N: if the checkout does not end on the commit that was
+#    downloaded (here a post-checkout hook moves it), the upgrade stops.
+printf '#!/bin/sh\n[ -n "$MOVED" ] && exit 0\nMOVED=1 git checkout --quiet --detach %s\n' "$C1" > "$WORK/.git/hooks/post-checkout"
+chmod +x "$WORK/.git/hooks/post-checkout"
+run_checkout "$WORK" vX
+check "checkout differs from download: non-zero exit" "$([ "$RC" -ne 0 ] && echo nonzero || echo zero)" "nonzero"
+case "$OUT" in *"is at a different commit"*"Nothing was built or changed"*) ok "checkout differs from download: plain message";; *) bad "checkout differs from download: message (got: $OUT)";; esac
+rm -f "$WORK/.git/hooks/post-checkout"
+
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
