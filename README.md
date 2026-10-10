@@ -8,14 +8,17 @@ OpenEstate is AGPL-3.0 licensed. Install it natively on your own server —
 your own PostgreSQL and Redis, a systemd service, standard Linux paths —
 like you would Zabbix or Wazuh, not a stack of containers you don't control.
 
-> **Status: v0.8.2 — the core sales funnel works end to end for a first
+> **Status: v0.8.3 — the core sales funnel works end to end for a first
 > pilot, with a short list of known gaps worth reading before you rely on
 > it.** Auth/RBAC, multi-tenancy, inventory (including plotted/farmhouse
 > land sales, not just apartment-style units), a configurable lead-stage
 > pipeline, manager-hierarchy-scoped lead visibility, pre-sales (including
 > an expanded reporting suite), the post-sales ledger, brokers/commissions,
 > both portals, plugins, webhooks, and custom fields are all built and
-> exercised end to end in a real browser against a real install. v0.8.2
+> exercised end to end in a real browser against a real install. v0.8.3
+> is a security fix: a broker portal session could download customers'
+> stored documents. Every install should upgrade; see the
+> [CHANGELOG](CHANGELOG.md). v0.8.2
 > is a security fix: an administrator could act beyond their own
 > permissions (including promoting themselves to super_admin). Every
 > install should upgrade; see the [CHANGELOG](CHANGELOG.md). v0.8.1
@@ -216,7 +219,7 @@ India-specific compliance handling, and the plugin boundary.
 ## Roadmap
 
 All phases below shipped as of v0.1.0; the project has followed semantic
-versioning (v0.1.0 → v0.8.2 and counting) since — manager-hierarchy lead
+versioning (v0.1.0 → v0.8.3 and counting) since — manager-hierarchy lead
 ownership, the Docker-to-native install migration, plotted/farmhouse
 inventory, the lead-stage pipeline, an expanded pre-sales reporting suite,
 and v0.5.0's 2FA security fix all shipped after v0.1.0. See

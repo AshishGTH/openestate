@@ -278,8 +278,20 @@ journalctl -u openestate-api -n 200    # last 200 lines
 
 ```bash
 cd /opt/openestate-src/deploy/native
-sudo ./upgrade-native.sh --ref v0.8.2
+sudo ./upgrade-native.sh --ref v0.8.3
 ```
+
+**Always pass a release tag (like `v0.8.3`), never a branch name such as `master`.**
+An install whose upgrade script is older than v0.8.3 (every install upgrading to
+v0.8.3 for the first time) checks out the *local* copy of a branch with that name.
+That copy is usually weeks behind GitHub, so the script silently builds and installs
+old code over your newer database. A tag has no such local copy and is safe.
+
+**The server clock must be time-synced.** `timedatectl` should show
+`System clock synchronized: yes`. A clock that is behind or ahead makes 2FA codes
+and password-reset links fail. A virtual machine that was suspended or restored from
+a snapshot can wake up with a stale clock even while it reports "synchronized",
+so check the date (`date`) after resuming or restoring one.
 
 This: takes an automatic backup first (same as `backup-native.sh`, unless
 you pass `--no-backup`), checks out the given tag/branch in the source

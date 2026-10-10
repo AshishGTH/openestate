@@ -1,6 +1,6 @@
 {
   "name": "@openestate/sdk",
-  "version": "0.8.2",
+  "version": "0.8.3",
   "private": true,
   "license": "AGPL-3.0-only",
   "main": "./src/index.ts",

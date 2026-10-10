@@ -3,9 +3,65 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.8.3] - 2026-10-10
+
+A security release. **Every install should upgrade.** Two migrations: one adds a
+column (`users.authz_version`), the other only changes database access rules (no
+table or data changes). No new environment variable; no change to install, backup,
+restore or uninstall. Advisory:
+[GHSA-gq5m-m6q6-x32p](https://github.com/AshishGTH/openestate/security/advisories/GHSA-gq5m-m6q6-x32p).
+
+### How to upgrade
+
+```bash
+cd /opt/openestate-src/deploy/native
+sudo ./upgrade-native.sh --ref v0.8.3
+```
+
+- **Always give the upgrade script a release tag, never a branch name.** The
+  `upgrade-native.sh` that ships with v0.8.2 and earlier, run with
+  `--ref master`, checks out the *local* copy of `master` in your source
+  checkout, which is usually weeks behind GitHub, and silently builds and installs
+  that old code over your newer database. A tag is safe. (From v0.8.3 on the script
+  fetches exactly the ref you name.)
+- **If the upgrade stops with "would clobber existing tag"** (a clone made before
+  the repository's history was rewritten), force the tag fetch once, then run the
+  upgrade again:
+
+  ```bash
+  sudo git -C /opt/openestate-src fetch --tags --force origin
+  cd /opt/openestate-src/deploy/native && sudo ./upgrade-native.sh --ref v0.8.3
+  ```
+
+- **The server clock must be time-synced.** `timedatectl` should say
+  `System clock synchronized: yes`. A wrong clock makes 2FA codes and
+  password-reset links fail, and a virtual machine resumed from a snapshot can have
+  a stale clock while still reporting "synchronized". Check `date` after resuming
+  one.
 
 ### Security
+
+- **A broker portal session could download a customer's stored documents.**
+  Reaching a document needs its ID, which the portal never lists to a broker, so
+  this is hard to exploit; it needs a signed-in broker account (Low severity).
+  Through the document download routes, a signed-in broker could fetch any stored
+  document (receipts, statements, demand letters, and the staff-only allotment and
+  reminder letters) belonging to a booking that broker sourced. The database access
+  rules behind the portal also let a broker session read the installment, payment
+  plan, receipt, receipt allocation, ledger and document-dispatch rows of such
+  bookings; we found no route that returned those rows to a broker. Fixed in both
+  places.
+  A broker session can now only fetch its own commission statements; a customer
+  session only the types its portal lists (statement, receipt, demand letter) and,
+  as before, only for its own bookings; and the database rules no longer give a
+  broker session access to any customer booking or money row. Customers could never
+  reach another customer's documents: for them the only change is that they can no
+  longer fetch, by ID, types their portal does not list (the staff-only allotment
+  and reminder letters), for their own bookings. A customer's own access, including
+  a co-applicant's, and staff access are otherwise unchanged. Affected: all
+  versions up to 0.8.2. The rule change uses `ALTER POLICY`, so there is no moment
+  during the upgrade when the portal scope is missing. No data is changed and
+  nothing needs cleaning up afterwards.
 
 - **A session now ends the moment it stops being authorised (UA-116).** Until
   now an access token stayed valid until it expired (up to 15 minutes), because
