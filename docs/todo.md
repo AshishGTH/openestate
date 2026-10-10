@@ -124,6 +124,56 @@ them for the user who can't do them. Candidate UI-audit findings:
   hard-deleted through the app (owner accepted, 2026-10-10); item Q is the
   server-side way.
 
+### Item Q plan: `deploy/native/erase.sh` (v0.9; recorded, not built)
+
+**Shape.** A shell script run on the server; the database part runs as the
+PostgreSQL superuser (`sudo -u postgres psql`, or `psql -h` with `--db-host`)
+in ONE transaction with `SET LOCAL app.allow_financial_mutation = 'on'`. No API
+route, no app code. The target is named by UUID together with its company; the
+script first checks the target belongs to that company. Every statement filters
+by that company explicitly (the superuser bypasses RLS).
+
+**Decisions (architect and owner, 2026-10-10).**
+- **Three modes.**
+  - Default: REFUSE a target that has financial records (bookings, receipts,
+    ledger, TDS, commissions, refunds, NOCs), listing them.
+  - `--anonymise`: blank name, phone, email, PAN, addresses and document files;
+    keep the ledger, bookings and amounts.
+  - `--include-financial`: full delete, with a warning about tax-record
+    retention and changed historical and GST reports.
+- **Rows on other people's records** (a co-applicant row on someone else's
+  booking; a broker attributed on other customers' bookings;
+  `transfers.from_booking_id`): refused by default, listing the affected
+  bookings; allowed only with `--include-financial`.
+- **Audit log:** rows about the target are kept, with personal fields in
+  before/after blanked.
+- **Erasure log** keeps the target UUID (with who ran it, when, scope and
+  counts per table; no names or phone numbers), so erasure can be re-applied
+  after a restore from an older backup.
+- **With `--include-financial`,** a unit whose current booking is deleted goes
+  back to AVAILABLE, with a unit status-change record.
+- **Build scope 1 (one applicant or broker) first;** scope 2 (a whole company)
+  after.
+
+**Always:** dry run by default (per-table counts and the files on disk under
+`UPLOADS_DIR` that would go); a real run needs `--confirm` plus the target UUID
+typed at a terminal (refused without one); `backup-native.sh` runs first and a
+failed backup stops everything; the portal user is deleted before its applicant
+or broker (the restored `users.applicant_id`/`broker_id` SET NULL would trip the
+portal-link trigger); files are deleted after the commit and any that could not
+be removed are reported.
+
+**Docs:** backups keep the data until they age out, and restoring one brings
+erased data back (re-run from the erasure log); consult a CA and lawyer; no
+claim of legal compliance.
+
+**Tests:** dry run changes nothing; a real run removes exactly the listed rows
+and files and nothing else (another applicant, another company and the balances
+of untouched bookings unchanged); a financial target is refused without a flag;
+`--anonymise` keeps every amount; the app and system roles cannot run it; no
+typed confirmation, no run; a failed backup deletes nothing. Every refusal
+mutation-checked.
+
 ## `Failed to create bin ... ENOENT` warnings during upgrade builds
 
 Every `upgrade-native.sh` build prints four pnpm warnings (browserslist,
