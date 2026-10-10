@@ -129,6 +129,23 @@ psql_admin --dbname "$DB_NAME" <<-EOSQL
   END
   \$\$;
 
+  -- v0.8.4: two roles nobody logs in as. Migrations create them too, but a
+  -- restore onto a fresh server loads a dump (which never contains roles)
+  -- before any migration runs there: the dump makes openestate_guard_owner
+  -- the owner of forbid_unlinked_portal_role() and fails if the role is
+  -- missing, and without openestate_maintenance the append-only escape hatch
+  -- stays shut even for the superuser. No password, no members.
+  DO \$\$
+  BEGIN
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'openestate_maintenance') THEN
+      CREATE ROLE openestate_maintenance NOLOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'openestate_guard_owner') THEN
+      CREATE ROLE openestate_guard_owner NOLOGIN BYPASSRLS;
+    END IF;
+  END
+  \$\$;
+
   GRANT USAGE ON SCHEMA public TO ${APP_ROLE};
   GRANT USAGE ON SCHEMA public TO ${SYSTEM_ROLE};
   GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE};

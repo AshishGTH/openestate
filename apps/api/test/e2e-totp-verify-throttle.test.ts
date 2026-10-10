@@ -32,6 +32,7 @@ import { ZodValidationPipe } from 'nestjs-zod';
 import * as argon2 from '@node-rs/argon2';
 import { ROLE_PERMISSIONS, SYSTEM_ROLES } from '@openestate/shared';
 import { makeClients, seedCompany, makePortalRole, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
+import { TRUST_PROXY } from '../src/common/network';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -65,7 +66,7 @@ async function bootstrapApp(): Promise<INestApplication> {
   const nestApp = await NestFactory.create(AppModule, { logger: ['error', 'warn'] });
   // Same as main.ts: req.ip comes from X-Forwarded-For, which is how these
   // tests stand in for different client addresses.
-  nestApp.getHttpAdapter().getInstance().set('trust proxy', 1);
+  nestApp.getHttpAdapter().getInstance().set('trust proxy', TRUST_PROXY); // same as main.ts
   nestApp.use(helmet());
   nestApp.use(cookieParser());
   nestApp.setGlobalPrefix('api/v1');

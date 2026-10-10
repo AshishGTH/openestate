@@ -183,6 +183,11 @@ OpenAPI → UI → seed/demo data → docs page stub → audit logging
   `pgrep -f vitest 2>/dev/null` prints nothing because it failed, not
   because nothing is running. Before a build or a test run, check with
   `Get-CimInstance Win32_Process -Filter "Name='node.exe'"`.
+- **Rebuild `apps/api` before running the suite locally**
+  (`pnpm --filter @openestate/api build`). The HTTP tests load the compiled
+  API from `apps/api/dist`, not the source, so a stale build tests old code: on
+  2026-10-10 a build from before the v0.8.3 portal fix made two passing tests
+  fail. CI builds first, so CI is not affected.
 
 ## Decisions log
 
@@ -7686,6 +7691,132 @@ portal sessions each did one silent refresh and carried on.
 - **Owner direct pushes bypass the required status checks** (GitHub says so on
   every such push). Accepted, because CI is watched to green before the tag is
   created.
+
+### v0.8.4 Part G — the append-only escape hatch is superuser-only
+
+- **Until now any role could use it**, including `openestate_app`: the trigger
+  only checked that `app.allow_financial_mutation` was `'on'`, and any role may
+  set a custom setting. Migration `20261020000000_scope_financial_mutation_hatch`
+  creates `openestate_maintenance` (NOLOGIN, no members) and honours the setting
+  only when `pg_has_role(session_user, 'openestate_maintenance', 'MEMBER')`.
+  Superusers count as members of every role, so in production only the postgres
+  superuser can use it; no script grants membership, and
+  `print_post_migrate_findings()` lists any non-superuser member.
+- **`session_user`, not `current_user`.** Rows removed or nulled by a
+  foreign-key cascade are changed by PostgreSQL as the table owner, so
+  `current_user` inside the trigger is the owner; a `current_user` check refused
+  every cascading cleanup (shown by mutation against test 3).
+- **Fails closed:** with the role missing, `pg_has_role` raises.
+- **Test teardown (`cleanupCompany`) now uses a superuser login,
+  `DATABASE_URL_TEST_SUPER`** (written by `scripts/test-setup.sh`, passed by
+  `turbo.json`, inherited by CI from `.test-env`). The test app and system roles
+  are deliberately not members. `portal-demo-seed` needs
+  `DATABASE_URL_MAINTENANCE`, a superuser URL.
+- **Checked before building:** on a migrations-built database the 7 append-only
+  tables and `forbid_financial_mutation()` are owned by the migrating superuser,
+  and the app and system roles cannot TRUNCATE them, disable or drop their
+  triggers, replace the function, or set `session_replication_role` (test 7).
+  Every install path runs migrations as a superuser (native: `postgres`; the old
+  Docker path: its `openestate` superuser), so no install can have these owned by
+  the app or system role.
+- **Not changed, reported:** `openestate_system` owns
+  `forbid_unlinked_portal_role()` (v0.8.2, `SECURITY DEFINER` by design). It
+  cannot replace it (no CREATE on the schema), but as owner it can
+  `DROP FUNCTION ... CASCADE`, which also drops the v0.8.2 trigger on `users`,
+  or `ALTER FUNCTION ... SECURITY INVOKER`. Both shown on the local test
+  database in rolled-back transactions.
+- **`prisma migrate deploy` (6.19) runs each migration file as one
+  transaction**; a failed file leaves nothing behind but is recorded as failed,
+  and later deploys stop with P3009 until `prisma migrate resolve
+  --rolled-back <name>`. It does not show `RAISE NOTICE`/`WARNING` output, so
+  anything an operator must see has to come from the upgrade script. Both
+  verified on a scratch database.
+
+### v0.8.4 — portal-check ownership, Part A (71 foreign keys back) and Part B (guards)
+
+- **`forbid_unlinked_portal_role()` belongs to `openestate_guard_owner`**
+  (NOLOGIN, no members, BYPASSRLS, SELECT on `roles(id, is_portal)` only), not
+  to `openestate_system`. As owner, the system login role could `DROP ...
+  CASCADE` it (removing the `users` trigger), switch it to SECURITY INVOKER or
+  reset its search_path. BYPASSRLS is required: writes through the system
+  client carry no company context, so without it every staff-user insert there
+  failed ("does not resolve to a known role"), shown by mutation. Changelog
+  note, no advisory (owner decision).
+- **Part A: the 71 foreign keys are added NOT VALID, then validated one by one
+  only where the link has zero orphans** (owner decision: never block an
+  upgrade on orphans, never change rows). A link left NOT VALID still checks new
+  and changed rows; `upgrade-native.sh` prints it and
+  `deploy/native/check-foreign-keys.sh` lists it (read-only session). The report
+  is a query run by the script because `prisma migrate deploy` hides NOTICEs.
+- **Three links became ON DELETE RESTRICT** (`ledger_entries.installment_id`,
+  `interest_accruals.installment_id`, `interest_accruals.interest_rule_id`; they
+  were SET NULL, which would have to UPDATE an append-only row). The refusal is
+  turned into a plain 409 by `ForeignKeyRefusalFilter`
+  (`apps/api/src/common/filters`), so the frozen services are unchanged. Before
+  this, editing a plan deleted an installment with interest charged and left
+  ledger and accrual rows pointing at nothing (shown on the pre-A schema).
+- **No lock-timeout retry inside the ADD file.** The file is one transaction,
+  so a retry would keep the locks it already holds, including on `users`, for
+  longer. Instead the 35 links that lock `users` run last, and a timeout fails
+  the file cleanly (nothing applied; P3009 on the next deploy until the failed
+  row is marked rolled back, which `upgrade-native.sh` now explains and the
+  release notes give as one command).
+- **Restore onto a fresh server needed the new roles first.** A dump never
+  contains roles but now refers to `openestate_guard_owner`, so loading it
+  failed with "role does not exist" (shown on a fresh PostgreSQL 16).
+  `setup-database.sh` creates both NOLOGIN roles and `restore-native.sh` runs it
+  before loading the dump as well as after.
+- **Part B:** `packages/db/constraint-manifest.json` (generated by
+  `packages/db/prisma/constraint-manifest.ts`, one entry per line) is compared
+  with the migrated test database in CI, together with "every foreign key
+  validated" and "no trigger or SECURITY DEFINER function owned by a
+  non-superuser login role or by `openestate_app`/`openestate_system`".
+  `apps/api/test/fk-enforcement.test.ts` proves every foreign key in the
+  manifest refuses a bad pointer.
+- **The ownership rule names the application roles explicitly, a lesson from
+  its own mutation check.** The first version flagged only owners that can log
+  in, and stayed green with the function given back to `openestate_system`: a
+  migrations-built database (CI) creates that role NOLOGIN, and only a real
+  install's `setup-database.sh` makes it a login role. A check that passes in CI
+  for a state that is broken on every real install is no check.
+- **The manifest self-checks compare copies, they don't alter the database.**
+  A rolled-back `DROP CONSTRAINT` still takes ACCESS EXCLUSIVE locks while the
+  api tests run concurrently, and deadlocked them. Dropping a real foreign key
+  was shown to fail both the manifest test and the enforcement test by hand.
+- **Restoring the keys exposed two test fixtures that were wrong all along:**
+  e2e-tickets created tickets "raised by" an applicant id where production
+  stores a user id, and teardown deleted brokers/applicants while their portal
+  users still pointed at them (the restored ON DELETE SET NULL then trips the
+  v0.8.2 portal-link trigger). In the product this means an applicant or broker
+  with a portal account cannot be hard-deleted; nothing hard-deletes them.
+  `scripts/lint-migration-drops.mjs` (CI step) refuses an unmarked DROP
+  CONSTRAINT / TRIGGER / POLICY / FUNCTION or DISABLE TRIGGER after the cutoff
+  `20261015000000_portal_document_scope`; a removal needs `-- ALLOW-DROP:
+  <reason>` and an entry in `packages/db/approved-removals.json`.
+- **Testing method worth reusing:** a foreign key probe must commit its filler
+  rows first. PostgreSQL re-checks every foreign key of a row updated in the
+  transaction that inserted it, so an uncommitted filler fails on its own
+  placeholder values (`apps/api/test/helpers/fk-probe.ts`).
+
+### v0.8.4 Part I — system-role permission sync with a per-role seed baseline
+
+- **`role_seed_baselines` (one row per system role) records the seed each role
+  was last synced to.** `syncSystemRoleBaselines()` (sync-permissions.ts, run by
+  every upgrade and by seed.ts) adds only keys new to a role's seed since its
+  baseline. A key in the baseline that the role lacks was removed by an admin
+  and is never added back; keys an admin added are untouched. The first
+  upgrade of an existing install records the baseline, adds nothing and
+  prints each role's differences from its seed for an admin to review.
+  super_admin keeps its own rule; custom roles are never touched. Each role
+  that gains keys gets a `ROLE_PERMS_CHANGED` audit row (no actor,
+  `surface: upgrade`) and its users' sessions end.
+- **Standing rule: the permission sync never revokes. If a permission must be
+  removed from a role for security reasons, that release ships its own
+  migration that removes it, with a test.** (The portal-role strip in
+  sync-permissions.ts predates this rule and stays the one exception: a portal
+  role holding a staff permission is a security defect by definition.)
+- **Known edge:** a key removed from a seed in one release and put back in a
+  later one counts as new and is re-added, even if an admin had removed it.
 
 ## graphify
 

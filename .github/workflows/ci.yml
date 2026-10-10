@@ -75,6 +75,11 @@ jobs:
             exit 1
           fi
 
+      # v0.8.4 Part N: the upgrade guard (refuses an older version, or a
+      # database with migrations the checkout lacks), against throwaway folders.
+      - name: Test the upgrade script's downgrade guard
+        run: bash deploy/native/test-upgrade-guard.sh
+
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -92,6 +97,15 @@ jobs:
 
       - name: Lint
         run: pnpm lint
+
+      # v0.8.4 Part B: a new migration may not drop or disable a constraint,
+      # trigger, policy or function unless the line is marked
+      # "-- ALLOW-DROP: <reason>" and listed in packages/db/approved-removals.json.
+      # `prisma migrate dev` silently generated the drops that removed 71
+      # foreign keys in 2026-08; this stops that at review time. The other
+      # half, the constraint manifest, runs with the integration tests.
+      - name: Migration drop lint
+        run: node scripts/lint-migration-drops.mjs
 
       - name: Typecheck
         run: pnpm typecheck
@@ -213,8 +227,10 @@ jobs:
       # always-present template/postgres databases.
       #
       # .test-env's values are appended to $GITHUB_ENV so every later step
-      # inherits DATABASE_URL_TEST/DATABASE_URL_TEST_SYSTEM/REDIS_TEST_URL
-      # from the script's own output — the two steps below no longer carry
+      # inherits DATABASE_URL_TEST/DATABASE_URL_TEST_SYSTEM/REDIS_TEST_URL,
+      # plus DATABASE_URL_TEST_SUPER (the superuser login test teardown
+      # needs for the append-only escape hatch since v0.8.4), from the
+      # script's own output — the two steps below no longer carry
       # a second hardcoded copy that could quietly drift from what the
       # script actually provisions.
       - name: Provision test database (scripts/test-setup.sh)
@@ -535,6 +551,35 @@ jobs:
       - name: Assert health endpoint responds over HTTP
         run: curl -fsS http://localhost/api/v1/health
 
+      # v0.8.4 Part P: pnpm 9's `deploy` writes a stray copy of the release's
+      # .bin tree (see build_release in deploy/native/lib.sh) and warns about
+      # it. The build must hide those lines and remove the stray tree.
+      # v0.8.4 Part M: the API must listen on loopback only (no HOST line in the
+      # env file), so nothing on the network can reach :3000 and skip nginx.
+      - name: Assert the API listens on 127.0.0.1:3000 only
+        run: |
+          set -euo pipefail
+          sudo ss -ltnH 'sport = :3000' | tee /tmp/ss-3000.txt
+          awk '{print $4}' /tmp/ss-3000.txt | grep -qx '127.0.0.1:3000' || { echo "::error::API is not listening on 127.0.0.1:3000"; exit 1; }
+          if awk '{print $4}' /tmp/ss-3000.txt | grep -vqx '127.0.0.1:3000'; then echo "::error::API also listens on another address"; exit 1; fi
+          IP="$(hostname -I | awk '{print $1}')"
+          if curl -sS --max-time 5 "http://${IP}:3000/api/v1/health" >/dev/null 2>&1; then
+            echo "::error::http://${IP}:3000 answered; the API is reachable from the network"; exit 1
+          fi
+          curl -fsS http://127.0.0.1:3000/api/v1/health >/dev/null
+          echo "Loopback only: ${IP}:3000 refused, 127.0.0.1:3000 healthy."
+
+      - name: Assert no pnpm "Failed to create bin" warnings and no stray release tree
+        run: |
+          if grep -q "Failed to create bin" /tmp/install-native.log; then
+            grep "Failed to create bin" /tmp/install-native.log
+            echo "::error::the build printed pnpm bin warnings"; exit 1
+          fi
+          ID="$(basename "$(readlink -f /opt/openestate/current)")"
+          STRAY="$(sudo find /home /opt /root -path "*/releases/${ID}" -not -path "/opt/openestate/releases/${ID}" 2>/dev/null || true)"
+          [ -z "$STRAY" ] || { echo "::error::stray release tree left behind: $STRAY"; exit 1; }
+          echo "No bin warnings, no stray tree (release ${ID})."
+
       - name: Assert login succeeds over HTTP
         run: |
           PASSWORD="$(grep -m1 '^   password:' /tmp/install-native.log | awk '{print $2}')"
@@ -803,6 +848,21 @@ jobs:
       - name: Assert the app boots healthy after upgrade
         run: curl -fsS http://localhost/api/v1/health
 
+      # v0.8.4 Part M: the API must listen on loopback only (no HOST line in the
+      # env file), so nothing on the network can reach :3000 and skip nginx.
+      - name: Assert the API listens on 127.0.0.1:3000 only
+        run: |
+          set -euo pipefail
+          sudo ss -ltnH 'sport = :3000' | tee /tmp/ss-3000.txt
+          awk '{print $4}' /tmp/ss-3000.txt | grep -qx '127.0.0.1:3000' || { echo "::error::API is not listening on 127.0.0.1:3000"; exit 1; }
+          if awk '{print $4}' /tmp/ss-3000.txt | grep -vqx '127.0.0.1:3000'; then echo "::error::API also listens on another address"; exit 1; fi
+          IP="$(hostname -I | awk '{print $1}')"
+          if curl -sS --max-time 5 "http://${IP}:3000/api/v1/health" >/dev/null 2>&1; then
+            echo "::error::http://${IP}:3000 answered; the API is reachable from the network"; exit 1
+          fi
+          curl -fsS http://127.0.0.1:3000/api/v1/health >/dev/null
+          echo "Loopback only: ${IP}:3000 refused, 127.0.0.1:3000 healthy."
+
       - name: Assert nothing was lost, and new permissions arrived
         run: |
           set -euo pipefail
@@ -914,3 +974,225 @@ jobs:
           (sudo journalctl -u openestate-api -n 8 --no-pager 2>/dev/null || echo "(unit not found / never started)") | while IFS= read -r line; do
             echo "::error::${line}"
           done
+
+  # v0.8.4 Part O. Real servers upgrade from the PREVIOUS RELEASE, with the
+  # upgrade script that release shipped. The job above starts from a fixed old
+  # baseline and runs the new script, so it never proved that path. Three
+  # variants: clean data; one planted orphan row (a restored foreign key must
+  # be left NOT VALID and reported, never block the upgrade); and a forced lock
+  # timeout during the foreign-key step (the previous version must keep
+  # working on the half-migrated database, the release-notes recovery command
+  # must be needed and must work, and the retry must succeed).
+  native-upgrade-from-previous-release:
+    name: Upgrade from the previous release (${{ matrix.variant }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: lint-typecheck-build
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [clean, orphan, lock-timeout]
+    env:
+      STATE: /tmp/upgrade-state.json
+      SRC: /opt/openestate-src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the previous release tag and the commit under test must both exist here
+
+      - name: Install prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql postgresql-client redis-server nginx build-essential python3 jq
+          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+          sudo apt-get install -y nodejs
+          sudo systemctl enable --now postgresql
+          sudo systemctl enable --now redis-server
+          for i in $(seq 1 30); do sudo -u postgres pg_isready && break; [ "$i" -eq 30 ] && { echo "::error::Postgres never became ready"; exit 1; }; sleep 1; done
+          for i in $(seq 1 30); do redis-cli ping | grep -q PONG && break; [ "$i" -eq 30 ] && { echo "::error::Redis never became ready"; exit 1; }; sleep 1; done
+
+      - name: Install the previous release with its own install-native.sh
+        run: |
+          set -euo pipefail
+          HEAD_SHA="$(git rev-parse HEAD)"
+          PREV=""
+          for t in $(git tag -l 'v*' --sort=-v:refname); do
+            if [ "$(git rev-list -n1 "$t")" != "$HEAD_SHA" ]; then PREV="$t"; break; fi
+          done
+          [ -n "$PREV" ] || { echo "::error::no previous release tag found"; exit 1; }
+          echo "Previous release: ${PREV} ($(git log -1 --format='%h %s' "$PREV"))"
+          echo "PREV_TAG=${PREV}" >> "$GITHUB_ENV"
+          echo "HEAD_SHA=${HEAD_SHA}" >> "$GITHUB_ENV"
+          # The server's source folder clones THIS checkout, so the previous
+          # release's own upgrade script can fetch the commit under test by
+          # its sha (a PR merge commit is on no GitHub branch).
+          git config uploadpack.allowAnySHA1InWant true
+          sudo git config --system --add safe.directory '*'
+          sudo git clone --quiet --no-local "file://${GITHUB_WORKSPACE}" "$SRC"
+          sudo git -C "$SRC" checkout --quiet --detach "$PREV"
+          cd "$SRC/deploy/native"
+          sudo ./install-native.sh 2>&1 | tee /tmp/install-prev.log
+          PASSWORD="$(grep -m1 '^   password:' /tmp/install-prev.log | awk '{print $2}')"
+          [ -n "$PASSWORD" ] || { echo "::error::no admin password found in the install log"; exit 1; }
+          echo "::add-mask::${PASSWORD}"
+          echo "ADMIN_PASSWORD=${PASSWORD}" >> "$GITHUB_ENV"
+          V="$(curl -fsS http://localhost/api/v1/health | jq -r .version)"
+          [ "v${V}" = "$PREV" ] || { echo "::error::installed version ${V} is not ${PREV}"; exit 1; }
+
+      - name: Add data and open one staff and one portal session (over HTTP)
+        run: node scripts/ci/upgrade-scenario.mjs seed
+
+      - name: "Variant orphan: plant a row whose pointer will not resolve"
+        if: matrix.variant == 'orphan'
+        run: |
+          # On the previous release this foreign key does not exist yet, so a
+          # webhook endpoint "created by" a user that never existed is accepted.
+          (cd / && sudo -u postgres psql -d openestate -v ON_ERROR_STOP=1 -c \
+            "INSERT INTO webhook_endpoints (id, company_id, name, url, secret_ciphertext, secret_key_version, event_types, created_by_id, updated_at)
+             VALUES (gen_random_uuid(), (SELECT id FROM companies ORDER BY created_at LIMIT 1), 'Orphan hook', 'https://example.invalid/hook', 'x', 1, '{}', gen_random_uuid(), now())")
+
+      - name: "Variant lock-timeout: upgrade with the previous script while users is locked"
+        if: matrix.variant == 'lock-timeout'
+        run: |
+          set -uo pipefail
+          # Hold ROW EXCLUSIVE on users: ordinary writes still work, but the
+          # foreign-key file's SHARE ROW EXCLUSIVE lock on users must wait,
+          # and with a 3 s lock_timeout the file fails cleanly.
+          (cd / && sudo -u postgres env PGAPPNAME=o-lock-holder psql -d openestate -c \
+            "BEGIN; LOCK TABLE users IN ROW EXCLUSIVE MODE; SELECT pg_sleep(900);" >/dev/null 2>&1) &
+          HELD=0
+          for i in $(seq 1 30); do
+            HELD="$(cd / && sudo -u postgres psql -d openestate -AtX -c "SELECT count(*) FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE a.application_name = 'o-lock-holder' AND l.relation = 'users'::regclass AND l.granted")"
+            [ "$HELD" = "1" ] && break; sleep 1
+          done
+          [ "$HELD" = "1" ] || { echo "::error::could not take the lock on users"; exit 1; }
+          cd "$SRC/deploy/native"
+          sudo MIGRATION_LOCK_TIMEOUT=3s ./upgrade-native.sh --no-backup --ref "$HEAD_SHA" 2>&1 | tee /tmp/upgrade-attempt1.log
+          RC=${PIPESTATUS[0]}
+          [ "$RC" -ne 0 ] || { echo "::error::the upgrade succeeded although users was locked; the variant proves nothing"; exit 1; }
+          grep -qi "lock timeout" /tmp/upgrade-attempt1.log || { echo "::error::the first attempt did not fail on the lock timeout"; exit 1; }
+          q() { (cd / && sudo -u postgres psql -d openestate -AtX -c "$1"); }
+          # State: the hatch and portal-check migrations applied, the FK file failed, no FK added.
+          [ "$(q "SELECT count(*) FROM _prisma_migrations WHERE migration_name IN ('20261020000000_scope_financial_mutation_hatch','20261021000000_portal_guard_function_owner') AND finished_at IS NOT NULL")" = "2" ] \
+            || { echo "::error::the earlier v0.8.4 migrations are not both applied"; exit 1; }
+          [ "$(q "SELECT count(*) FROM _prisma_migrations WHERE migration_name = '20261022000000_restore_foreign_keys' AND finished_at IS NULL AND rolled_back_at IS NULL")" = "1" ] \
+            || { echo "::error::the foreign-key migration is not recorded as failed"; exit 1; }
+          [ "$(q "SELECT count(*) FROM pg_constraint WHERE conname = 'ledger_entries_installment_id_fkey'")" = "0" ] \
+            || { echo "::error::a restored foreign key exists although its file failed"; exit 1; }
+          # The previous version still runs correctly on this database.
+          cd "$GITHUB_WORKSPACE"
+          V="$(curl -fsS http://localhost/api/v1/health | jq -r .version)"
+          [ "v${V}" = "$PREV_TAG" ] || { echo "::error::running version is ${V}, expected ${PREV_TAG}"; exit 1; }
+          node scripts/ci/upgrade-scenario.mjs receipt || exit 1
+          node scripts/ci/upgrade-scenario.mjs sessions || exit 1
+          echo "Half-migrated: hatch and portal-check migrations applied, foreign keys not; ${PREV_TAG} still records receipts and refreshes sessions."
+
+      - name: Record money totals before the upgrade
+        run: bash scripts/ci/upgrade-checks.sh money /tmp/money-before.txt
+
+      - name: "Variant lock-timeout: the retry needs the release-notes recovery command"
+        if: matrix.variant == 'lock-timeout'
+        run: |
+          set -uo pipefail
+          (cd / && sudo -u postgres psql -d openestate -AtX -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'o-lock-holder'") >/dev/null
+          cd "$SRC/deploy/native"
+          # The source folder is already on the commit under test, so this
+          # runs the NEW script, which is what an operator's retry runs.
+          sudo ./upgrade-native.sh --no-backup 2>&1 | tee /tmp/upgrade-attempt2.log
+          RC=${PIPESTATUS[0]}
+          if [ "$RC" -eq 0 ] || ! grep -q "P3009" /tmp/upgrade-attempt2.log; then
+            echo "::error::a retry WITHOUT the recovery command did not stop with P3009 (exit ${RC})"; exit 1
+          fi
+          # The command exactly as the release notes print it.
+          CMD="$(grep -m1 'UPDATE _prisma_migrations SET rolled_back_at' "${GITHUB_WORKSPACE}/docs/releases/v0.8.4-release-notes.md")"
+          echo "Running the release-notes command: ${CMD}"
+          (cd / && eval "$CMD") || { echo "::error::the release-notes recovery command failed"; exit 1; }
+
+      - name: Upgrade to the commit under test
+        run: |
+          set -uo pipefail
+          echo "CUTOVER_SINCE=$(date -u '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
+          cd "$SRC/deploy/native"
+          if [ "${{ matrix.variant }}" = "lock-timeout" ]; then
+            sudo ./upgrade-native.sh --no-backup 2>&1 | tee /tmp/upgrade.log   # the operator's retry, new script
+          else
+            sudo ./upgrade-native.sh --no-backup --ref "$HEAD_SHA" 2>&1 | tee /tmp/upgrade.log   # the previous release's own script
+          fi
+          RC=${PIPESTATUS[0]}
+          [ "$RC" -eq 0 ] || { echo "::error::upgrade-native.sh exited ${RC}"; exit 1; }
+
+      - name: Assert the upgrade outcome
+        run: |
+          set -euo pipefail
+          C="$(readlink -f /opt/openestate/current)"
+          case "$C" in *-"$(git rev-parse --short "$HEAD_SHA")") ;; *) echo "::error::current release ${C} is not the commit under test"; exit 1;; esac
+          V="$(curl -fsS http://localhost/api/v1/health | jq -r .version)"
+          WANT="$(jq -r .version apps/api/package.json)"
+          [ "$V" = "$WANT" ] || { echo "::error::health says ${V}, the commit's package.json says ${WANT}"; exit 1; }
+          bash scripts/ci/upgrade-checks.sh migrations "$GITHUB_WORKSPACE"
+          bash scripts/ci/upgrade-checks.sh money /tmp/money-after.txt
+          bash scripts/ci/upgrade-checks.sh same-money /tmp/money-before.txt /tmp/money-after.txt
+          # Self-check: the money comparison does catch a changed total.
+          sed '0,/^booking /s/^\(booking [^ ]*\) \([0-9-]*\)/\1 999\2/' /tmp/money-before.txt > /tmp/money-tampered.txt
+          if bash scripts/ci/upgrade-checks.sh same-money /tmp/money-before.txt /tmp/money-tampered.txt >/dev/null 2>&1; then
+            echo "::error::the money comparison did not notice a changed balance"; exit 1
+          fi
+          node scripts/ci/upgrade-scenario.mjs sessions
+          UNVALIDATED="$(cd / && sudo -u postgres psql -d openestate -AtX -c "SELECT COALESCE(string_agg(conname, ',' ORDER BY conname), '') FROM pg_constraint WHERE contype = 'f' AND NOT convalidated")"
+          if [ "${{ matrix.variant }}" = "orphan" ]; then
+            [ "$UNVALIDATED" = "webhook_endpoints_created_by_id_fkey" ] || { echo "::error::expected only webhook_endpoints_created_by_id_fkey NOT VALID, got '${UNVALIDATED}'"; exit 1; }
+            # The previous release's upgrade script cannot print this report
+            # (it is new in v0.8.4), so the release notes tell operators to run
+            # check-foreign-keys.sh after this upgrade. That is what is checked.
+            set +e; sudo "$SRC/deploy/native/check-foreign-keys.sh" > /tmp/check-fk.txt 2>&1; RC=$?; set -e
+            cat /tmp/check-fk.txt
+            if [ "$RC" != "2" ] || ! grep -q "webhook_endpoints_created_by_id_fkey" /tmp/check-fk.txt; then
+              echo "::error::check-foreign-keys.sh did not report it (exit ${RC})"; exit 1
+            fi
+          else
+            [ -z "$UNVALIDATED" ] || { echo "::error::foreign keys left NOT VALID on clean data: ${UNVALIDATED}"; exit 1; }
+          fi
+          ERRORS="$(sudo journalctl -u openestate-api --since "$CUTOVER_SINCE" -o cat --no-pager | grep -c '"level":50' || true)"
+          if [ "$ERRORS" != "0" ]; then
+            sudo journalctl -u openestate-api --since "$CUTOVER_SINCE" -o cat --no-pager | grep '"level":50' | tail -5
+            echo "::error::${ERRORS} error lines in the API journal since the upgrade"; exit 1
+          fi
+          # Part I: the first upgrade with a seed baseline records one for every
+          # system role except super_admin and adds nothing to them.
+          q() { (cd / && sudo -u postgres psql -d openestate -AtX -c "$1"); }
+          ROLES="$(q "SELECT count(*) FROM roles WHERE is_system AND slug IN ('company_admin','sales_manager','sales_executive','accounts','customer','broker')")"
+          BASED="$(q "SELECT count(*) FROM role_seed_baselines b JOIN roles r ON r.id = b.role_id WHERE r.slug <> 'super_admin'")"
+          [ "$ROLES" -gt 0 ] && [ "$ROLES" = "$BASED" ] || { echo "::error::${BASED} seed baselines for ${ROLES} system roles"; exit 1; }
+          ADDED="$(q "SELECT count(*) FROM audit_logs WHERE action = 'ROLE_PERMS_CHANGED' AND after->>'surface' = 'upgrade'")"
+          [ "$ADDED" = "0" ] || { echo "::error::the first upgrade added permissions to system roles (${ADDED} audit rows)"; exit 1; }
+          echo "Upgrade outcome as expected (${{ matrix.variant }})."
+
+      - name: "Part M after the upgrade: the API listens on loopback only"
+        run: bash scripts/ci/upgrade-checks.sh loopback
+
+      - name: "Part N after the upgrade: going back to the previous release is refused"
+        run: |
+          set -uo pipefail
+          BEFORE="$(readlink -f /opt/openestate/current)"
+          COUNT_BEFORE="$(ls /opt/openestate/releases | wc -l)"
+          cd "$SRC/deploy/native"
+          sudo ./upgrade-native.sh --no-backup --ref "$PREV_TAG" 2>&1 | tee /tmp/downgrade.log
+          RC=${PIPESTATUS[0]}
+          [ "$RC" -ne 0 ] || { echo "::error::a downgrade to ${PREV_TAG} was not refused"; exit 1; }
+          grep -q "does not contain" /tmp/downgrade.log || { echo "::error::the refusal did not name the migrations ${PREV_TAG} lacks"; exit 1; }
+          [ "$(readlink -f /opt/openestate/current)" = "$BEFORE" ] || { echo "::error::the current release changed"; exit 1; }
+          [ "$(ls /opt/openestate/releases | wc -l)" = "$COUNT_BEFORE" ] || { echo "::error::a release was built although the downgrade was refused"; exit 1; }
+          [ "$(sudo git -C "$SRC" rev-parse HEAD)" = "$HEAD_SHA" ] || { echo "::error::the source folder was not returned to the running release"; exit 1; }
+          curl -fsS http://localhost/api/v1/health >/dev/null
+          echo "Downgrade refused; nothing built or changed."
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          for f in /tmp/install-prev.log /tmp/upgrade-attempt1.log /tmp/upgrade-attempt2.log /tmp/upgrade.log /tmp/downgrade.log; do
+            [ -f "$f" ] || continue
+            echo "::group::$f"; sed 's/\x1b\[[0-9;]*m//g' "$f" | tail -n 150; echo "::endgroup::"
+          done
+          echo "::group::journalctl -u openestate-api"
+          sudo journalctl -u openestate-api -n 200 --no-pager || true
+          echo "::endgroup::"

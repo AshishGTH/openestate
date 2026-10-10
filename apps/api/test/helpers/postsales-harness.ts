@@ -20,6 +20,18 @@ import { UnitStateMachineService } from '../../src/inventory/unit-state-machine.
 import { NotificationService } from '../../src/notifications/notification.service';
 import { ConsoleCommunicationProvider, type CommunicationProvider } from '../../src/queues/communication-provider';
 
+/**
+ * Superuser connection for the one thing that needs it: test teardown through
+ * the append-only escape hatch (see cleanupCompany). Same default as
+ * scripts/test-setup.sh writes to .test-env.
+ */
+/** cleanupCompany's marker for "the company's portal users only". */
+const PORTAL_USERS = 'users (portal)';
+
+export const TEST_SUPER_URL =
+  process.env.DATABASE_URL_TEST_SUPER ??
+  'postgresql://openestate_super:test_super_pass@localhost:5432/openestate_test';
+
 export interface Services {
   numbers: NumberSequenceService;
   ledger: LedgerService;
@@ -406,9 +418,19 @@ export async function makeFlatCommissionRule(
   return rule.id;
 }
 
-/** Delete all financial + inventory rows for a company (append-only override). */
+/**
+ * Delete all financial + inventory rows for a company (append-only override).
+ *
+ * Runs on a SUPERUSER connection (DATABASE_URL_TEST_SUPER), not the system
+ * client the caller passes in: since v0.8.4 the append-only triggers honour
+ * app.allow_financial_mutation only when the login role is a member of
+ * openestate_maintenance, and superusers are the only such logins. The app
+ * and system test roles are deliberately NOT members, so the guard tests can
+ * prove neither of them can use the hatch. The parameter stays so the ~100
+ * callers are unchanged.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function cleanupCompany(systemPrisma: any, companyId: string): Promise<void> {
+export async function cleanupCompany(_systemPrisma: any, companyId: string): Promise<void> {
   const tables = [
     // Phase 6: portal rows — several RESTRICT onto users (raised_by_id,
     // requested_by_id) and onto companies directly, so must go before both
@@ -420,7 +442,13 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
     // password_resets: admin-triggered staff-target resets (see
     // UsersService.forcePasswordReset) — same RESTRICT-onto-companies
     // shape as portal_password_resets right above.
-    'password_resets', 'portal_password_resets', 'portal_invites', 'construction_update_media', 'construction_updates',
+    'password_resets', 'portal_password_resets', 'portal_invites',
+    // v0.8.4: portal users (linked to an applicant or broker) go before
+    // brokers/applicants. The restored users.applicant_id/broker_id foreign
+    // keys are ON DELETE SET NULL, and nulling a portal user's link is
+    // refused by the v0.8.2 portal-link trigger.
+    PORTAL_USERS,
+    'construction_update_media', 'construction_updates',
     // Phase 7 rows — same never-caught-until-first-use gap as several
     // tables below: their companies_id_fkey was CASCADE in the migration
     // that first created them but schema.prisma never specified
@@ -510,15 +538,21 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
   // Single transaction so the maintenance GUC (which lets us bypass the
   // append-only triggers) and every DELETE share one connection. Generous
   // timeout because the property test leaves thousands of bookings' rows.
-  await systemPrisma.$transaction(
-    async (tx: { $executeRawUnsafe: (q: string, ...a: unknown[]) => Promise<unknown> }) => {
-      await tx.$executeRawUnsafe(`SET LOCAL app.allow_financial_mutation = 'on'`);
-      for (const t of tables) {
-        await tx.$executeRawUnsafe(`DELETE FROM ${t} WHERE company_id = $1::uuid`, companyId);
-      }
-      await tx.$executeRawUnsafe(`DELETE FROM audit_logs WHERE company_id = $1::uuid`, companyId);
-      await tx.$executeRawUnsafe(`DELETE FROM companies WHERE id = $1::uuid`, companyId);
-    },
-    { maxWait: 120_000, timeout: 300_000 },
-  );
+  const superPrisma = createSystemPrismaClient(TEST_SUPER_URL);
+  try {
+    await superPrisma.$transaction(
+      async (tx: { $executeRawUnsafe: (q: string, ...a: unknown[]) => Promise<unknown> }) => {
+        await tx.$executeRawUnsafe(`SET LOCAL app.allow_financial_mutation = 'on'`);
+        for (const t of tables) {
+          const where = t === PORTAL_USERS ? 'company_id = $1::uuid AND (applicant_id IS NOT NULL OR broker_id IS NOT NULL)' : 'company_id = $1::uuid';
+          await tx.$executeRawUnsafe(`DELETE FROM ${t === PORTAL_USERS ? 'users' : t} WHERE ${where}`, companyId);
+        }
+        await tx.$executeRawUnsafe(`DELETE FROM audit_logs WHERE company_id = $1::uuid`, companyId);
+        await tx.$executeRawUnsafe(`DELETE FROM companies WHERE id = $1::uuid`, companyId);
+      },
+      { maxWait: 120_000, timeout: 300_000 },
+    );
+  } finally {
+    await superPrisma.$disconnect();
+  }
 }

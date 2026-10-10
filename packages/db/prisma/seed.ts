@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { SYSTEM_ROLES, ROLE_PERMISSIONS, ROLE_DISPLAY_NAMES, SEED_GST_RATES, SEED_TDS_RULES } from '@openestate/shared';
 import * as argon2 from '@node-rs/argon2';
-import { syncPermissions, syncLeadStages } from './sync-permissions';
+import { syncPermissions, syncLeadStages, syncSystemRoleBaselines } from './sync-permissions';
 
 const prisma = new PrismaClient();
 
@@ -110,6 +110,10 @@ async function main() {
 
   console.log('Seeding default lead-stage pipeline...');
   await syncLeadStages(prisma);
+
+  // v0.8.4 Part I: the roles were just created from their seeds, so this
+  // records each one's baseline (nothing to add, nothing to report).
+  await syncSystemRoleBaselines(prisma);
 
   console.log('Seeding Indian master defaults...');
 

@@ -25,20 +25,77 @@ rand_hex_32() {
 # fetched plainly. Any failure stops the upgrade here, in plain English, before
 # anything is built or changed.
 checkout_ref() {
-  local src_dir="$1" ref="$2" out
+  local src_dir="$1" ref="$2" out fetched
   if out="$(cd "$src_dir" && git fetch --force --no-tags origin "+refs/tags/${ref}:refs/tags/${ref}" 2>&1)"; then
+    fetched="$(cd "$src_dir" && git rev-parse "refs/tags/${ref}^{commit}")"
     if ! out="$(cd "$src_dir" && git checkout --quiet --detach "refs/tags/${ref}" 2>&1)"; then
       die "Could not switch to version '${ref}' after downloading it. git said: ${out}. Nothing was changed and the previous release is still running. If you edited files in ${src_dir}, undo or save those edits and run the upgrade again."
     fi
-    return 0
-  fi
-  if out="$(cd "$src_dir" && git fetch --force --no-tags origin "$ref" 2>&1)"; then
+  elif out="$(cd "$src_dir" && git fetch --force --no-tags origin "$ref" 2>&1)"; then
+    fetched="$(cd "$src_dir" && git rev-parse "FETCH_HEAD^{commit}")"
     if ! out="$(cd "$src_dir" && git checkout --quiet --detach FETCH_HEAD 2>&1)"; then
       die "Could not switch to '${ref}' after downloading it. git said: ${out}. Nothing was changed and the previous release is still running. If you edited files in ${src_dir}, undo or save those edits and run the upgrade again."
     fi
-    return 0
+  else
+    die "Could not download '${ref}' from the source repository. git said: ${out}. Nothing was changed and the previous release is still running. Check that this server can reach the internet (and the remote named 'origin' in ${src_dir}) and that the version name is spelled exactly as published, then run the upgrade again."
   fi
-  die "Could not download '${ref}' from the source repository. git said: ${out}. Nothing was changed and the previous release is still running. Check that this server can reach the internet (and the remote named 'origin' in ${src_dir}) and that the version name is spelled exactly as published, then run the upgrade again."
+  # v0.8.4 Part N: what is checked out must be exactly what was downloaded.
+  local head
+  head="$(cd "$src_dir" && git rev-parse HEAD)"
+  if [ "$head" != "$fetched" ]; then
+    die "After downloading '${ref}' (commit ${fetched}), the source folder ${src_dir} is at a different commit (${head}). Nothing was built or changed and the previous release is still running. Check ${src_dir} for local changes or git hooks, then run the upgrade again."
+  fi
+  log "Deploying ${head} (${ref})"
+}
+
+# version_is_older A B: true when version A (x.y.z, optionally -suffix) is
+# older than B. A version with a suffix (0.9.0-rc1) is older than the plain
+# release of the same number, which `sort -V` gets wrong.
+version_is_older() {
+  node -e '
+    const p = (v) => { const [n, pre] = String(v).trim().split("-", 2); return { n: n.split(".").map(Number), pre }; };
+    const a = p(process.argv[1]), b = p(process.argv[2]);
+    for (let i = 0; i < 3; i++) if ((a.n[i] || 0) !== (b.n[i] || 0)) process.exit((a.n[i] || 0) < (b.n[i] || 0) ? 0 : 1);
+    if (a.pre && !b.pre) process.exit(0);
+    if (a.pre && b.pre && a.pre < b.pre) process.exit(0);
+    process.exit(1);
+  ' "$1" "$2"
+}
+
+# migrations_not_in MIGRATIONS_DIR: reads applied migration names on stdin and
+# prints each one that has no folder in MIGRATIONS_DIR.
+migrations_not_in() {
+  local dir="$1" name
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    [ -d "${dir}/${name}" ] || printf '%s\n' "$name"
+  done
+}
+
+# guard_upgrade SRC_DIR RUNNING_RELEASE_DIR APPLIED_MIGRATIONS
+#
+# v0.8.4 Part N. Returns non-zero, with a plain message on stderr, when the
+# checked-out code would be older than what runs now: an older version number,
+# or a database that already has migrations this checkout does not contain.
+# There is deliberately no override: going back means restoring a backup.
+guard_upgrade() {
+  local src="$1" running="$2" applied="$3" target current extra
+  target="$(node -p 'require(process.argv[1]).version' "${src}/apps/api/package.json")"
+  if [ -f "${running}/api/package.json" ]; then
+    current="$(node -p 'require(process.argv[1]).version' "${running}/api/package.json")"
+    if version_is_older "$target" "$current"; then
+      printf '%s\n' "This would install version ${target}, but this server runs ${current}. An upgrade cannot go back to an older version. Nothing was changed and ${current} is still running. To return to an older version, restore the backup taken before your last upgrade (restore-native.sh), or give the release tag of ${current} or newer." >&2
+      return 1
+    fi
+  fi
+  extra="$(printf '%s\n' "$applied" | migrations_not_in "${src}/packages/db/prisma/migrations")"
+  if [ -n "$extra" ]; then
+    printf '%s\n' "The database already has these changes, which version ${target} does not contain:" >&2
+    printf '  %s\n' $extra >&2
+    printf '%s\n' "Installing ${target} would run older code against a newer database. Nothing was changed and the current version is still running. Give a newer release tag that contains these changes, or restore the backup or snapshot taken before they were applied." >&2
+    return 1
+  fi
+  return 0
 }
 
 # wait_for_health URL [max_tries]
@@ -106,7 +163,35 @@ build_release() {
     mkdir -p "$release_dir"
 
     log "Deploying API as a standalone production tree..."
-    pnpm --filter @openestate/api deploy --prod "${release_dir}/api"
+    # pnpm 9 bug (seen with 9.15.0 and 9.15.9, the latest 9.x): when the deploy
+    # target is outside the workspace, `pnpm deploy` links bins a second time
+    # into the target path taken relative to the workspace root but resolved
+    # from apps/api, a stray tree such as
+    # /opt/openestate-src/apps/openestate/releases/<id>/api. It prints "Failed to
+    # create bin at <stray>/node_modules/.bin/<name>" for the dev-only tools that
+    # are not there (browserslist, webpack, vite, terser). The real release tree
+    # is not affected. Hide exactly those lines and remove the stray tree.
+    local rel stray hide tail
+    rel="$(realpath -m --relative-to="$(pwd)" "${release_dir}/api")"
+    stray="$(realpath -m "apps/api/${rel}")"
+    hide="Failed to create bin at ${stray}/node_modules/.bin/"
+    pnpm --filter @openestate/api deploy --prod "${release_dir}/api" 2>&1 \
+      | awk -v h="$hide" 'index($0, h) == 0' || exit 1
+    if [ "${rel#../}" != "$rel" ] && [ "$stray" != "$(realpath -m "${release_dir}/api")" ] && [ -d "$stray" ]; then
+      # The stray tree mirrors the path below the common ancestor, ending in
+      # this build's new release id, so nothing else can live in it. Its
+      # parents are removed only if empty (pnpm created them).
+      rm -rf "$stray"
+      tail="$rel"
+      while [ "${tail#../}" != "$tail" ]; do tail="${tail#../}"; done
+      tail="$(dirname "$tail")"
+      local dir; dir="$(dirname "$stray")"
+      while [ "$tail" != "." ]; do
+        rmdir "$dir" 2>/dev/null || break
+        dir="$(dirname "$dir")"
+        tail="$(dirname "$tail")"
+      done
+    fi
 
     # Workspace packages' built dist/ (gitignored, so pnpm deploy's
     # git-tracked-files selection skips them) copied back in at the same
@@ -162,13 +247,61 @@ build_release() {
 # Uses the same connection choices as upgrade-native.sh's run_as_superuser:
 # DB_HOST (+ PG_SUPERUSER / PG_SUPERUSER_PASSWORD) for a remote database,
 # otherwise the local `postgres` OS user over the Unix socket.
+#
+# OPENESTATE_DB_NAME overrides the database name (default openestate). A caller
+# may set PGOPTIONS (for example to make the session read-only); it is passed
+# through sudo explicitly because sudo resets the environment.
 _findings_rows() {
   # $1 = SQL. Prints rows; prints __QUERY_FAILED__ if the query could not run.
+  local db="${OPENESTATE_DB_NAME:-openestate}"
   if [ -n "${DB_HOST:-}" ]; then
-    PGPASSWORD="${PG_SUPERUSER_PASSWORD:-}" psql -h "$DB_HOST" -U "${PG_SUPERUSER:-postgres}" -d openestate -tAF ' | ' -c "$1" 2>/dev/null || echo "__QUERY_FAILED__"
+    PGPASSWORD="${PG_SUPERUSER_PASSWORD:-}" psql -h "$DB_HOST" -U "${PG_SUPERUSER:-postgres}" -d "$db" -tAF ' | ' -c "$1" 2>/dev/null || echo "__QUERY_FAILED__"
   else
-    sudo -u postgres psql -d openestate -tAF ' | ' -c "$1" 2>/dev/null || echo "__QUERY_FAILED__"
+    sudo -u postgres env PGOPTIONS="${PGOPTIONS:-}" psql -d "$db" -tAF ' | ' -c "$1" 2>/dev/null || echo "__QUERY_FAILED__"
   fi
+}
+
+# v0.8.4: every foreign key the database has not validated, with how many rows
+# point at a row that no longer exists ("orphans"). The v0.8.4 migrations add
+# the 71 restored foreign keys NOT VALID and validate each one that has no
+# orphans; a link with orphans stays NOT VALID (new and changed rows are still
+# checked) and is listed here. Read-only: it only counts. Used by
+# upgrade-native.sh after migrating and by check-foreign-keys.sh.
+UNVALIDATED_FK_SQL="SELECT c.conrelid::regclass, a.attname, c.confrelid::regclass,
+       (xpath('/row/k/text()', query_to_xml(format(
+          'SELECT count(*) AS k FROM %s x WHERE x.%I IS NOT NULL AND NOT EXISTS (SELECT 1 FROM %s p WHERE p.%I = x.%I)',
+          c.conrelid::regclass, a.attname, c.confrelid::regclass, pa.attname, a.attname), false, true, '')))[1]::text,
+       c.conname
+  FROM pg_constraint c
+  JOIN pg_attribute a  ON a.attrelid  = c.conrelid  AND a.attnum  = c.conkey[1]
+  JOIN pg_attribute pa ON pa.attrelid = c.confrelid AND pa.attnum = c.confkey[1]
+ WHERE c.contype = 'f' AND NOT c.convalidated
+ ORDER BY 1, 2"
+
+# Returns 0 if every foreign key is validated, 2 if some are not, 1 if the
+# query could not run. Never changes anything.
+print_unvalidated_foreign_keys() {
+  local rows
+  rows="$(_findings_rows "$UNVALIDATED_FK_SQL")"
+  if [ "$rows" = "__QUERY_FAILED__" ]; then
+    warn "Could not check for foreign keys that are not validated (non-fatal). Run deploy/native/check-foreign-keys.sh later."
+    return 1
+  fi
+  if [ -z "$rows" ]; then
+    log "Foreign keys: all validated."
+    return 0
+  fi
+  warn "================================================================"
+  warn "FINDING: these links between tables point, in some existing rows, at"
+  warn "rows that no longer exist (\"orphans\"). New and changed rows are"
+  warn "checked, but the database could not confirm the existing rows, so the"
+  warn "link is marked NOT VALID. Nothing was changed or deleted, and the"
+  warn "application works as before. Keep this list: fixing those rows needs a"
+  warn "reviewed procedure, which is not part of this release."
+  warn "  table | column | points to | orphan rows | constraint"
+  printf '%s\n' "$rows" | while IFS= read -r line; do warn "  ${line}"; done
+  warn "================================================================"
+  return 2
 }
 
 print_post_migrate_findings() {
@@ -182,20 +315,41 @@ print_post_migrate_findings() {
   # isSystem + slug), so an admin should know it exists.
   local fake_sql="SELECT r.id, r.company_id, r.name, (SELECT count(*) FROM users u WHERE u.role_id = r.id)
                     FROM roles r WHERE r.slug = 'super_admin' AND NOT r.is_system ORDER BY r.created_at"
-  local rows fake
+  # v0.8.4: only superusers should be able to use the append-only escape
+  # hatch. Any non-superuser role that is a member of openestate_maintenance
+  # (directly or through another role) can, so list them. No script grants
+  # this membership; a row here means someone did it by hand.
+  local maint_sql="SELECT rolname, rolcanlogin FROM pg_roles
+                    WHERE NOT rolsuper AND rolname <> 'openestate_maintenance' AND rolname !~ '^pg_'
+                      AND pg_has_role(oid, 'openestate_maintenance', 'MEMBER') ORDER BY rolname"
+  local rows fake maint
   rows="$(_findings_rows "$portal_sql")"
   fake="$(_findings_rows "$fake_sql")"
+  maint="$(_findings_rows "$maint_sql")"
 
-  if [ "$rows" = "__QUERY_FAILED__" ] || [ "$fake" = "__QUERY_FAILED__" ]; then
+  if [ "$rows" = "__QUERY_FAILED__" ] || [ "$fake" = "__QUERY_FAILED__" ] || [ "$maint" = "__QUERY_FAILED__" ]; then
     warn "Could not run the post-migration checks (non-fatal). Run them by hand in psql against the openestate database:"
     warn "  unlinked portal-role accounts: SELECT u.id, u.email, r.slug FROM users u JOIN roles r ON r.id=u.role_id WHERE r.is_portal AND u.applicant_id IS NULL AND u.broker_id IS NULL;"
     warn "  non-system roles named super_admin: SELECT id, company_id, name FROM roles WHERE slug='super_admin' AND NOT is_system;"
+    warn "  non-superuser members of openestate_maintenance: SELECT rolname FROM pg_roles WHERE NOT rolsuper AND rolname <> 'openestate_maintenance' AND pg_has_role(oid, 'openestate_maintenance', 'MEMBER');"
     return 0
   fi
 
-  if [ -z "$rows" ] && [ -z "$fake" ]; then
-    log "Post-migration checks: no unlinked portal-role accounts and no non-system 'super_admin' roles found."
+  if [ -z "$rows" ] && [ -z "$fake" ] && [ -z "$maint" ]; then
+    log "Post-migration checks: no unlinked portal-role accounts, no non-system 'super_admin' roles, and no non-superuser members of openestate_maintenance found."
     return 0
+  fi
+  if [ -n "$maint" ]; then
+    warn "================================================================"
+    warn "FINDING: these database roles are members of openestate_maintenance,"
+    warn "so they can change or delete append-only financial rows (ledger,"
+    warn "receipt allocations, TDS, interest, commission ledger). Only the"
+    warn "postgres superuser should be able to. No OpenEstate script grants"
+    warn "this; remove it unless it was added on purpose:"
+    warn "  REVOKE openestate_maintenance FROM <role>;"
+    warn "  role | can log in"
+    printf '%s\n' "$maint" | while IFS= read -r line; do warn "  ${line}"; done
+    warn "================================================================"
   fi
   if [ -n "$rows" ]; then
     warn "================================================================"

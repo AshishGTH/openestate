@@ -10,6 +10,7 @@
     "lint": "eslint src",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "test:serial": "vitest run --config vitest.serial.config.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "seed:portal-demo": "tsx scripts/portal-demo-seed.ts",
     "rotate-plugin-secrets": "tsx scripts/rotate-plugin-secrets.ts"

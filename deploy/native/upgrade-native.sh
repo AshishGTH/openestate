@@ -59,16 +59,43 @@ done
 [ -L "$CURRENT_LINK" ] || die "${CURRENT_LINK} is not a symlink — is OpenEstate installed via install-native.sh?"
 PREVIOUS_RELEASE="$(readlink -f "$CURRENT_LINK")"
 
+if [ -n "$REF" ]; then
+  log "Checking out ${REF}..."
+  checkout_ref "$SRC_DIR" "$REF"
+fi
+
+# v0.8.4 Part N: refuse code older than what runs now (version, or migrations
+# the database has that this checkout lacks), before anything is backed up,
+# built or changed. Reads _prisma_migrations as the same superuser the
+# migrate step uses; psql runs from / so it never stats the checkout.
+applied_migrations() {
+  local sql="SELECT migration_name FROM _prisma_migrations WHERE finished_at IS NOT NULL AND rolled_back_at IS NULL ORDER BY 1"
+  if [ -n "$DB_HOST" ]; then
+    (cd / && PGPASSWORD="${PG_SUPERUSER_PASSWORD:?Set PG_SUPERUSER_PASSWORD when using --db-host}" \
+      psql -h "$DB_HOST" -U "${PG_SUPERUSER:-postgres}" -d openestate -AtX -v ON_ERROR_STOP=1 -c "$sql")
+  else
+    (cd / && sudo -u postgres psql -d openestate -AtX -v ON_ERROR_STOP=1 -c "$sql")
+  fi
+}
+APPLIED_MIGRATIONS="$(applied_migrations)" \
+  || die "Could not read the list of database changes already applied. Nothing was changed and the previous release is still running."
+if ! guard_upgrade "$SRC_DIR" "$PREVIOUS_RELEASE" "$APPLIED_MIGRATIONS"; then
+  # Put the source folder back on the running release's commit (the release
+  # directory is named <timestamp>-<short sha>), so the next run starts clean.
+  RUNNING_SHA="${PREVIOUS_RELEASE##*-}"
+  if (cd "$SRC_DIR" && git checkout --quiet --detach "$RUNNING_SHA" 2>/dev/null); then
+    warn "The source folder ${SRC_DIR} was returned to the running release (${RUNNING_SHA})."
+  else
+    warn "The source folder ${SRC_DIR} is still on the refused version; the next upgrade will fetch the version you name."
+  fi
+  exit 1
+fi
+
 if [ "$NO_BACKUP" -eq 1 ]; then
   warn "Skipping pre-upgrade backup (--no-backup)."
 else
   log "Taking a pre-upgrade backup..."
   "${SCRIPT_DIR}/backup-native.sh" --env-file "$ENV_FILE"
-fi
-
-if [ -n "$REF" ]; then
-  log "Checking out ${REF}..."
-  checkout_ref "$SRC_DIR" "$REF"
 fi
 
 log "Building new release..."
@@ -138,6 +165,19 @@ log "Running database migrations (before cutover — old release keeps running a
 MIGRATE_LOG="$(mktemp)"
 if ! run_as_superuser "${RELEASE_DIR}/api/node_modules/.bin/prisma" migrate deploy \
   --schema "${RELEASE_DIR}/api/packages/db/prisma/schema.prisma" 2>&1 | tee "$MIGRATE_LOG"; then
+  # A failed migration file is rolled back by PostgreSQL (each file runs as
+  # one transaction) but Prisma records it as failed, and every later
+  # `migrate deploy` then stops with P3009 until it is marked rolled back.
+  if grep -qE "P3009|P3018|failed" "$MIGRATE_LOG"; then
+    warn "Prisma has recorded a migration as failed (nothing from it was applied)."
+    warn "Before you retry this upgrade, mark it rolled back with:"
+    # Same database name as run_as_superuser above, which is what migrated.
+    if [ -n "$DB_HOST" ]; then
+      warn "  psql -h $DB_HOST -U ${PG_SUPERUSER:-postgres} -d openestate -c \"UPDATE _prisma_migrations SET rolled_back_at = now() WHERE finished_at IS NULL AND rolled_back_at IS NULL\""
+    else
+      warn "  sudo -u postgres psql -d openestate -c \"UPDATE _prisma_migrations SET rolled_back_at = now() WHERE finished_at IS NULL AND rolled_back_at IS NULL\""
+    fi
+  fi
   if grep -qi "lock timeout" "$MIGRATE_LOG"; then
     rm -f "$MIGRATE_LOG"
     die "Migration timed out waiting for a table lock (current limit: ${MIGRATION_LOCK_TIMEOUT}). This means another process — almost always the PREVIOUS release, still serving live traffic — held a conflicting lock on a table this migration needs to change for longer than the timeout. Previous release (${PREVIOUS_RELEASE}) is untouched and still running; nothing is broken. What to do: retry this upgrade during a quieter traffic period, or raise the limit for one run: MIGRATION_LOCK_TIMEOUT=60s sudo ./upgrade-native.sh"
@@ -150,6 +190,9 @@ rm -f "$MIGRATE_LOG"
 # Read-only, never fatal: lists pre-existing accounts the v0.8.2 trigger
 # can't fix retroactively. See lib.sh.
 print_post_migrate_findings || true
+# v0.8.4: lists any foreign key left NOT VALID because existing rows point at
+# rows that no longer exist. Read-only, never fatal. See lib.sh.
+print_unvalidated_foreign_keys || true
 
 # Schema migrations don't cover PERMISSIONS constants — those are
 # application-level rows, not a Prisma model change. seed.ts's own

@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['src/**/*.spec.ts', 'test/**/*.test.ts'],
+    // Run separately, after every other suite: see vitest.serial.config.ts.
+    exclude: ['test/**/*.serial.test.ts', '**/node_modules/**'],
     environment: 'node',
     // ~50 concurrently-forked test files (this suite plus packages/db's own)
     // all share ONE IP-keyed default throttle bucket (RedisThrottlerStorage

@@ -8,7 +8,10 @@
  * hand-building fixtures with a dozen curl calls before every session.
  *
  * Usage (from apps/api, with DATABASE_URL / DATABASE_URL_SYSTEM pointed
- * at the target Postgres — see README.md's "Local development" section):
+ * at the target Postgres — see README.md's "Local development" section —
+ * and DATABASE_URL_MAINTENANCE pointed at a SUPERUSER login on the same
+ * database: the reset step removes ledger rows through the append-only
+ * escape hatch, which since v0.8.4 only a superuser login can use):
  *
  *   pnpm --filter @openestate/api run seed:portal-demo
  *
@@ -160,8 +163,11 @@ async function reset(systemPrisma: ReturnType<typeof createSystemPrismaClient>, 
 async function main() {
   const dbUrl = process.env.DATABASE_URL;
   const systemUrl = process.env.DATABASE_URL_SYSTEM;
-  if (!dbUrl || !systemUrl) {
-    throw new Error('DATABASE_URL and DATABASE_URL_SYSTEM must be set (see README.md — Local development).');
+  const maintenanceUrl = process.env.DATABASE_URL_MAINTENANCE;
+  if (!dbUrl || !systemUrl || !maintenanceUrl) {
+    throw new Error(
+      'DATABASE_URL, DATABASE_URL_SYSTEM and DATABASE_URL_MAINTENANCE (a superuser login, for the reset step) must be set (see README.md — Local development).',
+    );
   }
 
   const tenantPrisma = createTenantPrismaClient(dbUrl);
@@ -178,7 +184,12 @@ async function main() {
   const admin = await systemPrisma.user.findFirstOrThrow({ where: { companyId, email: 'admin@demo-realty.com' } });
 
   console.log('Resetting any previous portal-demo fixture…');
-  await reset(systemPrisma, companyId);
+  const maintenancePrisma = createSystemPrismaClient(maintenanceUrl);
+  try {
+    await reset(maintenancePrisma, companyId);
+  } finally {
+    await maintenancePrisma.$disconnect();
+  }
 
   console.log('Creating fresh portal-demo fixture…');
   const area = await systemPrisma.areaLocation.create({ data: { companyId, name: AREA_NAME, stateCode: '09' } });

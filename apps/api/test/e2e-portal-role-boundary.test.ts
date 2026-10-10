@@ -258,7 +258,9 @@ describeIf('v0.8.2 portal-role boundary', () => {
       );
       expect(fn.prosecdef).toBe(true);
       expect(fn.rolbypassrls).toBe(true);
-      expect(fn.rolname).toBe('openestate_system');
+      // v0.8.4: owned by a role nobody logs in as (it was openestate_system,
+      // which could then drop or alter it). See portal-guard-owner.test.ts.
+      expect(fn.rolname).toBe('openestate_guard_owner');
       expect(fn.proconfig).toContain('search_path=pg_catalog, public');
       const [trg] = await systemPrisma.$queryRawUnsafe(
         `SELECT pg_get_triggerdef(oid) AS def FROM pg_trigger WHERE tgname = 'users_forbid_unlinked_portal_role'`,

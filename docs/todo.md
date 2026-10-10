@@ -9,18 +9,39 @@ they're expected to land. Each entry should say *what*, *why deferred*, and
 Each is written up, with its fix and tests, in
 [`docs/testing/v0.8.3-plan.md`](testing/v0.8.3-plan.md) (the v0.8.4 parts):
 
-- **Part M:** the API listens on every network interface (`0.0.0.0:3000`), so
-  nginx can be bypassed and a client can choose its own IP address; make it listen
-  on loopback and trust forwarded headers only from the local proxy. Medium.
-- **Part N:** `upgrade-native.sh` must refuse to deploy code older than the
-  database, and confirm the checkout equals what was fetched. The v0.8.2 script,
-  given a branch name, installs a stale local branch; until Part N ships the rule
-  is "give a release tag".
-- **Part O:** a CI job that upgrades a populated database from the previous
-  release tag with that release's own `upgrade-native.sh`. Today's job starts from
-  v0.1.2 and does not prove the previous-release path.
-- **Part P:** investigate the "Failed to create bin" build warnings (including
-  `prisma`); see the two older entries about them further down.
+- **Parts M, N, O, P and I: built on the v0.8.4 branch (unreleased, 2026-10-10).**
+  M: the API listens on 127.0.0.1 (HOST to change) and trusts only loopback
+  proxies. N: the upgrade refuses an older version or a database ahead of the
+  checkout. O: CI upgrades from the previous release tag with its own script
+  (clean, orphan, lock-timeout). P: pnpm deploy's stray bin warnings hidden and
+  the stray tree removed. I: system-role permission sync with a per-role seed
+  baseline. Still to do: the VM rehearsal from `v0.8.3-clean`.
+
+## Deferred from v0.8.4 items A and G (architect decisions, 2026-10-10)
+
+- **A "reschedule an installment with interest charged" flow, after the CA
+  review.** v0.8.4 restores `ledger_entries.installment_id`,
+  `interest_accruals.installment_id` and `interest_accruals.interest_rule_id`
+  as `ON DELETE RESTRICT`, so a payment-plan edit that would delete an unpaid
+  installment with interest already charged is refused with a plain message
+  instead of leaving dangling pointers. Staff then have no way to reschedule
+  such an installment. The right accounting treatment (waive, carry the interest
+  to the new installment, or something else) needs the CA review first.
+- **No orphan-fix script.** v0.8.4 never changes or deletes rows: a foreign key
+  whose column has orphans is added `NOT VALID` and reported. Fixing orphans in
+  append-only tables needs the escape hatch (superuser only since v0.8.4) and a
+  reviewed procedure; neither is built.
+- **Indexes on the 70 unindexed foreign-key columns, v0.9.** Not needed for
+  correctness or for validating the constraints (each check is a primary-key
+  lookup on the parent). They matter only when a parent row is deleted or its key
+  changes, which for most of these parents (users, masters) is rare.
+- **Done on the v0.8.4 branch (unreleased):** Parts G, A and B, and the
+  `forbid_unlinked_portal_role()` ownership fix (now owned by the NOLOGIN role
+  `openestate_guard_owner`). M, N, O, P and I followed (see the top of this file).
+- **A restored foreign key can be left NOT VALID on a real install** (orphan
+  rows). The upgrade prints them and `deploy/native/check-foreign-keys.sh` lists
+  them; nothing resolves them yet (see "No orphan-fix script" above). Check the
+  verification VM with the scan before releasing.
 
 ## CVE for GHSA-gq5m-m6q6-x32p is pending
 
@@ -88,6 +109,65 @@ them for the user who can't do them. Candidate UI-audit findings:
    refusal can't be exercised from the UI for such an account.
 6. A refused save shows both a toast and an inline banner at the top of the
    Edit page; fine, but worth keeping consistent across forms.
+
+## Erasure
+
+- **Erasure: CLI hard-delete tool planned (item Q, target v0.9).** Questions
+  for the CA and DPDP lawyer: legal retention periods for financial records, and
+  when anonymising vs deleting is appropriate.
+- Since v0.8.4, an applicant or broker who has a portal account cannot be
+  hard-deleted through the app (owner accepted, 2026-10-10); item Q is the
+  server-side way.
+
+### Item Q plan: `deploy/native/erase.sh` (v0.9; recorded, not built)
+
+**Shape.** A shell script run on the server; the database part runs as the
+PostgreSQL superuser (`sudo -u postgres psql`, or `psql -h` with `--db-host`)
+in ONE transaction with `SET LOCAL app.allow_financial_mutation = 'on'`. No API
+route, no app code. The target is named by UUID together with its company; the
+script first checks the target belongs to that company. Every statement filters
+by that company explicitly (the superuser bypasses RLS).
+
+**Decisions (architect and owner, 2026-10-10).**
+- **Three modes.**
+  - Default: REFUSE a target that has financial records (bookings, receipts,
+    ledger, TDS, commissions, refunds, NOCs), listing them.
+  - `--anonymise`: blank name, phone, email, PAN, addresses and document files;
+    keep the ledger, bookings and amounts.
+  - `--include-financial`: full delete, with a warning about tax-record
+    retention and changed historical and GST reports.
+- **Rows on other people's records** (a co-applicant row on someone else's
+  booking; a broker attributed on other customers' bookings;
+  `transfers.from_booking_id`): refused by default, listing the affected
+  bookings; allowed only with `--include-financial`.
+- **Audit log:** rows about the target are kept, with personal fields in
+  before/after blanked.
+- **Erasure log** keeps the target UUID (with who ran it, when, scope and
+  counts per table; no names or phone numbers), so erasure can be re-applied
+  after a restore from an older backup.
+- **With `--include-financial`,** a unit whose current booking is deleted goes
+  back to AVAILABLE, with a unit status-change record.
+- **Build scope 1 (one applicant or broker) first;** scope 2 (a whole company)
+  after.
+
+**Always:** dry run by default (per-table counts and the files on disk under
+`UPLOADS_DIR` that would go); a real run needs `--confirm` plus the target UUID
+typed at a terminal (refused without one); `backup-native.sh` runs first and a
+failed backup stops everything; the portal user is deleted before its applicant
+or broker (the restored `users.applicant_id`/`broker_id` SET NULL would trip the
+portal-link trigger); files are deleted after the commit and any that could not
+be removed are reported.
+
+**Docs:** backups keep the data until they age out, and restoring one brings
+erased data back (re-run from the erasure log); consult a CA and lawyer; no
+claim of legal compliance.
+
+**Tests:** dry run changes nothing; a real run removes exactly the listed rows
+and files and nothing else (another applicant, another company and the balances
+of untouched bookings unchanged); a financial target is refused without a flag;
+`--anonymise` keeps every amount; the app and system roles cannot run it; no
+typed confirmation, no run; a failed backup deletes nothing. Every refusal
+mutation-checked.
 
 ## `Failed to create bin ... ENOENT` warnings during upgrade builds
 

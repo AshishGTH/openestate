@@ -1,5 +1,5 @@
 import { PrismaClient, Prisma } from '@prisma/client';
-import { ALL_PERMISSIONS, SYSTEM_ROLES, DEFAULT_LEAD_STAGES } from '@openestate/shared';
+import { ALL_PERMISSIONS, SYSTEM_ROLES, DEFAULT_LEAD_STAGES, ROLE_PERMISSIONS } from '@openestate/shared';
 
 /**
  * True when `err` is Prisma's foreign-key-violation error (P2003). Both
@@ -280,6 +280,112 @@ export async function stripStaffPermissionsFromPortalRoles(
   return { removed, roles: byRole.size };
 }
 
+/**
+ * v0.8.4 Part I: adds permissions newly added to a system role's seed, never
+ * anything an admin removed. The sync never revokes.
+ *
+ * For each system role other than super_admin (company_admin, sales_manager,
+ * sales_executive, accounts, customer, broker), `role_seed_baselines` holds
+ * the seed it was last synced to:
+ *  - No baseline (every install before v0.8.4, on its first upgrade): record
+ *    the current seed as the baseline and add NOTHING. Differences between
+ *    the role and its seed are returned in `differences` for the upgrade to
+ *    print; an admin decides in the Roles screen.
+ *  - Baseline: add the keys in the seed that are neither in the baseline nor
+ *    held (new to the seed since the last sync), then set the baseline to the
+ *    seed. A key in the baseline that the role lacks was removed by an admin
+ *    and stays removed. Keys an admin added are never touched, and keys
+ *    dropped from the seed are never revoked: a release that must remove a
+ *    permission ships its own migration (CLAUDE.md).
+ * Each role that gains keys gets one ROLE_PERMS_CHANGED audit row (no actor)
+ * and its users' sessions end, in the same transaction.
+ *
+ * Known edge: a key removed from the seed in one release and put back in a
+ * later one counts as new and is added again, even if an admin had removed it.
+ *
+ * `scope.companyId` exists for tests; the upgrade runs it unscoped.
+ */
+export async function syncSystemRoleBaselines(
+  client: PrismaClient = prisma,
+  scope: { companyId?: string } = {},
+): Promise<{ added: number; rolesChanged: number; baselined: number; differences: string[]; skipped: number }> {
+  const slugs = (Object.keys(ROLE_PERMISSIONS) as Array<keyof typeof ROLE_PERMISSIONS>).filter(
+    (s) => s !== SYSTEM_ROLES.SUPER_ADMIN,
+  );
+  const roles = await client.role.findMany({
+    where: { isSystem: true, slug: { in: slugs }, ...(scope.companyId ? { companyId: scope.companyId } : {}) },
+    select: { id: true, companyId: true, slug: true },
+    orderBy: [{ companyId: 'asc' }, { slug: 'asc' }],
+  });
+  const keyToId = new Map((await client.permission.findMany({ select: { id: true, key: true } })).map((p) => [p.key, p.id]));
+
+  const out = { added: 0, rolesChanged: 0, baselined: 0, differences: [] as string[], skipped: 0 };
+  for (const role of roles) {
+    const seed = [...new Set(ROLE_PERMISSIONS[role.slug as keyof typeof ROLE_PERMISSIONS])].sort();
+    try {
+      const held = new Set(
+        (
+          await client.rolePermission.findMany({ where: { roleId: role.id }, select: { permission: { select: { key: true } } } })
+        ).map((rp) => rp.permission.key),
+      );
+      const base = await client.roleSeedBaseline.findUnique({ where: { roleId: role.id } });
+      if (!base) {
+        await client.roleSeedBaseline.create({ data: { roleId: role.id, permissionKeys: seed } });
+        out.baselined++;
+        const missing = seed.filter((k) => !held.has(k));
+        const extra = [...held].filter((k) => !seed.includes(k)).sort();
+        if (missing.length || extra.length) {
+          out.differences.push(
+            `${role.slug} (company ${role.companyId}): ` +
+              [missing.length ? `lacks ${missing.length} seeded: ${missing.join(', ')}` : '', extra.length ? `has ${extra.length} beyond the seed: ${extra.join(', ')}` : '']
+                .filter(Boolean)
+                .join('; '),
+          );
+        }
+        continue;
+      }
+      const baseline = new Set(base.permissionKeys);
+      const toAdd = seed.filter((k) => !baseline.has(k) && !held.has(k) && keyToId.has(k));
+      await client.$transaction([
+        ...(toAdd.length
+          ? [
+              client.rolePermission.createMany({
+                data: toAdd.map((k) => ({ roleId: role.id, permissionId: keyToId.get(k)! })),
+                skipDuplicates: true,
+              }),
+              // Ends the role's users' sessions (see syncSuperAdminPermissions).
+              client.$executeRaw`UPDATE users SET authz_version = authz_version + 1 WHERE role_id = ${role.id}::uuid`,
+              client.auditLog.create({
+                data: {
+                  companyId: role.companyId,
+                  userId: null,
+                  entityType: 'Role',
+                  entityId: role.id,
+                  action: 'ROLE_PERMS_CHANGED',
+                  after: { added: toAdd, surface: 'upgrade' },
+                },
+              }),
+            ]
+          : []),
+        client.roleSeedBaseline.update({ where: { roleId: role.id }, data: { permissionKeys: seed, syncedAt: new Date() } }),
+      ]);
+      if (toAdd.length) {
+        out.added += toAdd.length;
+        out.rolesChanged++;
+        console.log(`System role "${role.slug}" (company ${role.companyId}): added ${toAdd.join(', ')}`);
+      }
+    } catch (err) {
+      if (isForeignKeyViolation(err) || (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2025')) {
+        out.skipped++;
+        console.warn(`syncSystemRoleBaselines: skipped role ${role.id} (company ${role.companyId}) — it vanished mid-sync.`);
+        continue;
+      }
+      throw err;
+    }
+  }
+  return out;
+}
+
 // Exit codes this CLI entrypoint uses, inspected by
 // deploy/native/upgrade-native.sh (see its own comment at the call site):
 //   0 — clean, nothing skipped.
@@ -327,7 +433,29 @@ if (require.main === module) {
         console.log('');
       }
 
-      const totalSkipped = superAdminSkipped + leadStagesSkipped;
+      const roles = await syncSystemRoleBaselines();
+      if (roles.added > 0) {
+        console.log(`System roles: added ${roles.added} newly seeded permission(s) to ${roles.rolesChanged} role(s) (listed above, recorded in the audit log).`);
+      } else {
+        console.log('System roles: no newly seeded permissions to add.');
+      }
+      if (roles.baselined > 0) {
+        console.log(`System roles: recorded a seed baseline for ${roles.baselined} role(s) (nothing was added for them this time).`);
+      }
+      if (roles.differences.length > 0) {
+        console.log('');
+        console.log('='.repeat(72));
+        console.log('SYSTEM ROLES THAT DIFFER FROM THEIR DEFAULT PERMISSIONS (nothing was changed):');
+        for (const d of roles.differences) console.log(`  ${d}`);
+        console.log(
+          'Review these in Admin -> Roles. Later upgrades add only permissions that are new to a role; ' +
+            'anything an admin removed stays removed.',
+        );
+        console.log('='.repeat(72));
+        console.log('');
+      }
+
+      const totalSkipped = superAdminSkipped + leadStagesSkipped + roles.skipped;
       if (totalSkipped > 0) {
         console.error('');
         console.error('='.repeat(72));
@@ -336,7 +464,8 @@ if (require.main === module) {
         );
         console.error(
           `${superAdminSkipped} super_admin role(s), ${leadStagesSkipped} compan${leadStagesSkipped === 1 ? 'y' : 'ies'} ` +
-            'for lead stages. This should be near-impossible in production (companies ' +
+            `for lead stages, ${roles.skipped} system role(s) for seed baselines. ` +
+            'This should be near-impossible in production (companies ' +
             'are never hard-deleted through the app) — investigate before assuming this ' +
             'is routine, then re-run this sync once resolved.',
         );
