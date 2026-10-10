@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
 import { HealthModule } from './health/health.module';
+import { ForeignKeyRefusalFilter } from './common/filters/foreign-key-refusal.filter';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
@@ -200,6 +201,10 @@ import { LOG_REDACTION_PATHS } from './common/logger/redaction';
     // AND a first attempt at a Guard using enterWith (context was lost
     // across prisma.$transaction()'s internal async boundary).
     { provide: APP_INTERCEPTOR, useClass: TenantContextInterceptor },
+    // v0.8.4: a plain 409 for the three ON DELETE RESTRICT foreign keys
+    // (installment with interest charged, interest rule in use). Every
+    // other error is passed to Nest's default handling unchanged.
+    { provide: APP_FILTER, useClass: ForeignKeyRefusalFilter },
   ],
 })
 export class AppModule {}

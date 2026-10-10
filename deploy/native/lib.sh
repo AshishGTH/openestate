@@ -162,13 +162,61 @@ build_release() {
 # Uses the same connection choices as upgrade-native.sh's run_as_superuser:
 # DB_HOST (+ PG_SUPERUSER / PG_SUPERUSER_PASSWORD) for a remote database,
 # otherwise the local `postgres` OS user over the Unix socket.
+#
+# OPENESTATE_DB_NAME overrides the database name (default openestate). A caller
+# may set PGOPTIONS (for example to make the session read-only); it is passed
+# through sudo explicitly because sudo resets the environment.
 _findings_rows() {
   # $1 = SQL. Prints rows; prints __QUERY_FAILED__ if the query could not run.
+  local db="${OPENESTATE_DB_NAME:-openestate}"
   if [ -n "${DB_HOST:-}" ]; then
-    PGPASSWORD="${PG_SUPERUSER_PASSWORD:-}" psql -h "$DB_HOST" -U "${PG_SUPERUSER:-postgres}" -d openestate -tAF ' | ' -c "$1" 2>/dev/null || echo "__QUERY_FAILED__"
+    PGPASSWORD="${PG_SUPERUSER_PASSWORD:-}" psql -h "$DB_HOST" -U "${PG_SUPERUSER:-postgres}" -d "$db" -tAF ' | ' -c "$1" 2>/dev/null || echo "__QUERY_FAILED__"
   else
-    sudo -u postgres psql -d openestate -tAF ' | ' -c "$1" 2>/dev/null || echo "__QUERY_FAILED__"
+    sudo -u postgres env PGOPTIONS="${PGOPTIONS:-}" psql -d "$db" -tAF ' | ' -c "$1" 2>/dev/null || echo "__QUERY_FAILED__"
   fi
+}
+
+# v0.8.4: every foreign key the database has not validated, with how many rows
+# point at a row that no longer exists ("orphans"). The v0.8.4 migrations add
+# the 71 restored foreign keys NOT VALID and validate each one that has no
+# orphans; a link with orphans stays NOT VALID (new and changed rows are still
+# checked) and is listed here. Read-only: it only counts. Used by
+# upgrade-native.sh after migrating and by check-foreign-keys.sh.
+UNVALIDATED_FK_SQL="SELECT c.conrelid::regclass, a.attname, c.confrelid::regclass,
+       (xpath('/row/k/text()', query_to_xml(format(
+          'SELECT count(*) AS k FROM %s x WHERE x.%I IS NOT NULL AND NOT EXISTS (SELECT 1 FROM %s p WHERE p.%I = x.%I)',
+          c.conrelid::regclass, a.attname, c.confrelid::regclass, pa.attname, a.attname), false, true, '')))[1]::text,
+       c.conname
+  FROM pg_constraint c
+  JOIN pg_attribute a  ON a.attrelid  = c.conrelid  AND a.attnum  = c.conkey[1]
+  JOIN pg_attribute pa ON pa.attrelid = c.confrelid AND pa.attnum = c.confkey[1]
+ WHERE c.contype = 'f' AND NOT c.convalidated
+ ORDER BY 1, 2"
+
+# Returns 0 if every foreign key is validated, 2 if some are not, 1 if the
+# query could not run. Never changes anything.
+print_unvalidated_foreign_keys() {
+  local rows
+  rows="$(_findings_rows "$UNVALIDATED_FK_SQL")"
+  if [ "$rows" = "__QUERY_FAILED__" ]; then
+    warn "Could not check for foreign keys that are not validated (non-fatal). Run deploy/native/check-foreign-keys.sh later."
+    return 1
+  fi
+  if [ -z "$rows" ]; then
+    log "Foreign keys: all validated."
+    return 0
+  fi
+  warn "================================================================"
+  warn "FINDING: these links between tables point, in some existing rows, at"
+  warn "rows that no longer exist (\"orphans\"). New and changed rows are"
+  warn "checked, but the database could not confirm the existing rows, so the"
+  warn "link is marked NOT VALID. Nothing was changed or deleted, and the"
+  warn "application works as before. Keep this list: fixing those rows needs a"
+  warn "reviewed procedure, which is not part of this release."
+  warn "  table | column | points to | orphan rows | constraint"
+  printf '%s\n' "$rows" | while IFS= read -r line; do warn "  ${line}"; done
+  warn "================================================================"
+  return 2
 }
 
 print_post_migrate_findings() {

@@ -73,12 +73,18 @@ log "Dropping and recreating '${DB_NAME}'..."
 psql_admin -c "DROP DATABASE IF EXISTS ${DB_NAME}" postgres
 psql_admin -c "CREATE DATABASE ${DB_NAME}" postgres
 
+HOST_ARGS=()
+[ -n "$PG_HOST" ] && HOST_ARGS=(--host "$PG_HOST" --admin-user "$PG_ADMIN_USER")
+
+# Roles are not part of the dump, but the dump refers to them (owners and
+# grants), so on a fresh server they must exist before it is loaded.
+log "Creating the database roles the dump refers to..."
+"${SCRIPT_DIR}/setup-database.sh" --db "$DB_NAME" --env-file "$ENV_FILE" "${HOST_ARGS[@]}"
+
 log "Restoring database from ${BUNDLE_DIR}/db.sql..."
 psql_admin -d "$DB_NAME" -f "${BUNDLE_DIR}/db.sql"
 
 log "Re-applying role setup (roles/grants are not part of the dump)..."
-HOST_ARGS=()
-[ -n "$PG_HOST" ] && HOST_ARGS=(--host "$PG_HOST" --admin-user "$PG_ADMIN_USER")
 "${SCRIPT_DIR}/setup-database.sh" --db "$DB_NAME" --env-file "$ENV_FILE" "${HOST_ARGS[@]}"
 
 if [ -f "${BUNDLE_DIR}/uploads.tar.gz" ]; then

@@ -25,6 +25,9 @@ import { ConsoleCommunicationProvider, type CommunicationProvider } from '../../
  * the append-only escape hatch (see cleanupCompany). Same default as
  * scripts/test-setup.sh writes to .test-env.
  */
+/** cleanupCompany's marker for "the company's portal users only". */
+const PORTAL_USERS = 'users (portal)';
+
 export const TEST_SUPER_URL =
   process.env.DATABASE_URL_TEST_SUPER ??
   'postgresql://openestate_super:test_super_pass@localhost:5432/openestate_test';
@@ -439,7 +442,13 @@ export async function cleanupCompany(_systemPrisma: any, companyId: string): Pro
     // password_resets: admin-triggered staff-target resets (see
     // UsersService.forcePasswordReset) — same RESTRICT-onto-companies
     // shape as portal_password_resets right above.
-    'password_resets', 'portal_password_resets', 'portal_invites', 'construction_update_media', 'construction_updates',
+    'password_resets', 'portal_password_resets', 'portal_invites',
+    // v0.8.4: portal users (linked to an applicant or broker) go before
+    // brokers/applicants. The restored users.applicant_id/broker_id foreign
+    // keys are ON DELETE SET NULL, and nulling a portal user's link is
+    // refused by the v0.8.2 portal-link trigger.
+    PORTAL_USERS,
+    'construction_update_media', 'construction_updates',
     // Phase 7 rows — same never-caught-until-first-use gap as several
     // tables below: their companies_id_fkey was CASCADE in the migration
     // that first created them but schema.prisma never specified
@@ -535,7 +544,8 @@ export async function cleanupCompany(_systemPrisma: any, companyId: string): Pro
       async (tx: { $executeRawUnsafe: (q: string, ...a: unknown[]) => Promise<unknown> }) => {
         await tx.$executeRawUnsafe(`SET LOCAL app.allow_financial_mutation = 'on'`);
         for (const t of tables) {
-          await tx.$executeRawUnsafe(`DELETE FROM ${t} WHERE company_id = $1::uuid`, companyId);
+          const where = t === PORTAL_USERS ? 'company_id = $1::uuid AND (applicant_id IS NOT NULL OR broker_id IS NOT NULL)' : 'company_id = $1::uuid';
+          await tx.$executeRawUnsafe(`DELETE FROM ${t === PORTAL_USERS ? 'users' : t} WHERE ${where}`, companyId);
         }
         await tx.$executeRawUnsafe(`DELETE FROM audit_logs WHERE company_id = $1::uuid`, companyId);
         await tx.$executeRawUnsafe(`DELETE FROM companies WHERE id = $1::uuid`, companyId);

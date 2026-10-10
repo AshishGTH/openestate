@@ -138,6 +138,14 @@ log "Running database migrations (before cutover — old release keeps running a
 MIGRATE_LOG="$(mktemp)"
 if ! run_as_superuser "${RELEASE_DIR}/api/node_modules/.bin/prisma" migrate deploy \
   --schema "${RELEASE_DIR}/api/packages/db/prisma/schema.prisma" 2>&1 | tee "$MIGRATE_LOG"; then
+  # A failed migration file is rolled back by PostgreSQL (each file runs as
+  # one transaction) but Prisma records it as failed, and every later
+  # `migrate deploy` then stops with P3009 until it is marked rolled back.
+  if grep -qE "P3009|P3018|failed" "$MIGRATE_LOG"; then
+    warn "Prisma has recorded a migration as failed (nothing from it was applied)."
+    warn "Before you retry this upgrade, mark it rolled back with:"
+    warn "  sudo -u postgres psql -d openestate -c \"UPDATE _prisma_migrations SET rolled_back_at = now() WHERE finished_at IS NULL AND rolled_back_at IS NULL\""
+  fi
   if grep -qi "lock timeout" "$MIGRATE_LOG"; then
     rm -f "$MIGRATE_LOG"
     die "Migration timed out waiting for a table lock (current limit: ${MIGRATION_LOCK_TIMEOUT}). This means another process — almost always the PREVIOUS release, still serving live traffic — held a conflicting lock on a table this migration needs to change for longer than the timeout. Previous release (${PREVIOUS_RELEASE}) is untouched and still running; nothing is broken. What to do: retry this upgrade during a quieter traffic period, or raise the limit for one run: MIGRATION_LOCK_TIMEOUT=60s sudo ./upgrade-native.sh"
@@ -150,6 +158,9 @@ rm -f "$MIGRATE_LOG"
 # Read-only, never fatal: lists pre-existing accounts the v0.8.2 trigger
 # can't fix retroactively. See lib.sh.
 print_post_migrate_findings || true
+# v0.8.4: lists any foreign key left NOT VALID because existing rows point at
+# rows that no longer exist. Read-only, never fatal. See lib.sh.
+print_unvalidated_foreign_keys || true
 
 # Schema migrations don't cover PERMISSIONS constants — those are
 # application-level rows, not a Prisma model change. seed.ts's own

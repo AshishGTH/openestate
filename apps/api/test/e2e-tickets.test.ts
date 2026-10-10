@@ -20,7 +20,7 @@ import type { INestApplication } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
 import * as argon2 from '@node-rs/argon2';
 import { ALL_PERMISSIONS, PERMISSIONS, TICKET_STATUS } from '@openestate/shared';
-import { makeClients, seedCompany, makeApplicant, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
+import { makeClients, seedCompany, makeApplicant, makePortalRole, cleanupCompany, type CompanyFixture } from './helpers/postsales-harness';
 
 const APP_URL = process.env.DATABASE_URL_TEST;
 const SYSTEM_URL = process.env.DATABASE_URL_TEST_SYSTEM;
@@ -98,11 +98,26 @@ describeIf('e2e AdminTicketController: queue, thread, respond, status', () => {
     const applicantId = await makeApplicant(systemPrisma, fx.companyId);
     const applicant = await systemPrisma.applicant.findUnique({ where: { id: applicantId } });
     applicantName = applicant.name;
+    // tickets.raised_by_id and ticket_messages.author_id point at users (the
+    // portal controller stores the signed-in user's id), so the customer needs
+    // a real portal user. Before v0.8.4 restored those foreign keys, this
+    // fixture got away with the applicant's id.
+    const customerRoleId = await makePortalRole(systemPrisma, fx.companyId, 'customer');
+    const portalUser = await systemPrisma.user.create({
+      data: {
+        companyId: fx.companyId,
+        email: `e2e-ticket-customer-${TAG}@test.com`,
+        passwordHash: 'x',
+        name: applicant.name,
+        roleId: customerRoleId,
+        applicantId,
+      },
+    });
 
     const ticket = await systemPrisma.ticket.create({
       data: {
         companyId: fx.companyId,
-        raisedById: applicantId,
+        raisedById: portalUser.id,
         applicantId,
         categoryId: category.id,
         subject: `E2E Ticket ${TAG}`,
@@ -113,7 +128,7 @@ describeIf('e2e AdminTicketController: queue, thread, respond, status', () => {
       data: {
         companyId: fx.companyId,
         ticketId: ticket.id,
-        authorId: applicantId,
+        authorId: portalUser.id,
         authorIsStaff: false,
         body: 'Opening message from customer',
       },
