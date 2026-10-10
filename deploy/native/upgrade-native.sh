@@ -144,7 +144,12 @@ if ! run_as_superuser "${RELEASE_DIR}/api/node_modules/.bin/prisma" migrate depl
   if grep -qE "P3009|P3018|failed" "$MIGRATE_LOG"; then
     warn "Prisma has recorded a migration as failed (nothing from it was applied)."
     warn "Before you retry this upgrade, mark it rolled back with:"
-    warn "  sudo -u postgres psql -d openestate -c \"UPDATE _prisma_migrations SET rolled_back_at = now() WHERE finished_at IS NULL AND rolled_back_at IS NULL\""
+    # Same database name as run_as_superuser above, which is what migrated.
+    if [ -n "$DB_HOST" ]; then
+      warn "  psql -h $DB_HOST -U ${PG_SUPERUSER:-postgres} -d openestate -c \"UPDATE _prisma_migrations SET rolled_back_at = now() WHERE finished_at IS NULL AND rolled_back_at IS NULL\""
+    else
+      warn "  sudo -u postgres psql -d openestate -c \"UPDATE _prisma_migrations SET rolled_back_at = now() WHERE finished_at IS NULL AND rolled_back_at IS NULL\""
+    fi
   fi
   if grep -qi "lock timeout" "$MIGRATE_LOG"; then
     rm -f "$MIGRATE_LOG"

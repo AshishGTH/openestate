@@ -115,6 +115,15 @@ them for the user who can't do them. Candidate UI-audit findings:
 6. A refused save shows both a toast and an inline banner at the top of the
    Edit page; fine, but worth keeping consistent across forms.
 
+## Erasure
+
+- **Erasure: CLI hard-delete tool planned (item Q, target v0.9).** Questions
+  for the CA and DPDP lawyer: legal retention periods for financial records, and
+  when anonymising vs deleting is appropriate.
+- Since v0.8.4, an applicant or broker who has a portal account cannot be
+  hard-deleted through the app (owner accepted, 2026-10-10); item Q is the
+  server-side way.
+
 ## `Failed to create bin ... ENOENT` warnings during upgrade builds
 
 Every `upgrade-native.sh` build prints four pnpm warnings (browserslist,

@@ -152,16 +152,32 @@ export async function probeForeignKeys(
         // The superuser may use the append-only hatch, so the protected
         // tables' own trigger doesn't answer before the foreign key does.
         await tx.$executeRawUnsafe(`SET LOCAL app.allow_financial_mutation = 'on'`);
-        // Likewise the portal-link trigger on users answers a bad role_id first
-        // ("does not resolve to a known role"). Off for this rolled-back probe only.
-        if (l.table === 'users' && l.column === 'role_id') {
-          await tx.$executeRawUnsafe(`ALTER TABLE users DISABLE TRIGGER users_forbid_unlinked_portal_role`);
-        }
         try {
-          await tx.$executeRawUnsafe(
-            `UPDATE "${l.table}" SET "${l.column}" = gen_random_uuid()${l.alsoSet ? `, ${l.alsoSet}` : ''} WHERE ctid = $1::tid`,
-            fillers.ctids[l.table],
-          );
+          if (l.table === 'users' && l.column === 'role_id') {
+            // The portal-link trigger on users (BEFORE) refuses every unknown
+            // role_id before the foreign key is checked, and no role id passes
+            // the trigger but fails the key. So prove this key from the parent
+            // side instead: point the filler user at a fresh role, then delete
+            // that role. Only this key references it, so only this key can
+            // refuse. Row locks only; disabling the trigger would take an
+            // ACCESS EXCLUSIVE lock on users while other test files run.
+            const [{ company_id }] = await tx.$queryRawUnsafe<Array<{ company_id: string }>>(
+              `SELECT company_id::text FROM users WHERE ctid = $1::tid`,
+              fillers.ctids.users,
+            );
+            const roleCtid = await insertFillerRow(tx, 'roles', { company_id });
+            await tx.$executeRawUnsafe(
+              `UPDATE users SET role_id = (SELECT id FROM roles WHERE ctid = $1::tid) WHERE ctid = $2::tid`,
+              roleCtid,
+              fillers.ctids.users,
+            );
+            await tx.$executeRawUnsafe(`DELETE FROM roles WHERE ctid = $1::tid`, roleCtid);
+          } else {
+            await tx.$executeRawUnsafe(
+              `UPDATE "${l.table}" SET "${l.column}" = gen_random_uuid()${l.alsoSet ? `, ${l.alsoSet}` : ''} WHERE ctid = $1::tid`,
+              fillers.ctids[l.table],
+            );
+          }
           outcome = 'accepted';
         } catch (e) {
           const msg = pgError(e);
