@@ -5,7 +5,7 @@ with whatever a new session needs to pick up work immediately; prune stale facts
 rather than layering history on top of them. For *why* a decision was made, see
 CLAUDE.md's Decisions log; this file is only *what's true right now*.
 
-**Last updated: 2026-10-10, after the v0.8.3 release.**
+**Last updated: 2026-10-10, v0.8.4 work in progress (G, A, B committed locally).**
 
 ## Where things stand
 
@@ -21,14 +21,18 @@ CLAUDE.md's Decisions log; this file is only *what's true right now*.
   sessions that end at once when a user stops being authorised, the refusal of
   tokens with no surface claim, UTC audit timestamps, and the upgrade-script
   fetch fix. See `CHANGELOG.md` and CLAUDE.md's "0.8.3" entry.
-- **Next work is v0.8.4** (plan: `docs/testing/v0.8.3-plan.md`, the v0.8.4
-  parts): **A** (restore the 71 foreign keys), **B** (constraint manifest and CI
-  guard), **G** (harden the append-only escape hatch), **I** (safe system-role
-  permission sync), **M** (the API listens on every interface), **N** (upgrade
-  script downgrade guard), **O** (CI upgrade from the previous release tag), plus
-  the small item **P** ("Failed to create bin" warnings). **A and G touch the
-  frozen financial core and need the owner's explicit approval before any work
-  starts.**
+- **v0.8.4 is in progress, local commits only (not pushed).** Built and
+  committed: **G** (the append-only escape hatch works only for a superuser
+  login), the `forbid_unlinked_portal_role()` ownership fix, **A** (the 71
+  foreign keys restored: added NOT VALID, validated where no orphans, three
+  links ON DELETE RESTRICT with plain 409 messages; `check-foreign-keys.sh`;
+  restore creates the roles a dump needs), and **B** (constraint manifest +
+  CI test, foreign-key enforcement test, migration drop lint). Still to do:
+  **M, N, O, P, I**. Plan: `docs/testing/v0.8.3-plan.md` (v0.8.4 parts). Draft
+  release-notes text: `docs/releases/v0.8.4-release-notes.md`.
+- **Before releasing v0.8.4:** run the read-only orphan scan on the VM (the
+  owner has the one-line command) and rehearse the upgrade from the
+  `v0.8.3-clean` snapshot with v0.8.3's own script.
 
 ## The verification VM
 

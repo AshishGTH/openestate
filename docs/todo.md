@@ -40,13 +40,13 @@ Each is written up, with its fix and tests, in
   correctness or for validating the constraints (each check is a primary-key
   lookup on the parent). They matter only when a parent row is deleted or its key
   changes, which for most of these parents (users, masters) is rare.
-- **`openestate_system` can remove the v0.8.2 unlinked-portal-role trigger.**
-  It owns `forbid_unlinked_portal_role()` (deliberately, for `SECURITY DEFINER`),
-  and an owner may `DROP FUNCTION ... CASCADE`, which drops the trigger on
-  `users` with it, or switch the function to `SECURITY INVOKER`. Found while
-  checking ownership for Part G (2026-10-10). Needs a decision: own it by a
-  NOLOGIN role that holds only the privileges the function needs, so no login
-  role is its owner.
+- **Done on the v0.8.4 branch (unreleased):** Parts G, A and B, and the
+  `forbid_unlinked_portal_role()` ownership fix (now owned by the NOLOGIN role
+  `openestate_guard_owner`). Still to do for v0.8.4: M, N, O, P and I.
+- **A restored foreign key can be left NOT VALID on a real install** (orphan
+  rows). The upgrade prints them and `deploy/native/check-foreign-keys.sh` lists
+  them; nothing resolves them yet (see "No orphan-fix script" above). Check the
+  verification VM with the scan before releasing.
 
 ## CVE for GHSA-gq5m-m6q6-x32p is pending
 
