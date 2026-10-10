@@ -173,11 +173,17 @@ first `pnpm install`/build).
 > and `ufw enable` before you finish setup, or use your cloud provider's
 > security-group equivalent.
 
-**Block port 3000 from other machines (v0.8.3 and earlier).** The API listens on
-all network interfaces on port 3000, so anyone on the same network can reach it
-directly and skip nginx. A fix is planned for v0.8.4. Until then, use a host
-firewall so that only nginx (on the same machine) can reach the API. With `ufw`,
-allow SSH first or enabling it can lock you out:
+**Port 3000 is local only (v0.8.4 and later).** The API listens on
+`127.0.0.1:3000`, so only nginx on the same machine can reach it, and it believes
+`X-Forwarded-For` / `X-Forwarded-Proto` only from a local proxy. If your reverse
+proxy runs on another machine, set `HOST=0.0.0.0` (or a specific address) in
+`/etc/openestate/openestate.env`, restart the service, and firewall port 3000 so
+only that proxy can reach it. A host firewall is still recommended.
+
+**v0.8.3 and earlier** listened on all network interfaces, so anyone on the same
+network could reach port 3000 directly and skip nginx. On those versions, block
+it with a host firewall. With `ufw`, allow SSH first or enabling it can lock you
+out:
 
 ```bash
 sudo ufw allow 22/tcp

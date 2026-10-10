@@ -36,6 +36,7 @@ import { NestFactory } from '@nestjs/core';
 import type { INestApplication } from '@nestjs/common';
 import { ZodValidationPipe } from 'nestjs-zod';
 import * as argon2 from '@node-rs/argon2';
+import { TRUST_PROXY } from '../src/common/network';
 import {
   makeClients,
   seedCompany,
@@ -80,7 +81,7 @@ async function bootstrapApp(): Promise<INestApplication> {
   nestApp.useGlobalPipes(new ZodValidationPipe());
   // Mirrors main.ts's own trust-proxy setup — see that file's doc
   // comment for why this is the fix, not NODE_ENV.
-  nestApp.getHttpAdapter().getInstance().set('trust proxy', 1);
+  nestApp.getHttpAdapter().getInstance().set('trust proxy', TRUST_PROXY); // same as main.ts
   await nestApp.init();
   return nestApp;
 }

@@ -8,6 +8,7 @@ import { Logger } from 'nestjs-pino';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ZodValidationPipe } from './common/pipes/zod-validation.pipe';
 import { AppModule } from './app.module';
+import { TRUST_PROXY, apiBindHost } from './common/network';
 
 // Money is stored as BigInt paise everywhere per CLAUDE.md, but native
 // BigInt has no JSON representation — Express's res.json() (JSON.stringify)
@@ -45,7 +46,8 @@ async function bootstrap() {
   // browser hitting a fresh install. Only caught because this session's
   // VM walkthrough was the first time a real browser (not curl) drove a
   // mutation against the actual deployed VM.
-  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+  // Only loopback hops (the local nginx) are trusted: see common/network.ts.
+  app.getHttpAdapter().getInstance().set('trust proxy', TRUST_PROXY);
 
   const corsAllowlist = (process.env.CORS_ALLOWLIST ?? '')
     .split(',')
@@ -74,7 +76,8 @@ async function bootstrap() {
   }
 
   const port = Number(process.env.PORT ?? 3000);
-  await app.listen(port, '0.0.0.0');
+  // Loopback only unless HOST says otherwise: see common/network.ts.
+  await app.listen(port, apiBindHost());
 }
 
 bootstrap();
