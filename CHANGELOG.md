@@ -3,6 +3,20 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Security
+
+- **The append-only escape hatch is superuser-only.** The database setting that
+  lets maintenance change or delete ledger, receipt-allocation, TDS, interest and
+  commission-ledger rows used to work for any database role, including the ones
+  the application logs in as. It now works only for the `postgres` superuser.
+- **The v0.8.2 portal-link check can no longer be switched off by the
+  application's system role.** That role owned the database function behind the
+  check, so it could drop it (and the trigger with it) or weaken it. The function
+  now belongs to a role that cannot log in. Hardening, not a reported
+  vulnerability: using it needed the system role's database password.
+
 ## [0.8.3] - 2026-10-10
 
 A security release. **Every install should upgrade.** Two migrations: one adds a
