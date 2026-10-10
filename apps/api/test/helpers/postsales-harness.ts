@@ -20,6 +20,15 @@ import { UnitStateMachineService } from '../../src/inventory/unit-state-machine.
 import { NotificationService } from '../../src/notifications/notification.service';
 import { ConsoleCommunicationProvider, type CommunicationProvider } from '../../src/queues/communication-provider';
 
+/**
+ * Superuser connection for the one thing that needs it: test teardown through
+ * the append-only escape hatch (see cleanupCompany). Same default as
+ * scripts/test-setup.sh writes to .test-env.
+ */
+export const TEST_SUPER_URL =
+  process.env.DATABASE_URL_TEST_SUPER ??
+  'postgresql://openestate_super:test_super_pass@localhost:5432/openestate_test';
+
 export interface Services {
   numbers: NumberSequenceService;
   ledger: LedgerService;
@@ -406,9 +415,19 @@ export async function makeFlatCommissionRule(
   return rule.id;
 }
 
-/** Delete all financial + inventory rows for a company (append-only override). */
+/**
+ * Delete all financial + inventory rows for a company (append-only override).
+ *
+ * Runs on a SUPERUSER connection (DATABASE_URL_TEST_SUPER), not the system
+ * client the caller passes in: since v0.8.4 the append-only triggers honour
+ * app.allow_financial_mutation only when the login role is a member of
+ * openestate_maintenance, and superusers are the only such logins. The app
+ * and system test roles are deliberately NOT members, so the guard tests can
+ * prove neither of them can use the hatch. The parameter stays so the ~100
+ * callers are unchanged.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export async function cleanupCompany(systemPrisma: any, companyId: string): Promise<void> {
+export async function cleanupCompany(_systemPrisma: any, companyId: string): Promise<void> {
   const tables = [
     // Phase 6: portal rows — several RESTRICT onto users (raised_by_id,
     // requested_by_id) and onto companies directly, so must go before both
@@ -510,15 +529,20 @@ export async function cleanupCompany(systemPrisma: any, companyId: string): Prom
   // Single transaction so the maintenance GUC (which lets us bypass the
   // append-only triggers) and every DELETE share one connection. Generous
   // timeout because the property test leaves thousands of bookings' rows.
-  await systemPrisma.$transaction(
-    async (tx: { $executeRawUnsafe: (q: string, ...a: unknown[]) => Promise<unknown> }) => {
-      await tx.$executeRawUnsafe(`SET LOCAL app.allow_financial_mutation = 'on'`);
-      for (const t of tables) {
-        await tx.$executeRawUnsafe(`DELETE FROM ${t} WHERE company_id = $1::uuid`, companyId);
-      }
-      await tx.$executeRawUnsafe(`DELETE FROM audit_logs WHERE company_id = $1::uuid`, companyId);
-      await tx.$executeRawUnsafe(`DELETE FROM companies WHERE id = $1::uuid`, companyId);
-    },
-    { maxWait: 120_000, timeout: 300_000 },
-  );
+  const superPrisma = createSystemPrismaClient(TEST_SUPER_URL);
+  try {
+    await superPrisma.$transaction(
+      async (tx: { $executeRawUnsafe: (q: string, ...a: unknown[]) => Promise<unknown> }) => {
+        await tx.$executeRawUnsafe(`SET LOCAL app.allow_financial_mutation = 'on'`);
+        for (const t of tables) {
+          await tx.$executeRawUnsafe(`DELETE FROM ${t} WHERE company_id = $1::uuid`, companyId);
+        }
+        await tx.$executeRawUnsafe(`DELETE FROM audit_logs WHERE company_id = $1::uuid`, companyId);
+        await tx.$executeRawUnsafe(`DELETE FROM companies WHERE id = $1::uuid`, companyId);
+      },
+      { maxWait: 120_000, timeout: 300_000 },
+    );
+  } finally {
+    await superPrisma.$disconnect();
+  }
 }

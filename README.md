@@ -152,7 +152,9 @@ broker with a booking, accrued commission, a `REQUESTED` NOC ready to
 approve in the portal, and a commission statement PDF. It prints both
 logins (phone + password) on completion. Safe to rerun any time you want
 a clean slate — it deletes only its own fixed-identifier rows, never
-your other data.
+your other data. Besides `DATABASE_URL` and `DATABASE_URL_SYSTEM` it needs
+`DATABASE_URL_MAINTENANCE`, a superuser login on the same database: the
+reset removes ledger rows, which since v0.8.4 only a superuser can do.
 
 ## Architecture
 

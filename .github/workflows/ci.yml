@@ -213,8 +213,10 @@ jobs:
       # always-present template/postgres databases.
       #
       # .test-env's values are appended to $GITHUB_ENV so every later step
-      # inherits DATABASE_URL_TEST/DATABASE_URL_TEST_SYSTEM/REDIS_TEST_URL
-      # from the script's own output — the two steps below no longer carry
+      # inherits DATABASE_URL_TEST/DATABASE_URL_TEST_SYSTEM/REDIS_TEST_URL,
+      # plus DATABASE_URL_TEST_SUPER (the superuser login test teardown
+      # needs for the append-only escape hatch since v0.8.4), from the
+      # script's own output — the two steps below no longer carry
       # a second hardcoded copy that could quietly drift from what the
       # script actually provisions.
       - name: Provision test database (scripts/test-setup.sh)

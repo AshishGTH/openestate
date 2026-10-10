@@ -22,6 +22,32 @@ Each is written up, with its fix and tests, in
 - **Part P:** investigate the "Failed to create bin" build warnings (including
   `prisma`); see the two older entries about them further down.
 
+## Deferred from v0.8.4 items A and G (architect decisions, 2026-10-10)
+
+- **A "reschedule an installment with interest charged" flow, after the CA
+  review.** v0.8.4 restores `ledger_entries.installment_id`,
+  `interest_accruals.installment_id` and `interest_accruals.interest_rule_id`
+  as `ON DELETE RESTRICT`, so a payment-plan edit that would delete an unpaid
+  installment with interest already charged is refused with a plain message
+  instead of leaving dangling pointers. Staff then have no way to reschedule
+  such an installment. The right accounting treatment (waive, carry the interest
+  to the new installment, or something else) needs the CA review first.
+- **No orphan-fix script.** v0.8.4 never changes or deletes rows: a foreign key
+  whose column has orphans is added `NOT VALID` and reported. Fixing orphans in
+  append-only tables needs the escape hatch (superuser only since v0.8.4) and a
+  reviewed procedure; neither is built.
+- **Indexes on the 70 unindexed foreign-key columns, v0.9.** Not needed for
+  correctness or for validating the constraints (each check is a primary-key
+  lookup on the parent). They matter only when a parent row is deleted or its key
+  changes, which for most of these parents (users, masters) is rare.
+- **`openestate_system` can remove the v0.8.2 unlinked-portal-role trigger.**
+  It owns `forbid_unlinked_portal_role()` (deliberately, for `SECURITY DEFINER`),
+  and an owner may `DROP FUNCTION ... CASCADE`, which drops the trigger on
+  `users` with it, or switch the function to `SECURITY INVOKER`. Found while
+  checking ownership for Part G (2026-10-10). Needs a decision: own it by a
+  NOLOGIN role that holds only the privileges the function needs, so no login
+  role is its owner.
+
 ## CVE for GHSA-gq5m-m6q6-x32p is pending
 
 The advisory was published on 2026-10-10 and a CVE was requested while it was a

@@ -220,6 +220,11 @@ export DATABASE_URL="postgresql://openestate_super:${SUPER_PASSWORD}@${CONNECT_H
 export DATABASE_URL_TEST="postgresql://${TEST_APP_ROLE}:${APP_PASSWORD}@${CONNECT_HOST}:${PG_PORT}/${DB_NAME}?connection_limit=10"
 export DATABASE_URL_TEST_SYSTEM="postgresql://${TEST_SYSTEM_ROLE}:${SYSTEM_PASSWORD}@${CONNECT_HOST}:${PG_PORT}/${DB_NAME}?connection_limit=5"
 export REDIS_TEST_URL="redis://${REDIS_HOST}:${REDIS_PORT}"
+# Superuser login for test teardown only: since v0.8.4 the append-only
+# escape hatch (app.allow_financial_mutation) works only for a login that is
+# a member of openestate_maintenance, and superusers are the only such
+# logins. The test app/system roles are deliberately not members.
+export DATABASE_URL_TEST_SUPER="postgresql://openestate_super:${SUPER_PASSWORD}@${CONNECT_HOST}:${PG_PORT}/${DB_NAME}?connection_limit=2"
 # connection_limit above is deliberate, not decorative — see CLAUDE.md's
 # Phase 7 CI-reliability decisions. Every test file gets its OWN
 # PrismaClient pair (createTenantPrismaClient/createSystemPrismaClient), and
@@ -266,6 +271,7 @@ fi
 cat > "${REPO_ROOT}/.test-env" <<-EOF
 	export DATABASE_URL_TEST="${DATABASE_URL_TEST}"
 	export DATABASE_URL_TEST_SYSTEM="${DATABASE_URL_TEST_SYSTEM}"
+	export DATABASE_URL_TEST_SUPER="${DATABASE_URL_TEST_SUPER}"
 	export REDIS_TEST_URL="${REDIS_TEST_URL}"
 EOF
 

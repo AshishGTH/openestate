@@ -182,20 +182,41 @@ print_post_migrate_findings() {
   # isSystem + slug), so an admin should know it exists.
   local fake_sql="SELECT r.id, r.company_id, r.name, (SELECT count(*) FROM users u WHERE u.role_id = r.id)
                     FROM roles r WHERE r.slug = 'super_admin' AND NOT r.is_system ORDER BY r.created_at"
-  local rows fake
+  # v0.8.4: only superusers should be able to use the append-only escape
+  # hatch. Any non-superuser role that is a member of openestate_maintenance
+  # (directly or through another role) can, so list them. No script grants
+  # this membership; a row here means someone did it by hand.
+  local maint_sql="SELECT rolname, rolcanlogin FROM pg_roles
+                    WHERE NOT rolsuper AND rolname <> 'openestate_maintenance' AND rolname !~ '^pg_'
+                      AND pg_has_role(oid, 'openestate_maintenance', 'MEMBER') ORDER BY rolname"
+  local rows fake maint
   rows="$(_findings_rows "$portal_sql")"
   fake="$(_findings_rows "$fake_sql")"
+  maint="$(_findings_rows "$maint_sql")"
 
-  if [ "$rows" = "__QUERY_FAILED__" ] || [ "$fake" = "__QUERY_FAILED__" ]; then
+  if [ "$rows" = "__QUERY_FAILED__" ] || [ "$fake" = "__QUERY_FAILED__" ] || [ "$maint" = "__QUERY_FAILED__" ]; then
     warn "Could not run the post-migration checks (non-fatal). Run them by hand in psql against the openestate database:"
     warn "  unlinked portal-role accounts: SELECT u.id, u.email, r.slug FROM users u JOIN roles r ON r.id=u.role_id WHERE r.is_portal AND u.applicant_id IS NULL AND u.broker_id IS NULL;"
     warn "  non-system roles named super_admin: SELECT id, company_id, name FROM roles WHERE slug='super_admin' AND NOT is_system;"
+    warn "  non-superuser members of openestate_maintenance: SELECT rolname FROM pg_roles WHERE NOT rolsuper AND rolname <> 'openestate_maintenance' AND pg_has_role(oid, 'openestate_maintenance', 'MEMBER');"
     return 0
   fi
 
-  if [ -z "$rows" ] && [ -z "$fake" ]; then
-    log "Post-migration checks: no unlinked portal-role accounts and no non-system 'super_admin' roles found."
+  if [ -z "$rows" ] && [ -z "$fake" ] && [ -z "$maint" ]; then
+    log "Post-migration checks: no unlinked portal-role accounts, no non-system 'super_admin' roles, and no non-superuser members of openestate_maintenance found."
     return 0
+  fi
+  if [ -n "$maint" ]; then
+    warn "================================================================"
+    warn "FINDING: these database roles are members of openestate_maintenance,"
+    warn "so they can change or delete append-only financial rows (ledger,"
+    warn "receipt allocations, TDS, interest, commission ledger). Only the"
+    warn "postgres superuser should be able to. No OpenEstate script grants"
+    warn "this; remove it unless it was added on purpose:"
+    warn "  REVOKE openestate_maintenance FROM <role>;"
+    warn "  role | can log in"
+    printf '%s\n' "$maint" | while IFS= read -r line; do warn "  ${line}"; done
+    warn "================================================================"
   fi
   if [ -n "$rows" ]; then
     warn "================================================================"

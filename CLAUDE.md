@@ -7687,6 +7687,46 @@ portal sessions each did one silent refresh and carried on.
   every such push). Accepted, because CI is watched to green before the tag is
   created.
 
+### v0.8.4 Part G — the append-only escape hatch is superuser-only
+
+- **Until now any role could use it**, including `openestate_app`: the trigger
+  only checked that `app.allow_financial_mutation` was `'on'`, and any role may
+  set a custom setting. Migration `20261020000000_scope_financial_mutation_hatch`
+  creates `openestate_maintenance` (NOLOGIN, no members) and honours the setting
+  only when `pg_has_role(session_user, 'openestate_maintenance', 'MEMBER')`.
+  Superusers count as members of every role, so in production only the postgres
+  superuser can use it; no script grants membership, and
+  `print_post_migrate_findings()` lists any non-superuser member.
+- **`session_user`, not `current_user`.** Rows removed or nulled by a
+  foreign-key cascade are changed by PostgreSQL as the table owner, so
+  `current_user` inside the trigger is the owner; a `current_user` check refused
+  every cascading cleanup (shown by mutation against test 3).
+- **Fails closed:** with the role missing, `pg_has_role` raises.
+- **Test teardown (`cleanupCompany`) now uses a superuser login,
+  `DATABASE_URL_TEST_SUPER`** (written by `scripts/test-setup.sh`, passed by
+  `turbo.json`, inherited by CI from `.test-env`). The test app and system roles
+  are deliberately not members. `portal-demo-seed` needs
+  `DATABASE_URL_MAINTENANCE`, a superuser URL.
+- **Checked before building:** on a migrations-built database the 7 append-only
+  tables and `forbid_financial_mutation()` are owned by the migrating superuser,
+  and the app and system roles cannot TRUNCATE them, disable or drop their
+  triggers, replace the function, or set `session_replication_role` (test 7).
+  Every install path runs migrations as a superuser (native: `postgres`; the old
+  Docker path: its `openestate` superuser), so no install can have these owned by
+  the app or system role.
+- **Not changed, reported:** `openestate_system` owns
+  `forbid_unlinked_portal_role()` (v0.8.2, `SECURITY DEFINER` by design). It
+  cannot replace it (no CREATE on the schema), but as owner it can
+  `DROP FUNCTION ... CASCADE`, which also drops the v0.8.2 trigger on `users`,
+  or `ALTER FUNCTION ... SECURITY INVOKER`. Both shown on the local test
+  database in rolled-back transactions.
+- **`prisma migrate deploy` (6.19) runs each migration file as one
+  transaction**; a failed file leaves nothing behind but is recorded as failed,
+  and later deploys stop with P3009 until `prisma migrate resolve
+  --rolled-back <name>`. It does not show `RAISE NOTICE`/`WARNING` output, so
+  anything an operator must see has to come from the upgrade script. Both
+  verified on a scratch database.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
