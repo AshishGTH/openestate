@@ -4,6 +4,31 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## v0.8.4: items found during the v0.8.3 release
+
+Each is written up, with its fix and tests, in
+[`docs/testing/v0.8.3-plan.md`](testing/v0.8.3-plan.md) (the v0.8.4 parts):
+
+- **Part M:** the API listens on every network interface (`0.0.0.0:3000`), so
+  nginx can be bypassed and a client can choose its own IP address; make it listen
+  on loopback and trust forwarded headers only from the local proxy. Medium.
+- **Part N:** `upgrade-native.sh` must refuse to deploy code older than the
+  database, and confirm the checkout equals what was fetched. The v0.8.2 script,
+  given a branch name, installs a stale local branch; until Part N ships the rule
+  is "give a release tag".
+- **Part O:** a CI job that upgrades a populated database from the previous
+  release tag with that release's own `upgrade-native.sh`. Today's job starts from
+  v0.1.2 and does not prove the previous-release path.
+- **Part P:** investigate the "Failed to create bin" build warnings (including
+  `prisma`); see the two older entries about them further down.
+
+## CVE for GHSA-gq5m-m6q6-x32p is pending
+
+The advisory was published on 2026-10-10 and a CVE was requested while it was a
+draft. No number was assigned at publication. If none appears by about
+2026-10-17, re-request it from the advisory page
+(https://github.com/AshishGTH/openestate/security/advisories/GHSA-gq5m-m6q6-x32p).
+
 ## HIGH PRIORITY: fix the two flaky test races soon — flaky CI hides real failures
 
 Two known races make CI fail intermittently on unrelated changes. Each one
@@ -41,7 +66,7 @@ the requested ref with force (e.g. `git fetch --force origin
 print a clear error and what to do on any fetch failure instead of exiting
 silently. Needs a CI test: a clone with a local tag that points somewhere else
 than origin's, then `upgrade-native.sh --ref <tag>` must succeed. Assigned to
-v0.8.3. Note `fix/native-upgrade-ownership-and-stale-ref` (closed PR #44, never
+v0.8.3: **done (shipped in v0.8.3, Part J).** Note `fix/native-upgrade-ownership-and-stale-ref` (closed PR #44, never
 merged, pre-rewrite history) reworked the same section; reuse ideas, not the
 branch.
 
@@ -75,6 +100,8 @@ bins pnpm links in the deployed `api` tree that don't exist there. Find out
 which and silence or fix it.
 
 ## Remove `SessionSurfaceGuard`'s pre-0.8.1-token fallback (v0.8.3)
+
+**Done: shipped in v0.8.3 (Part L).** Original note:
 
 The guard still infers a session's surface from `applicantId`/`brokerId` for
 tokens issued before v0.8.1 had a `surface` claim. Removal is in
@@ -898,6 +925,14 @@ the whole booking if any line's rate can't be resolved, and
 CHANGELOG.md's `[Unreleased]` entry for the full writeup, including how
 already-created zero-GST bookings are surfaced (boot-time log + admin
 banner + a "Zero-GST bookings" CSV report) rather than silently altered.
+
+**Pilot checklist (operations).** Check these before a pilot server goes live:
+
+- **The server clock must be NTP-synced** (`timedatectl` says `System clock
+  synchronized: yes`, and `date` matches a trusted clock). 2FA codes and
+  password-reset links fail otherwise, and a virtual machine resumed from a
+  snapshot can say "synchronized" while hours behind. See the clock-skew entry
+  above and the 0.8.3 section of the installation guide.
 
 ## `Project.isActive` has no enforced meaning anywhere
 

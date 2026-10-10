@@ -7631,6 +7631,62 @@ dropped foreign keys, deferred).
   unlinked customer-role accounts on the VM deactivated through the real UI
   (an `is_active`-only update, which the new trigger correctly does not block).
 
+### 0.8.3 — released 2026-10-10: broker document access, sessions that end at once, and what the release taught us
+
+**Release record.** v0.8.3 is public: master `1f48533`, annotated tag `v0.8.3`,
+the GitHub release, and advisory
+[GHSA-gq5m-m6q6-x32p](https://github.com/AshishGTH/openestate/security/advisories/GHSA-gq5m-m6q6-x32p)
+published 2026-10-10 03:50 UTC (Low, CVSS 3.1 score 3.1, CWE-639, affected
+<= 0.8.2, patched 0.8.3). A CVE was requested while the advisory was a draft; **the
+number is still pending** (re-request it from the advisory page if none is assigned
+within a week). Contents: the portal document fix (a broker session can fetch only
+its own commission statements, a customer session only the types its portal lists;
+the broker branch was removed from the booking and money policies by one
+`ALTER POLICY` migration), sessions that end the moment a user stops being
+authorised (one new column, `users.authz_version`), the refusal of tokens with no
+surface claim, UTC audit timestamps, and the upgrade-script fetch fix. All five CI
+jobs were green on `1f48533`. A customer session could never reach another
+customer's documents (the policy and an existing test show it), and the advisory
+says so.
+
+**Verification.** The upgrade was rehearsed on a VM restored from a snapshot proven
+to be v0.8.2 (35 migrations): the public code first, then the portal fix, with the
+owner's browser checks. The final check then used the public tag with v0.8.2's own
+`upgrade-native.sh`: 37 migrations, health 0.8.3, no errors, and open staff and
+portal sessions each did one silent refresh and carried on.
+
+**Lessons.**
+
+- **An upgrade rehearsal must start from a snapshot proven to be the previous
+  release.** Check the active build, the tag and the migration count before
+  trusting it. A VM that another session had moved onto a release-candidate branch
+  made the first v0.8.3 rehearsal prove nothing about the real upgrade path, and
+  CI's upgrade job starts from v0.1.2, so it does not prove the previous-release
+  path either (Part O in the v0.8.4 plan closes that).
+- **After any snapshot revert, check the VM clock before anything
+  time-dependent** (2FA codes, reset links, sessions). A resumed VM can say
+  "System clock synchronized: yes" while hours or days behind; here reverts gave
+  offsets of about 14 hours and of almost three days (one corrected within a minute,
+  the other not within several), and a restart fixed a failing 2FA code.
+- **A browser security check needs a "should work" control in the same session**,
+  so a refusal cannot just mean "not signed in". A URL pasted into the address bar
+  does not carry the portal sign-in (the access token lives in page memory and the
+  refresh cookie is scoped to the sign-in path), so such checks run as a script in
+  the signed-in window, with a control request that must succeed.
+- **When one host has served both HTTPS and HTTP, Chrome keeps Secure-only cookies
+  and cached HTTPS redirects that break plain-HTTP sign-ins:** sign-ins vanish on
+  reload and API calls are sent to a port nothing listens on. Clearing "site data"
+  does not clear the cached redirects. Use Incognito windows for VM browser checks.
+- **Give `upgrade-native.sh` a release tag, never a branch name.** The script in
+  v0.8.2 and earlier checks out the local copy of a branch, which a fetch never
+  moves, and would silently install old code (Part N adds a guard).
+- **Release order: fast-forward push, CI green, tag, release, then publish the
+  advisory at once, with the owner present from push to publish.** The fix was
+  public for about 20 minutes this time, between the push and the publication.
+- **Owner direct pushes bypass the required status checks** (GitHub says so on
+  every such push). Accepted, because CI is watched to green before the tag is
+  created.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
