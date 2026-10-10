@@ -93,6 +93,15 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # v0.8.4 Part B: a new migration may not drop or disable a constraint,
+      # trigger, policy or function unless the line is marked
+      # "-- ALLOW-DROP: <reason>" and listed in packages/db/approved-removals.json.
+      # `prisma migrate dev` silently generated the drops that removed 71
+      # foreign keys in 2026-08; this stops that at review time. The other
+      # half, the constraint manifest, runs with the integration tests.
+      - name: Migration drop lint
+        run: node scripts/lint-migration-drops.mjs
+
       - name: Typecheck
         run: pnpm typecheck
 
