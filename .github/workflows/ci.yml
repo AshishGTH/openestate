@@ -1157,6 +1157,14 @@ jobs:
             sudo journalctl -u openestate-api --since "$CUTOVER_SINCE" -o cat --no-pager | grep '"level":50' | tail -5
             echo "::error::${ERRORS} error lines in the API journal since the upgrade"; exit 1
           fi
+          # Part I: the first upgrade with a seed baseline records one for every
+          # system role except super_admin and adds nothing to them.
+          q() { (cd / && sudo -u postgres psql -d openestate -AtX -c "$1"); }
+          ROLES="$(q "SELECT count(*) FROM roles WHERE is_system AND slug IN ('company_admin','sales_manager','sales_executive','accounts','customer','broker')")"
+          BASED="$(q "SELECT count(*) FROM role_seed_baselines b JOIN roles r ON r.id = b.role_id WHERE r.slug <> 'super_admin'")"
+          [ "$ROLES" -gt 0 ] && [ "$ROLES" = "$BASED" ] || { echo "::error::${BASED} seed baselines for ${ROLES} system roles"; exit 1; }
+          ADDED="$(q "SELECT count(*) FROM audit_logs WHERE action = 'ROLE_PERMS_CHANGED' AND after->>'surface' = 'upgrade'")"
+          [ "$ADDED" = "0" ] || { echo "::error::the first upgrade added permissions to system roles (${ADDED} audit rows)"; exit 1; }
           echo "Upgrade outcome as expected (${{ matrix.variant }})."
 
       - name: "Part M after the upgrade: the API listens on loopback only"

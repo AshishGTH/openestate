@@ -272,6 +272,18 @@ model Role {
   @@map("roles")
 }
 
+/// v0.8.4 Part I: the seeded permission keys a system role was last synced to
+/// (packages/db/prisma/sync-permissions.ts, syncSystemRoleBaselines). The
+/// role_id foreign key (ON DELETE CASCADE) is in the migration; scalar here,
+/// like other provenance links, so Role gains no back-relation.
+model RoleSeedBaseline {
+  roleId         String   @id @map("role_id") @db.Uuid
+  permissionKeys String[] @map("permission_keys")
+  syncedAt       DateTime @default(now()) @map("synced_at")
+
+  @@map("role_seed_baselines")
+}
+
 model Permission {
   id  String @id @default(uuid()) @db.Uuid
   key String @unique @db.VarChar(100)

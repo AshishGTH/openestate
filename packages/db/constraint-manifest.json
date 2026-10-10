@@ -307,6 +307,8 @@
     {"table":"role_permissions","name":"role_permissions_permission_id_fkey","type":"foreign key","definition":"FOREIGN KEY (permission_id) REFERENCES permissions(id) ON UPDATE CASCADE ON DELETE CASCADE"},
     {"table":"role_permissions","name":"role_permissions_pkey","type":"primary key","definition":"PRIMARY KEY (role_id, permission_id)"},
     {"table":"role_permissions","name":"role_permissions_role_id_fkey","type":"foreign key","definition":"FOREIGN KEY (role_id) REFERENCES roles(id) ON UPDATE CASCADE ON DELETE CASCADE"},
+    {"table":"role_seed_baselines","name":"role_seed_baselines_pkey","type":"primary key","definition":"PRIMARY KEY (role_id)"},
+    {"table":"role_seed_baselines","name":"role_seed_baselines_role_id_fkey","type":"foreign key","definition":"FOREIGN KEY (role_id) REFERENCES roles(id) ON UPDATE CASCADE ON DELETE CASCADE"},
     {"table":"roles","name":"roles_company_id_fkey","type":"foreign key","definition":"FOREIGN KEY (company_id) REFERENCES companies(id) ON UPDATE CASCADE ON DELETE RESTRICT"},
     {"table":"roles","name":"roles_pkey","type":"primary key","definition":"PRIMARY KEY (id)"},
     {"table":"sms_templates","name":"sms_templates_company_id_fkey","type":"foreign key","definition":"FOREIGN KEY (company_id) REFERENCES companies(id) ON UPDATE CASCADE ON DELETE RESTRICT"},

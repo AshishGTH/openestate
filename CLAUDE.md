@@ -7798,6 +7798,26 @@ portal sessions each did one silent refresh and carried on.
   transaction that inserted it, so an uncommitted filler fails on its own
   placeholder values (`apps/api/test/helpers/fk-probe.ts`).
 
+### v0.8.4 Part I — system-role permission sync with a per-role seed baseline
+
+- **`role_seed_baselines` (one row per system role) records the seed each role
+  was last synced to.** `syncSystemRoleBaselines()` (sync-permissions.ts, run by
+  every upgrade and by seed.ts) adds only keys new to a role's seed since its
+  baseline. A key in the baseline that the role lacks was removed by an admin
+  and is never added back; keys an admin added are untouched. The first
+  upgrade of an existing install records the baseline, adds nothing and
+  prints each role's differences from its seed for an admin to review.
+  super_admin keeps its own rule; custom roles are never touched. Each role
+  that gains keys gets a `ROLE_PERMS_CHANGED` audit row (no actor,
+  `surface: upgrade`) and its users' sessions end.
+- **Standing rule: the permission sync never revokes. If a permission must be
+  removed from a role for security reasons, that release ships its own
+  migration that removes it, with a test.** (The portal-role strip in
+  sync-permissions.ts predates this rule and stays the one exception: a portal
+  role holding a staff permission is a security defect by definition.)
+- **Known edge:** a key removed from a seed in one release and put back in a
+  later one counts as new and is re-added, even if an admin had removed it.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
