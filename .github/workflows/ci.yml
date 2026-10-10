@@ -546,6 +546,20 @@ jobs:
       - name: Assert health endpoint responds over HTTP
         run: curl -fsS http://localhost/api/v1/health
 
+      # v0.8.4 Part P: pnpm 9's `deploy` writes a stray copy of the release's
+      # .bin tree (see build_release in deploy/native/lib.sh) and warns about
+      # it. The build must hide those lines and remove the stray tree.
+      - name: Assert no pnpm "Failed to create bin" warnings and no stray release tree
+        run: |
+          if grep -q "Failed to create bin" /tmp/install-native.log; then
+            grep "Failed to create bin" /tmp/install-native.log
+            echo "::error::the build printed pnpm bin warnings"; exit 1
+          fi
+          ID="$(basename "$(readlink -f /opt/openestate/current)")"
+          STRAY="$(sudo find /home /opt /root -path "*/releases/${ID}" -not -path "/opt/openestate/releases/${ID}" 2>/dev/null || true)"
+          [ -z "$STRAY" ] || { echo "::error::stray release tree left behind: $STRAY"; exit 1; }
+          echo "No bin warnings, no stray tree (release ${ID})."
+
       - name: Assert login succeeds over HTTP
         run: |
           PASSWORD="$(grep -m1 '^   password:' /tmp/install-native.log | awk '{print $2}')"

@@ -106,7 +106,35 @@ build_release() {
     mkdir -p "$release_dir"
 
     log "Deploying API as a standalone production tree..."
-    pnpm --filter @openestate/api deploy --prod "${release_dir}/api"
+    # pnpm 9 bug (seen with 9.15.0 and 9.15.9, the latest 9.x): when the deploy
+    # target is outside the workspace, `pnpm deploy` links bins a second time
+    # into the target path taken relative to the workspace root but resolved
+    # from apps/api, a stray tree such as
+    # /opt/openestate-src/apps/openestate/releases/<id>/api. It prints "Failed to
+    # create bin at <stray>/node_modules/.bin/<name>" for the dev-only tools that
+    # are not there (browserslist, webpack, vite, terser). The real release tree
+    # is not affected. Hide exactly those lines and remove the stray tree.
+    local rel stray hide tail
+    rel="$(realpath -m --relative-to="$(pwd)" "${release_dir}/api")"
+    stray="$(realpath -m "apps/api/${rel}")"
+    hide="Failed to create bin at ${stray}/node_modules/.bin/"
+    pnpm --filter @openestate/api deploy --prod "${release_dir}/api" 2>&1 \
+      | awk -v h="$hide" 'index($0, h) == 0' || exit 1
+    if [ "${rel#../}" != "$rel" ] && [ "$stray" != "$(realpath -m "${release_dir}/api")" ] && [ -d "$stray" ]; then
+      # The stray tree mirrors the path below the common ancestor, ending in
+      # this build's new release id, so nothing else can live in it. Its
+      # parents are removed only if empty (pnpm created them).
+      rm -rf "$stray"
+      tail="$rel"
+      while [ "${tail#../}" != "$tail" ]; do tail="${tail#../}"; done
+      tail="$(dirname "$tail")"
+      local dir; dir="$(dirname "$stray")"
+      while [ "$tail" != "." ]; do
+        rmdir "$dir" 2>/dev/null || break
+        dir="$(dirname "$dir")"
+        tail="$(dirname "$tail")"
+      done
+    fi
 
     # Workspace packages' built dist/ (gitignored, so pnpm deploy's
     # git-tracked-files selection skips them) copied back in at the same
