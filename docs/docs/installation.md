@@ -173,6 +173,23 @@ first `pnpm install`/build).
 > and `ufw enable` before you finish setup, or use your cloud provider's
 > security-group equivalent.
 
+**Block port 3000 from other machines (v0.8.3 and earlier).** The API listens on
+all network interfaces on port 3000, so anyone on the same network can reach it
+directly and skip nginx. A fix is planned for v0.8.4. Until then, use a host
+firewall so that only nginx (on the same machine) can reach the API. With `ufw`,
+allow SSH first or enabling it can lock you out:
+
+```bash
+sudo ufw allow 22/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw deny 3000/tcp
+sudo ufw enable
+```
+
+nginx reaches the API over the loopback address, which `ufw` does not block, so
+the web and portal apps keep working.
+
 ---
 
 ## 4. First login and initial setup SOP

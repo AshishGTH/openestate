@@ -9,8 +9,9 @@ CLAUDE.md's Decisions log; this file is only *what's true right now*.
 
 ## Where things stand
 
-- **v0.8.3 is released.** Master is `1f48533`, tag `v0.8.3` (annotated), GitHub
-  release `v0.8.3`, all five CI jobs green on that commit. Advisory
+- **v0.8.3 is released.** The release commit is `1f48533` (tag `v0.8.3`,
+  annotated), GitHub release `v0.8.3`, all five CI jobs green on that commit.
+  Master has moved on since, with docs-only commits. Advisory
   [GHSA-gq5m-m6q6-x32p](https://github.com/AshishGTH/openestate/security/advisories/GHSA-gq5m-m6q6-x32p)
   (Low, affected <= 0.8.2, patched 0.8.3) was published 2026-10-10 03:50 UTC.
   **The CVE number is still pending**; re-request it from the advisory page if
@@ -80,6 +81,10 @@ _prisma_migrations`); never assume.
 
 ### Using the VM for tests
 
+- **Only ONE Claude session may work on the VM at a time.** Confirm that no other
+  session (including the mobile-app project) is active before starting.
+- **`pre-P7` contains the temporary sudo rule**, so the rule comes back on every
+  revert to `pre-P7` and must be removed again at the end of the session.
 - **Check the clock first after any revert or resume**, before anything
   time-dependent (2FA codes, reset links, session expiry). `date` against a trusted
   clock is enough; do not trust `timedatectl`'s "synchronized" line. A restored
@@ -120,14 +125,17 @@ _prisma_migrations`); never assume.
    (not yet verified to work; a VM restart fixed it once).
 4. **The Cloudflare tunnel token on the VM** (installed 2026-10-02) was typed on a
    command line, so it appears in the VM's auth log and shell history. Rotate it in
-   the Cloudflare dashboard. The tunnel has no
-   ingress rules and cannot connect from this network, and no request came through
-   it in the logs checked on 2026-10-09 and -10.
-5. **The API listens on `0.0.0.0:3000`** on every install (Part M in the plan); until
-   it ships, advise operators to firewall port 3000.
-6. **The mobile-app staging self-signed certificate expires 2026-11-06.**
-7. **Old test data** remains on the VM (`UIAUDIT` users, projects, bookings and the
-   backups under `/var/backups/openestate/`); nothing is a secret and none of it is
-   needed again.
-8. An older walkthrough box at `192.168.1.100` (user `newopen`, v0.4.0 as of
+   the Cloudflare dashboard. The tunnel has no ingress rules and cannot connect from
+   this network, and no request came through it in the logs checked on 2026-10-09
+   and -10.
+5. **Rotate all test-VM passwords.** One password was exposed in a chat session.
+   Do this together with the tunnel token above.
+6. **The API listens on `0.0.0.0:3000`** on every install (Part M in the plan); until
+   it ships, advise operators to firewall port 3000 (see the installation guide).
+7. **The mobile-app staging self-signed certificate expires 2026-11-06.**
+8. **The UIAUDIT test data is the kept regression test bed. Do not delete it.** It
+   is the company, project, units and bookings, and the accounts exec-a, exec-b,
+   exec-d, mgr, accounts, narrow, 2fa, Buyer One and UIAUDIT-Broker-01. Only the old
+   backups under `/var/backups/openestate/` may be pruned.
+9. An older walkthrough box at `192.168.1.100` (user `newopen`, v0.4.0 as of
    2026-08-29) was not used in this release cycle; its state is unverified.
