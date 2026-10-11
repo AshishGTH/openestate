@@ -1067,8 +1067,10 @@ jobs:
           done
           [ "$HELD" = "1" ] || { echo "::error::could not take the lock on users"; exit 1; }
           cd "$SRC/deploy/native"
+          set +e   # the step runs under bash -e; this command is expected to fail
           sudo MIGRATION_LOCK_TIMEOUT=3s ./upgrade-native.sh --no-backup --ref "$HEAD_SHA" 2>&1 | tee /tmp/upgrade-attempt1.log
           RC=${PIPESTATUS[0]}
+          set -e
           [ "$RC" -ne 0 ] || { echo "::error::the upgrade succeeded although users was locked; the variant proves nothing"; exit 1; }
           grep -qi "lock timeout" /tmp/upgrade-attempt1.log || { echo "::error::the first attempt did not fail on the lock timeout"; exit 1; }
           q() { (cd / && sudo -u postgres psql -d openestate -AtX -c "$1"); }
@@ -1098,11 +1100,12 @@ jobs:
           cd "$SRC/deploy/native"
           # The source folder is already on the commit under test, so this
           # runs the NEW script, which is what an operator's retry runs.
+          set +e   # expected to fail
           sudo ./upgrade-native.sh --no-backup 2>&1 | tee /tmp/upgrade-attempt2.log
           RC=${PIPESTATUS[0]}
-          if [ "$RC" -eq 0 ] || ! grep -q "P3009" /tmp/upgrade-attempt2.log; then
-            echo "::error::a retry WITHOUT the recovery command did not stop with P3009 (exit ${RC})"; exit 1
-          fi
+          set -e
+          [ "$RC" -ne 0 ] || { echo "::error::a retry WITHOUT the recovery command succeeded; it should stop with P3009"; exit 1; }
+          grep -q "P3009" /tmp/upgrade-attempt2.log || { echo "::error::the retry failed (exit ${RC}) but not with P3009"; exit 1; }
           # The command exactly as the release notes print it.
           CMD="$(grep -m1 'UPDATE _prisma_migrations SET rolled_back_at' "${GITHUB_WORKSPACE}/docs/releases/v0.8.4-release-notes.md")"
           echo "Running the release-notes command: ${CMD}"
@@ -1113,12 +1116,14 @@ jobs:
           set -uo pipefail
           echo "CUTOVER_SINCE=$(date -u '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
           cd "$SRC/deploy/native"
+          set +e   # so the exit-code check below runs and names the failure
           if [ "${{ matrix.variant }}" = "lock-timeout" ]; then
             sudo ./upgrade-native.sh --no-backup 2>&1 | tee /tmp/upgrade.log   # the operator's retry, new script
           else
             sudo ./upgrade-native.sh --no-backup --ref "$HEAD_SHA" 2>&1 | tee /tmp/upgrade.log   # the previous release's own script
           fi
           RC=${PIPESTATUS[0]}
+          set -e
           [ "$RC" -eq 0 ] || { echo "::error::upgrade-native.sh exited ${RC}"; exit 1; }
 
       - name: Assert the upgrade outcome
@@ -1176,8 +1181,10 @@ jobs:
           BEFORE="$(readlink -f /opt/openestate/current)"
           COUNT_BEFORE="$(ls /opt/openestate/releases | wc -l)"
           cd "$SRC/deploy/native"
+          set +e   # expected to fail
           sudo ./upgrade-native.sh --no-backup --ref "$PREV_TAG" 2>&1 | tee /tmp/downgrade.log
           RC=${PIPESTATUS[0]}
+          set -e
           [ "$RC" -ne 0 ] || { echo "::error::a downgrade to ${PREV_TAG} was not refused"; exit 1; }
           grep -q "does not contain" /tmp/downgrade.log || { echo "::error::the refusal did not name the migrations ${PREV_TAG} lacks"; exit 1; }
           [ "$(readlink -f /opt/openestate/current)" = "$BEFORE" ] || { echo "::error::the current release changed"; exit 1; }
