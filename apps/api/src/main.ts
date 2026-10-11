@@ -76,7 +76,7 @@ async function bootstrap() {
   }
 
   const port = Number(process.env.PORT ?? 3000);
-  // Loopback only unless HOST says otherwise: see common/network.ts.
+  // Loopback only unless API_HOST says otherwise: see common/network.ts.
   await app.listen(port, apiBindHost());
 }
 

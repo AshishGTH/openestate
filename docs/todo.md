@@ -10,7 +10,7 @@ Each is written up, with its fix and tests, in
 [`docs/testing/v0.8.3-plan.md`](testing/v0.8.3-plan.md) (the v0.8.4 parts):
 
 - **Parts M, N, O, P and I: built on the v0.8.4 branch (unreleased, 2026-10-10).**
-  M: the API listens on 127.0.0.1 (HOST to change) and trusts only loopback
+  M: the API listens on 127.0.0.1 (API_HOST to change) and trusts only loopback
   proxies. N: the upgrade refuses an older version or a database ahead of the
   checkout. O: CI upgrades from the previous release tag with its own script
   (clean, orphan, lock-timeout). P: pnpm deploy's stray bin warnings hidden and

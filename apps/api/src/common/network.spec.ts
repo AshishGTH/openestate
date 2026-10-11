@@ -50,12 +50,12 @@ describe('v0.8.4 Part M: forwarded headers are believed only from loopback', () 
 });
 
 describe('v0.8.4 Part M: bind address', () => {
-  it('defaults to loopback, including when HOST is empty', () => {
+  it('defaults to loopback, including when API_HOST is empty', () => {
     expect(apiBindHost({})).toBe('127.0.0.1');
-    expect(apiBindHost({ HOST: '  ' })).toBe('127.0.0.1');
+    expect(apiBindHost({ API_HOST: '  ' })).toBe('127.0.0.1');
   });
 
-  it('uses HOST when set', () => {
-    expect(apiBindHost({ HOST: '0.0.0.0' })).toBe('0.0.0.0');
+  it('uses API_HOST when set', () => {
+    expect(apiBindHost({ API_HOST: '0.0.0.0' })).toBe('0.0.0.0');
   });
 });

@@ -176,7 +176,7 @@ first `pnpm install`/build).
 **Port 3000 is local only (v0.8.4 and later).** The API listens on
 `127.0.0.1:3000`, so only nginx on the same machine can reach it, and it believes
 `X-Forwarded-For` / `X-Forwarded-Proto` only from a local proxy. If your reverse
-proxy runs on another machine, set `HOST=0.0.0.0` (or a specific address) in
+proxy runs on another machine, set `API_HOST=0.0.0.0` (or a specific address) in
 `/etc/openestate/openestate.env`, restart the service, and firewall port 3000 so
 only that proxy can reach it. A host firewall is still recommended.
 

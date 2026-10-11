@@ -554,7 +554,7 @@ jobs:
       # v0.8.4 Part P: pnpm 9's `deploy` writes a stray copy of the release's
       # .bin tree (see build_release in deploy/native/lib.sh) and warns about
       # it. The build must hide those lines and remove the stray tree.
-      # v0.8.4 Part M: the API must listen on loopback only (no HOST line in the
+      # v0.8.4 Part M: the API must listen on loopback only (no API_HOST line in the
       # env file), so nothing on the network can reach :3000 and skip nginx.
       - name: Assert the API listens on 127.0.0.1:3000 only
         run: |
@@ -848,7 +848,7 @@ jobs:
       - name: Assert the app boots healthy after upgrade
         run: curl -fsS http://localhost/api/v1/health
 
-      # v0.8.4 Part M: the API must listen on loopback only (no HOST line in the
+      # v0.8.4 Part M: the API must listen on loopback only (no API_HOST line in the
       # env file), so nothing on the network can reach :3000 and skip nginx.
       - name: Assert the API listens on 127.0.0.1:3000 only
         run: |
