@@ -48,7 +48,7 @@ Each is written up, with its fix and tests, in
 The advisory was published on 2026-10-10 and a CVE was requested while it was a
 draft. No number was assigned at publication. If none appears by about
 2026-10-17, re-request it from the advisory page
-(https://github.com/AshishGTH/openestate/security/advisories/GHSA-gq5m-m6q6-x32p).
+(https://github.com/stemagh/openestate/security/advisories/GHSA-gq5m-m6q6-x32p).
 
 ## HIGH PRIORITY: fix the two flaky test races soon — flaky CI hides real failures
 
@@ -1563,15 +1563,15 @@ partial-progress miss), across otherwise-identical CI runs.
 different fix attempts each targeting a specific hypothesis (below) left
 the same two specs failing every time, `presales-reports.spec.ts` was
 removed from the branch ENTIRELY and pushed as a pure diagnostic (run
-[33245056896](https://github.com/AshishGTH/openestate/actions/runs/33245056896),
+[33245056896](https://github.com/stemagh/openestate/actions/runs/33245056896),
 job 99081209383). The job still failed — but with a **different** pair
 of specs (`successful-to-booking.spec.ts` + `user-role-edit.spec.ts`)
 than the pair that had been failing with the new spec present
 (`team-scope.spec.ts` + `user-role-edit.spec.ts` — seen across runs
-[33242845925](https://github.com/AshishGTH/openestate/actions/runs/33242845925),
-[33243617317](https://github.com/AshishGTH/openestate/actions/runs/33243617317),
-[33244004498](https://github.com/AshishGTH/openestate/actions/runs/33244004498),
-[33244405582](https://github.com/AshishGTH/openestate/actions/runs/33244405582)).
+[33242845925](https://github.com/stemagh/openestate/actions/runs/33242845925),
+[33243617317](https://github.com/stemagh/openestate/actions/runs/33243617317),
+[33244004498](https://github.com/stemagh/openestate/actions/runs/33244004498),
+[33244405582](https://github.com/stemagh/openestate/actions/runs/33244405582)).
 That rotation — a different pair failing depending on what else is in
 the suite, at the same fixed ceiling regardless — is the signature of
 real, load-dependent contention, not a specific spec's logic being

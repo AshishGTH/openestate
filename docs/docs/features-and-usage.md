@@ -228,7 +228,7 @@ limitation of the current build, not a bug you'll hit by accident:
   Deliberately left out of the project-edit form rather than shipping a
   toggle that looks like it does something and doesn't.
 
-See [docs/todo.md](https://github.com/AshishGTH/openestate/blob/master/docs/todo.md)
+See [docs/todo.md](https://github.com/stemagh/openestate/blob/master/docs/todo.md)
 for the complete, maintained list, including smaller deferred items.
 
 ---
