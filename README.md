@@ -101,7 +101,7 @@ sudo apt-get install -y redis-server nginx
 not writable by a normal user.
 
 ```bash
-sudo git clone https://github.com/AshishGTH/openestate.git /opt/openestate-src
+sudo git clone https://github.com/stemagh/openestate.git /opt/openestate-src
 cd /opt/openestate-src/deploy/native
 sudo ./install-native.sh --server-name crm.yourcompany.com
 ```

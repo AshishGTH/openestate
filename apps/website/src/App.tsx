@@ -159,7 +159,7 @@ const features: Array<{ icon: IconName; title: string; body: string; tone: strin
   { icon: 'plug', title: 'Extend without a fork', body: 'Plugins, webhooks, custom fields, and configurable terminology keep the core adaptable.', tone: 'orange' },
 ];
 
-const installCommand = `sudo git clone https://github.com/AshishGTH/openestate.git /opt/openestate-src
+const installCommand = `sudo git clone https://github.com/stemagh/openestate.git /opt/openestate-src
 cd /opt/openestate-src/deploy/native
 sudo ./install-native.sh --server-name crm.yourcompany.com`;
 
@@ -182,7 +182,7 @@ function App() {
             <a href="#install" onClick={closeMenu}>Install</a>
           </nav>
           <div className="nav-actions">
-            <a className="nav-github" href="https://github.com/AshishGTH/openestate" target="_blank" rel="noreferrer"><Icon name="github" size={18} /><span>GitHub</span></a>
+            <a className="nav-github" href="https://github.com/stemagh/openestate" target="_blank" rel="noreferrer"><Icon name="github" size={18} /><span>GitHub</span></a>
             <Button href="#demo" variant="outline" onClick={closeMenu}>Request a demo</Button>
             <button className="menu-toggle" type="button" aria-label={menuOpen ? 'Close navigation' : 'Open navigation'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
               <Icon name={menuOpen ? 'x' : 'menu'} size={22} />
@@ -269,7 +269,7 @@ function App() {
               <p className="eyebrow">Financial core</p>
               <h2>Balances you can explain six months later.</h2>
               <p>OpenEstate treats financial records as a ledger, not a mutable status field. A correction is a reversal. A balance is the sum of entries. That makes receipts, refunds, GST, TDS, interest, and audits easier to trust.</p>
-              <a className="text-link" href="https://github.com/AshishGTH/openestate#architecture" target="_blank" rel="noreferrer">Read the architecture <Icon name="arrow-up-right" size={16} /></a>
+              <a className="text-link" href="https://github.com/stemagh/openestate#architecture" target="_blank" rel="noreferrer">Read the architecture <Icon name="arrow-up-right" size={16} /></a>
             </div>
             <div className="ledger-card" aria-label="Example append-only ledger">
               <div className="ledger-card-head"><div><span className="small-label">Booking / OE-24018</span><strong>Ledger activity</strong></div><span className="ledger-badge"><Icon name="check" size={13} /> balanced</span></div>
@@ -319,7 +319,7 @@ function App() {
             <div className="terminal-card">
               <div className="terminal-head"><span className="terminal-dots"><i /><i /><i /></span><span>openestate / deploy / native</span><span className="terminal-copy">bash</span></div>
               <pre><code>{installCommand}</code></pre>
-              <div className="terminal-foot"><span><Icon name="check" size={14} /> ready for your server</span><a href="https://github.com/AshishGTH/openestate/blob/master/docs/docs/installation.md" target="_blank" rel="noreferrer">Read installation guide <Icon name="arrow-up-right" size={15} /></a></div>
+              <div className="terminal-foot"><span><Icon name="check" size={14} /> ready for your server</span><a href="https://github.com/stemagh/openestate/blob/master/docs/docs/installation.md" target="_blank" rel="noreferrer">Read installation guide <Icon name="arrow-up-right" size={15} /></a></div>
             </div>
           </div>
         </section>
@@ -327,7 +327,7 @@ function App() {
         <section className="demo-section section-pad" id="demo">
           <div className="container demo-card">
             <div><p className="eyebrow eyebrow-light">See OpenEstate in context</p><h2>Bring us the messy version of your sales process.</h2><p>Tell us where the handoffs break today. We’ll show you how the pieces fit together—and what is already ready to run.</p></div>
-            <div className="demo-actions"><Button href="https://github.com/AshishGTH/openestate/issues/new?title=OpenEstate%20demo%20request" external>Request a demo</Button><a className="demo-secondary" href="https://github.com/AshishGTH/openestate" target="_blank" rel="noreferrer">Explore the repository <Icon name="arrow-up-right" size={17} /></a></div>
+            <div className="demo-actions"><Button href="https://github.com/stemagh/openestate/issues/new?title=OpenEstate%20demo%20request" external>Request a demo</Button><a className="demo-secondary" href="https://github.com/stemagh/openestate" target="_blank" rel="noreferrer">Explore the repository <Icon name="arrow-up-right" size={17} /></a></div>
           </div>
         </section>
       </main>
@@ -335,7 +335,7 @@ function App() {
       <footer className="site-footer">
         <div className="container footer-grid">
           <div className="footer-brand"><img src="/brand/logo-reversed.svg" alt="OpenEstate by The IT Guys" /><p>Open-source property operations, kept on your terms.</p></div>
-          <div className="footer-links"><div><span>Product</span><a href="#capabilities">Capabilities</a><a href="#workflow">How it works</a><a href="#install">Install</a></div><div><span>Project</span><a href="https://github.com/AshishGTH/openestate" target="_blank" rel="noreferrer">GitHub</a><a href="https://github.com/AshishGTH/openestate/blob/master/CONTRIBUTING.md" target="_blank" rel="noreferrer">Contribute</a><a href="https://github.com/AshishGTH/openestate/blob/master/LICENSE" target="_blank" rel="noreferrer">AGPL-3.0</a></div></div>
+          <div className="footer-links"><div><span>Product</span><a href="#capabilities">Capabilities</a><a href="#workflow">How it works</a><a href="#install">Install</a></div><div><span>Project</span><a href="https://github.com/stemagh/openestate" target="_blank" rel="noreferrer">GitHub</a><a href="https://github.com/stemagh/openestate/blob/master/CONTRIBUTING.md" target="_blank" rel="noreferrer">Contribute</a><a href="https://github.com/stemagh/openestate/blob/master/LICENSE" target="_blank" rel="noreferrer">AGPL-3.0</a></div></div>
         </div>
         <div className="container footer-bottom"><span>© {new Date().getFullYear()} The IT Guys</span><span>Built in the open.</span></div>
       </footer>

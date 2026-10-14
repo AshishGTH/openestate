@@ -12,7 +12,7 @@ CLAUDE.md's Decisions log; this file is only *what's true right now*.
 - **v0.8.3 is released.** The release commit is `1f48533` (tag `v0.8.3`,
   annotated), GitHub release `v0.8.3`, all five CI jobs green on that commit.
   Master has moved on since, with docs-only commits. Advisory
-  [GHSA-gq5m-m6q6-x32p](https://github.com/AshishGTH/openestate/security/advisories/GHSA-gq5m-m6q6-x32p)
+  [GHSA-gq5m-m6q6-x32p](https://github.com/stemagh/openestate/security/advisories/GHSA-gq5m-m6q6-x32p)
   (Low, affected <= 0.8.2, patched 0.8.3) was published 2026-10-10 03:50 UTC.
   **The CVE number is still pending**; re-request it from the advisory page if
   none is assigned by about 2026-10-17.
