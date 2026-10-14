@@ -112,8 +112,10 @@ check "checkout differs from download: non-zero exit" "$([ "$RC" -ne 0 ] && echo
 case "$OUT" in *"is at a different commit"*"Nothing was built or changed"*) ok "checkout differs from download: plain message";; *) bad "checkout differs from download: message (got: $OUT)";; esac
 rm -f "$WORK/.git/hooks/post-checkout"
 
-# 8. The project moved: an origin at the old AshishGTH address is switched to
-#    stemAGH (keeping https or ssh); any other origin is left alone. No fetch.
+# 8. The repository's previous address: origin is switched to stemAGH (keeping
+#    https or ssh); any other origin is left alone. No fetch.
+OLD=ashishgth   # previous owner name of this repository (test input only)
+OLD_MIXED=AshishGTH
 switch_to() {
   G -C "$WORK" remote set-url origin "$1"
   OUT="$(bash -c 'source "$1/lib.sh"; switch_moved_origin "$2"' _ "$HERE" "$WORK" 2>&1)"; RC=$?
@@ -121,21 +123,21 @@ switch_to() {
 }
 NEW_HTTPS=https://github.com/stemAGH/openestate.git
 NEW_SSH=git@github.com:stemAGH/openestate.git
-check "moved origin: old https"            "$(switch_to https://github.com/AshishGTH/openestate.git)" "$NEW_HTTPS"
-check "moved origin: old https, no .git"   "$(switch_to https://github.com/AshishGTH/openestate)" "$NEW_HTTPS"
-check "moved origin: old https, lowercase" "$(switch_to https://github.com/ashishgth/openestate.git)" "$NEW_HTTPS"
-check "moved origin: old ssh (scp form)"   "$(switch_to git@github.com:AshishGTH/openestate.git)" "$NEW_SSH"
-check "moved origin: old ssh, no .git"     "$(switch_to git@github.com:AshishGTH/openestate)" "$NEW_SSH"
-check "moved origin: old ssh:// form"      "$(switch_to ssh://git@github.com/AshishGTH/openestate.git)" "$NEW_SSH"
-check "moved origin: already new, unchanged" "$(switch_to "$NEW_HTTPS")" "$NEW_HTTPS"
-check "moved origin: custom fork untouched" "$(switch_to https://github.com/someone/openestate-fork.git)" https://github.com/someone/openestate-fork.git
-check "moved origin: another repo of the old owner untouched" "$(switch_to https://github.com/AshishGTH/other.git)" https://github.com/AshishGTH/other.git
+check "previous address: https"              "$(switch_to "https://github.com/${OLD_MIXED}/openestate.git")" "$NEW_HTTPS"
+check "previous address: https, no .git"     "$(switch_to "https://github.com/${OLD_MIXED}/openestate")" "$NEW_HTTPS"
+check "previous address: https, lowercase"   "$(switch_to "https://github.com/${OLD}/openestate.git")" "$NEW_HTTPS"
+check "previous address: ssh (scp form)"     "$(switch_to "git@github.com:${OLD_MIXED}/openestate.git")" "$NEW_SSH"
+check "previous address: ssh, no .git"       "$(switch_to "git@github.com:${OLD_MIXED}/openestate")" "$NEW_SSH"
+check "previous address: ssh:// form"        "$(switch_to "ssh://git@github.com/${OLD_MIXED}/openestate.git")" "$NEW_SSH"
+check "current address: unchanged"           "$(switch_to "$NEW_HTTPS")" "$NEW_HTTPS"
+check "custom fork: untouched"               "$(switch_to https://github.com/someone/openestate-fork.git)" https://github.com/someone/openestate-fork.git
+check "another repository, same old owner: untouched" "$(switch_to "https://github.com/${OLD_MIXED}/other.git")" "https://github.com/${OLD_MIXED}/other.git"
 # The log line, checked outside $(...) so OUT is visible here.
-G -C "$WORK" remote set-url origin https://github.com/AshishGTH/openestate.git
+G -C "$WORK" remote set-url origin "https://github.com/${OLD_MIXED}/openestate.git"
 OUT="$(bash -c 'source "$1/lib.sh"; switch_moved_origin "$2"' _ "$HERE" "$WORK" 2>&1)"
-case "$OUT" in *"switched from https://github.com/AshishGTH/openestate.git to $NEW_HTTPS"*) ok "moved origin: logs the switch";; *) bad "moved origin: no log line (got: $OUT)";; esac
+case "$OUT" in *"switched from https://github.com/${OLD_MIXED}/openestate.git to $NEW_HTTPS"*) ok "previous address: the switch is logged";; *) bad "previous address: no log line (got: $OUT)";; esac
 OUT="$(bash -c 'source "$1/lib.sh"; switch_moved_origin "$2"' _ "$HERE" "$WORK" 2>&1)"
-[ -z "$OUT" ] && ok "moved origin: already new, nothing logged" || bad "moved origin: logged for an already-new origin (got: $OUT)"
+[ -z "$OUT" ] && ok "current address: nothing logged" || bad "current address: something was logged (got: $OUT)"
 G -C "$WORK" remote set-url origin "$ORIGIN"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"

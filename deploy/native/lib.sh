@@ -16,24 +16,24 @@ rand_hex_32() {
 
 # switch_moved_origin SRC_DIR
 #
-# The project moved from github.com/AshishGTH/openestate to
-# github.com/stemAGH/openestate. GitHub redirects the old address only until
-# someone claims the old name, so a source folder whose origin is the old
-# address (https or ssh, with or without .git, any letter case) is switched to
-# the new one, keeping its protocol. Any other origin (a fork, a mirror) is
-# left alone.
+# The project lives at github.com/stemAGH/openestate. A source folder whose
+# origin still uses the repository's previous address (https or ssh, with or
+# without .git, any letter case) is switched to the new one, keeping its
+# protocol, so upgrades don't depend on GitHub's redirect. Any other origin (a
+# fork, a mirror) is left alone.
 switch_moved_origin() {
-  local src_dir="$1" url new
+  local src_dir="$1" url lower new
   url="$(cd "$src_dir" && git remote get-url origin 2>/dev/null)" || return 0
-  case "$(printf '%s' "$url" | tr '[:upper:]' '[:lower:]')" in
-    https://github.com/ashishgth/openestate | https://github.com/ashishgth/openestate.git | https://github.com/ashishgth/openestate/)
-      new="https://github.com/stemAGH/openestate.git" ;;
-    git@github.com:ashishgth/openestate | git@github.com:ashishgth/openestate.git | ssh://git@github.com/ashishgth/openestate | ssh://git@github.com/ashishgth/openestate.git)
-      new="git@github.com:stemAGH/openestate.git" ;;
-    *) return 0 ;;
+  lower="$(printf '%s' "$url" | tr '[:upper:]' '[:lower:]')"
+  # previous owner name of this repository
+  printf '%s' "$lower" | grep -Eq '^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)ashishgth/openestate(\.git|/)?$' || return 0
+  case "$lower" in
+    https://*) new="https://github.com/stemAGH/openestate.git" ;;
+    *)         new="git@github.com:stemAGH/openestate.git" ;;
   esac
-  (cd "$src_dir" && git remote set-url origin "$new")     || die "Could not change the source folder's origin from ${url} to ${new}. Nothing was changed and the previous release is still running. Run: git -C ${src_dir} remote set-url origin ${new}"
-  log "The project moved to github.com/stemAGH/openestate: origin in ${src_dir} switched from ${url} to ${new}."
+  (cd "$src_dir" && git remote set-url origin "$new") \
+    || die "Could not change the source folder's origin from ${url} to ${new}. Nothing was changed and the previous release is still running. Run: git -C ${src_dir} remote set-url origin ${new}"
+  log "The project's address changed: origin in ${src_dir} switched from ${url} to ${new}."
 }
 
 # checkout_ref SRC_DIR REF
