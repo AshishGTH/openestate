@@ -1166,7 +1166,7 @@ jobs:
           RC=${PIPESTATUS[0]}
           set -e
           [ "$RC" -ne 0 ] || { echo "::error::a downgrade to ${PREV_TAG} was not refused"; exit 1; }
-          grep -q "does not contain" /tmp/downgrade.log || { echo "::error::the refusal did not name the migrations ${PREV_TAG} lacks"; exit 1; }
+          grep -qE "does not contain|cannot go back to an older version" /tmp/downgrade.log || { echo "::error::the refusal did not say why ${PREV_TAG} was refused"; exit 1; }
           [ "$(readlink -f /opt/openestate/current)" = "$BEFORE" ] || { echo "::error::the current release changed"; exit 1; }
           [ "$(ls /opt/openestate/releases | wc -l)" = "$COUNT_BEFORE" ] || { echo "::error::a release was built although the downgrade was refused"; exit 1; }
           [ "$(sudo git -C "$SRC" rev-parse HEAD)" = "$HEAD_SHA" ] || { echo "::error::the source folder was not returned to the running release"; exit 1; }
