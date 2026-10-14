@@ -32,14 +32,16 @@ case "${1:-}" in
     echo "Recorded migrations equal the checkout's $(wc -l < /tmp/expected.txt) folders."
     ;;
   loopback)
-    sudo ss -ltnH 'sport = :3000' | awk '{print $4}' > /tmp/ss-3000.txt
-    cat /tmp/ss-3000.txt
-    grep -qx '127.0.0.1:3000' /tmp/ss-3000.txt || { echo "::error::API is not listening on 127.0.0.1:3000"; exit 1; }
-    if grep -vqx '127.0.0.1:3000' /tmp/ss-3000.txt; then echo "::error::API also listens on another address"; exit 1; fi
+    # The network probe runs first: it is the outcome that matters, and it
+    # must be what fails when the API listens on every address.
+    FOUND="$(sudo ss -ltnH 'sport = :3000' | awk '{print $4}' | sort -u | paste -sd' ' -)"
+    FOUND="${FOUND:-nothing}"
+    echo "Listening on port 3000: ${FOUND}"
     IP="$(hostname -I | awk '{print $1}')"
     if curl -sS --max-time 5 "http://${IP}:3000/api/v1/health" >/dev/null 2>&1; then
-      echo "::error::http://${IP}:3000 answered; the API is reachable from the network"; exit 1
+      echo "::error::http://${IP}:3000 answered; the API is reachable from the network (it listens on ${FOUND}, expected 127.0.0.1:3000 only)"; exit 1
     fi
+    [ "$FOUND" = "127.0.0.1:3000" ] || { echo "::error::API listens on ${FOUND}, expected 127.0.0.1:3000 only"; exit 1; }
     curl -fsS http://127.0.0.1:3000/api/v1/health >/dev/null
     echo "Loopback only: ${IP}:3000 refused, 127.0.0.1:3000 healthy."
     ;;
