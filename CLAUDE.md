@@ -7818,6 +7818,35 @@ portal sessions each did one silent refresh and carried on.
 - **Known edge:** a key removed from a seed in one release and put back in a
   later one counts as new and is re-added, even if an admin had removed it.
 
+### v0.8.4 rehearsal (2026-10-15) and what it taught
+
+- **Rehearsal record.** VM reverted to `v0.8.3-clean` (tag v0.8.3, 37
+  migrations, clock within 1 s), then upgraded with v0.8.3's own
+  `upgrade-native.sh --ref <full sha of wip/v0.8.4 8e058a8c>` through GitHub's
+  redirect from the old address: exit 0, 5 migrations, 42 recorded and equal to
+  the release's folders, all foreign keys validated (the read-only scan found 0
+  orphans in all 71 links beforehand), money totals identical, port 3000 refused
+  from the LAN while nginx answered, the owner's edit from 192.168.1.18 audited
+  with that IP, open staff and portal tabs kept working, the role-baseline report
+  printed and nothing was added. A downgrade to v0.8.3 with the installed v0.8.4
+  script was refused with nothing built or changed and switched the origin to
+  stemAGH. Saved as snapshot `v0.8.4-rehearsal`, VM powered off.
+- **Owner rulings.** The four pnpm "Failed to create bin" warnings on this upgrade
+  are expected (v0.8.3's build code runs it; v0.8.4's cleanup removes only the
+  stray folder of the release it builds, so `apps/openestate` left by earlier
+  versions stays until the operator deletes it). The interest-rule gap ships as a
+  known limitation: nothing writes `Booking.interestRuleId`, so no interest is
+  ever charged and the v0.8.4 RESTRICT refusals can't be reached from the app; the
+  fix is a v0.9 item that needs a plan and owner approval (frozen core).
+- **Lessons.** A pull-request CI run is not created while the PR conflicts with
+  master; after the rename was squash-merged to master, three pushes got no run
+  until master was merged into the branch. Manual runs on one branch cancel each
+  other (`cancel-in-progress`). Windows PowerShell strips inner double quotes from
+  `ssh` arguments, so commands for the owner must be single-quoted with none
+  inside. VMware Tools aren't running in the guest, so the VM is powered off from
+  inside before a snapshot. The new SSH key (`~/.ssh/id_ed25519_openestate_vm`,
+  alias `openestate-vm`) exists only in the `v0.8.4-rehearsal` snapshot.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

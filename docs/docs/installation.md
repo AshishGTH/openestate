@@ -301,10 +301,10 @@ journalctl -u openestate-api -n 200    # last 200 lines
 
 ```bash
 cd /opt/openestate-src/deploy/native
-sudo ./upgrade-native.sh --ref v0.8.3
+sudo ./upgrade-native.sh --ref v0.8.4
 ```
 
-**Always pass a release tag (like `v0.8.3`), never a branch name such as `master`.**
+**Always pass a release tag (like `v0.8.4`), never a branch name such as `master`.**
 An install whose upgrade script is older than v0.8.3 (every install upgrading to
 v0.8.3 for the first time) checks out the *local* copy of a branch with that name.
 That copy is usually weeks behind GitHub, so the script silently builds and installs
@@ -315,6 +315,14 @@ old code over your newer database. A tag has no such local copy and is safe.
 and password-reset links fail. A virtual machine that was suspended or restored from
 a snapshot can wake up with a stale clock even while it reports "synchronized",
 so check the date (`date`) after resuming or restoring one.
+
+**From v0.8.4 the script won't go backwards.** If you name a version older than
+the one running, or one that lacks database changes your install already has, it
+stops before backing up, building or changing anything, says why, and leaves the
+current version running. To go back, restore the backup taken before your last
+upgrade with `restore-native.sh`. After an upgrade, `check-foreign-keys.sh`
+(in the same folder) lists any database links left unchecked because existing
+rows point at something that no longer exists; it only reads.
 
 This: takes an automatic backup first (same as `backup-native.sh`, unless
 you pass `--no-backup`), checks out the given tag/branch in the source
@@ -345,7 +353,7 @@ yours lives in a tag), then run the upgrade again:
 
 ```bash
 sudo git -C /opt/openestate-src fetch --tags --force origin
-cd /opt/openestate-src && sudo ./deploy/native/upgrade-native.sh --ref v0.8.3
+cd /opt/openestate-src && sudo ./deploy/native/upgrade-native.sh --ref v0.8.4
 ```
 
 From v0.8.3 on the script does this itself: `--ref` fetches only that one

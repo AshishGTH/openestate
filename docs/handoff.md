@@ -5,7 +5,7 @@ with whatever a new session needs to pick up work immediately; prune stale facts
 rather than layering history on top of them. For *why* a decision was made, see
 CLAUDE.md's Decisions log; this file is only *what's true right now*.
 
-**Last updated: 2026-10-10, v0.8.4 work in progress (G, A, B committed locally).**
+**Last updated: 2026-10-15, v0.8.4 release commit prepared on `wip/v0.8.4` (draft PR #74); not yet merged, tagged or released.**
 
 ## Where things stand
 
@@ -21,23 +21,26 @@ CLAUDE.md's Decisions log; this file is only *what's true right now*.
   sessions that end at once when a user stops being authorised, the refusal of
   tokens with no surface claim, UTC audit timestamps, and the upgrade-script
   fetch fix. See `CHANGELOG.md` and CLAUDE.md's "0.8.3" entry.
-- **v0.8.4 is in progress, local commits only (not pushed).** Built and
-  committed: **G** (the append-only escape hatch works only for a superuser
-  login), the `forbid_unlinked_portal_role()` ownership fix, **A** (the 71
-  foreign keys restored: added NOT VALID, validated where no orphans, three
-  links ON DELETE RESTRICT with plain 409 messages; `check-foreign-keys.sh`;
-  restore creates the roles a dump needs), and **B** (constraint manifest +
-  CI test, foreign-key enforcement test, migration drop lint). Still to do:
-  **M, N, O, P, I**. Plan: `docs/testing/v0.8.3-plan.md` (v0.8.4 parts). Draft
-  release-notes text: `docs/releases/v0.8.4-release-notes.md`.
-- **Before releasing v0.8.4:** run the read-only orphan scan on the VM (the
-  owner has the one-line command) and rehearse the upgrade from the
-  `v0.8.3-clean` snapshot with v0.8.3's own script.
+- **v0.8.4 is ready for release on `wip/v0.8.4` (draft PR #74), not merged.**
+  It contains G, A, B, M, N, O, P and I (see CHANGELOG `[0.8.4]` and
+  `docs/releases/v0.8.4-release-notes.md`), the repository move, and the 0.8.4
+  version bump. The VM rehearsal from `v0.8.3-clean` with v0.8.3's own script
+  passed on 2026-10-15 (CLAUDE.md, "v0.8.4 rehearsal"). Left: merge to master
+  as a fast-forward, CI green on master, tag `v0.8.4`, GitHub release.
+- **The repository moved to https://github.com/stemAGH/openestate** (was
+  AshishGTH). GitHub redirects the old address for now; the v0.8.4 upgrade script
+  switches an old origin itself.
 
 ## The verification VM
 
 One box is in use: `192.168.1.20`, user `textopen`, Ubuntu 24.04, reached from the
-dev machine with the key already installed (`ssh openestate-vm`, no password).
+dev machine as `ssh openestate-vm` (no password). The alias lives in the dev
+machine's `~/.ssh/config` and uses the key `~/.ssh/id_ed25519_openestate_vm`,
+created 2026-10-15 after the earlier key and alias disappeared from the dev
+machine. **That key is installed only in the `v0.8.4-rehearsal` snapshot**; after a
+revert to any older snapshot, the owner has to add it to
+`~textopen/.ssh/authorized_keys` again (one `echo ... >>` command, typing the
+password).
 IPs on this project drift, so confirm it before trusting it. Credentials are kept
 outside this repo; ask a maintainer. Never put a real credential value in this
 file or any tracked file.
@@ -74,9 +77,16 @@ Snapshot 1                        2026-09-08 23:02 IST  original install
       v0.8.3-clean                2026-10-10 09:37 IST  v0.8.3 from the public tag: release
                                                          ...1f485336, 37 migrations, plain
                                                          HTTP, no sudo rule
+        v0.8.4-rehearsal          2026-10-15            v0.8.3-clean upgraded with v0.8.3's
+                                                         own script to wip/v0.8.4 8e058a8c,
+                                                         42 migrations, origin switched to
+                                                         stemAGH, no sudo rule, powered off;
+                                                         holds the new SSH key
 ```
 
-The VM is currently restored to **`staging-2026-10-09`**.
+The VM is **powered off on `v0.8.4-rehearsal`**. Its health still reports 0.8.3
+because 8e058a8c predates the version bump. The stray pnpm folder
+`/opt/openestate-src/apps/openestate` is still there (left on purpose).
 
 **`v0.8.3-clean` is the new clean base** for the v0.8.4 rehearsal (the previous
 release is now v0.8.3). Before trusting any snapshot as a base, check the active
@@ -106,6 +116,23 @@ _prisma_migrations`); never assume.
 - The built-in browser pane of the desktop coding app is a separate browser with
   its own cookies; it can hold a second staff session next to Incognito.
 - `psql` over an interactive session paginates; use `psql -P pager=off`.
+- **Give the owner commands that survive Windows PowerShell.** PowerShell 5.1
+  strips double quotes inside an argument passed to `ssh`, so a remote command
+  with inner `"..."` breaks (or, piped, silently does nothing: the first key
+  install on 2026-10-15 wrote nothing). Use one single-quoted remote command with
+  no inner double quotes, or ask for Git Bash.
+- **VMware Tools are not running in the guest,** so `vmrun stop soft` fails. Power
+  off from inside (`sudo systemctl poweroff`) before taking a snapshot.
+
+## CI
+
+- **One CI run per commit.** Pull-request runs start on their own only while the
+  PR has no merge conflict with master; if a push gets no run, check for a
+  conflict first (PR #74 had one after the rename was squash-merged to master).
+- **Manual runs on the same branch cancel each other** (`concurrency:
+  cancel-in-progress` per ref), so start at most one with `gh workflow run`, and
+  only when no pull-request run started. Manual runs use the nightly-strength
+  settings (2000 property runs).
 
 ## Dev machine (Windows)
 

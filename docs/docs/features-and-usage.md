@@ -77,8 +77,10 @@ This is OpenEstate's core differentiator. Once a lead converts:
   — not where the buyer lives, per Indian tax law).
 - **TDS tracking** (Section 194-IA) on payments above threshold, with a
   certificate-received flag and report.
-- **Interest on delayed payments**, simple or compound, computed
-  automatically.
+- **Interest on delayed payments** (simple or compound) is calculated by
+  the system, but it can't yet be switched on for a booking from the app,
+  so in practice no interest is charged today. See the known gaps below;
+  a fix is planned for v0.9.
 - **Transfers** (re-selling a booking to a new buyer, or swapping units)
   and **cancellations/surrenders** with configurable deduction rules and a
   refund workflow — every rupee is traceable through an append-only
@@ -172,7 +174,7 @@ commission summaries, and more — every report exports to CSV.
 
 ## What OpenEstate deliberately does not do (yet)
 
-Honesty matters more than a feature list. As of v0.8.3:
+Honesty matters more than a feature list. As of v0.8.4:
 - No native mobile app (the portals are mobile-web, not App Store apps).
 - No built-in accounting/GL beyond the receivables ledger — it's not a
   full accounting system; export to your accountant's tool.
@@ -222,6 +224,9 @@ limitation of the current build, not a bug you'll hit by accident:
   an UPDATE row shows the new values only, not the old ones; changing a
   role's permissions, and a few other bulk changes, write no row; and the
   log is protected by the application, not the database.
+- **Delayed-payment interest can't be switched on.** Interest rules can be
+  set up under Masters, but there is no way in the app to attach one to a
+  booking, so no interest is ever charged. A fix is planned for v0.9.
 - **`Project.isActive` has no enforced effect anywhere.** It's shown as
   a read-only column and set at creation, but nothing — not
   available-unit lookups, not reports, not the portal — reads it.

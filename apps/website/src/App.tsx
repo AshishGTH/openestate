@@ -153,7 +153,7 @@ function ProductPreview() {
 const features: Array<{ icon: IconName; title: string; body: string; tone: string }> = [
   { icon: 'users', title: 'One funnel, end to end', body: 'Capture inquiries, assign work fairly, schedule follow-ups, and see the full story before a deal goes cold.', tone: 'teal' },
   { icon: 'building', title: 'Inventory with context', body: 'Projects, towers, floors, and units—or plotted/farmland inventory priced per acre—with rates and status changes your sales team can actually navigate.', tone: 'blue' },
-  { icon: 'ledger', title: 'Ledger, not mutation', body: 'Receipts, installments, GST, TDS, interest, and corrections stay auditable and append-only.', tone: 'orange' },
+  { icon: 'ledger', title: 'Ledger, not mutation', body: 'Receipts, installments, GST, TDS, and corrections stay auditable and append-only.', tone: 'orange' },
   { icon: 'shield', title: 'Tenant boundaries that hold', body: 'PostgreSQL row-level security and application guards keep companies from crossing the line.', tone: 'teal' },
   { icon: 'layers', title: 'Portals included', body: 'Give customers and brokers a clear view of bookings, documents, statements, tickets, and commissions.', tone: 'blue' },
   { icon: 'plug', title: 'Extend without a fork', body: 'Plugins, webhooks, custom fields, and configurable terminology keep the core adaptable.', tone: 'orange' },
@@ -268,7 +268,7 @@ function App() {
             <div className="ledger-copy">
               <p className="eyebrow">Financial core</p>
               <h2>Balances you can explain six months later.</h2>
-              <p>OpenEstate treats financial records as a ledger, not a mutable status field. A correction is a reversal. A balance is the sum of entries. That makes receipts, refunds, GST, TDS, interest, and audits easier to trust.</p>
+              <p>OpenEstate treats financial records as a ledger, not a mutable status field. A correction is a reversal. A balance is the sum of entries. That makes receipts, refunds, GST, TDS, and audits easier to trust.</p>
               <a className="text-link" href="https://github.com/stemAGH/openestate#architecture" target="_blank" rel="noreferrer">Read the architecture <Icon name="arrow-up-right" size={16} /></a>
             </div>
             <div className="ledger-card" aria-label="Example append-only ledger">

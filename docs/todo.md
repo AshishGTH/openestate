@@ -4,6 +4,31 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## v0.9 TOP ITEM: delayed-payment interest can't be switched on for a booking
+
+Found in the v0.8.4 VM rehearsal (2026-10-15). Interest rules can be set up
+under Masters and `InterestService` accrues correctly, but nothing writes
+`Booking.interestRuleId`: no DTO field, no service, no screen. Accrual skips a
+booking without a rule, so no interest is ever charged, and the v0.8.4
+installment/interest-rule refusals (the `ON DELETE RESTRICT` links) can't be
+reached through the app. v0.8.4 states this as a known limitation. The fix
+touches the frozen financial core (`Booking`, `BookingService`, the booking
+wizard, and how a rule change affects accruals already posted), so it needs a
+written plan and owner approval before any code. Decide with it: whether a rule
+may be attached after booking, and whether changing it is allowed once interest
+has been charged.
+
+## Upgrades never refresh the installed systemd unit
+
+`install-native.sh` copies `deploy/native/systemd/openestate-api.service` to
+`/etc/systemd/system/` and runs `systemctl daemon-reload`; `upgrade-native.sh`
+does neither. A change to the unit in a later release (an environment setting,
+a hardening option, a restart policy) never reaches an existing install. Seen
+in the v0.8.4 rehearsal: the installed unit still carries the old Documentation
+URL. Harmless so far, because no release has changed anything that matters in
+the unit. Fix when a release first needs a unit change: copy it, reload, and
+say so in the upgrade output.
+
 ## v0.8.4: items found during the v0.8.3 release
 
 Each is written up, with its fix and tests, in
@@ -15,7 +40,8 @@ Each is written up, with its fix and tests, in
   checkout. O: CI upgrades from the previous release tag with its own script
   (clean, orphan, lock-timeout). P: pnpm deploy's stray bin warnings hidden and
   the stray tree removed. I: system-role permission sync with a per-role seed
-  baseline. Still to do: the VM rehearsal from `v0.8.3-clean`.
+  baseline. The VM rehearsal from `v0.8.3-clean` passed on 2026-10-15 (snapshot
+  `v0.8.4-rehearsal`); see CLAUDE.md's v0.8.4 rehearsal entry.
 
 ## Deferred from v0.8.4 items A and G (architect decisions, 2026-10-10)
 

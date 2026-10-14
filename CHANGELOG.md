@@ -3,7 +3,58 @@
 All notable changes to OpenEstate are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.8.4] - 2026-10-15
+
+A hardening release: it protects upgrades and the database, and **it changes
+some behaviour**; read "Behaviour changes" before upgrading. Five migrations: two
+change only database ownership and access rules, two restore 71 links between
+tables, and one adds a table (`role_seed_baselines`). No new required
+environment variable; one optional (`API_HOST`). Release notes:
+[v0.8.4](docs/releases/v0.8.4-release-notes.md).
+
+### How to upgrade
+
+```bash
+cd /opt/openestate-src/deploy/native
+sudo ./upgrade-native.sh --ref v0.8.4
+```
+
+- **Give the release tag, never a branch name**, as before.
+- **This upgrade prints four harmless pnpm warnings** ("Failed to create bin at
+  /opt/openestate-src/apps/openestate/releases/…"). Your installed v0.8.3 script
+  builds it, and its build code has the bug v0.8.4 fixes. The release is complete.
+  The same bug has left a small folder, `apps/openestate`, in your source checkout
+  on every install and upgrade; you can delete it (see the release notes).
+- **Afterwards, run `sudo /opt/openestate-src/deploy/native/check-foreign-keys.sh`
+  once.** It only reads, and lists any of the 71 restored links that existing rows
+  keep "not valid". The v0.8.3 script can't print that list itself.
+- **If the upgrade stops at a migration** and the next attempt says "P3009", mark
+  the failed migration as rolled back with the one command in the release notes,
+  then run the upgrade again.
+
+### Behaviour changes
+
+- **The API listens on `127.0.0.1:3000` only.** Until now it listened on every
+  network interface, so anyone on your network could reach port 3000 directly and
+  skip nginx. Installs using the bundled nginx see no difference. If something
+  reached port 3000 from another machine (a remote reverse proxy, load balancer or
+  monitoring check), set `API_HOST=0.0.0.0` (or the address to listen on) in
+  `/etc/openestate/openestate.env`, restart the service, and firewall port 3000 so
+  only that proxy can reach it. The API now believes forwarded headers only from a
+  proxy on the same machine.
+- **The upgrade script refuses to go backwards.** From v0.8.4, `upgrade-native.sh`
+  stops before backing up, building or changing anything if the version you name is
+  older than the one running, or if your database has changes that version lacks.
+  There is no option to force it; to go back, restore the backup taken before your
+  last upgrade. It also checks that what it builds is exactly the commit it
+  downloaded, and prints it ("Deploying <commit> (<version>)").
+- **An installment with interest charged can't be deleted, and an interest rule
+  with charged interest can't be deleted.** Editing a payment plan in a way that
+  would remove such an installment, or deleting such a rule, is refused with a plain
+  message. (No interest is charged in practice yet; see Known limitation.)
+- **An applicant or broker who has a portal account can't be hard-deleted in the
+  database.** The app never hard-deletes them; this matters only to someone
+  deleting rows directly.
 
 ### Security
 
@@ -16,6 +67,8 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   check, so it could drop it (and the trigger with it) or weaken it. The function
   now belongs to a role that cannot log in. Hardening, not a reported
   vulnerability: using it needed the system role's database password.
+- **The API is no longer reachable on port 3000 from the network** (see Behaviour
+  changes).
 
 ### Fixed
 
@@ -31,6 +84,37 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Both now get a plain message instead of leaving records pointing at nothing.
 - `restore-native.sh` creates the database roles a backup refers to before
   loading it, so a restore onto a fresh server works.
+- **No more "Failed to create bin" warnings or stray `apps/openestate` folder** on
+  installs and upgrades made with the v0.8.4 scripts (a pnpm bug). Folders left by
+  earlier versions stay until you delete them.
+- **The upgrade script names the commit it deploys** and stops if what it would
+  build differs from what it downloaded.
+
+### Added
+
+- **New default permissions now reach existing system roles on upgrade.** Each
+  system role remembers the default permission set it was last synced to; an upgrade
+  adds only permissions that are new to that default. A permission an admin removed
+  stays removed, and nothing is ever taken away. The first upgrade records the
+  starting point, adds nothing, and prints how each role differs from its default
+  for an admin to review.
+- **The repository moved to https://github.com/stemAGH/openestate.** The upgrade
+  script switches a source folder that still points at the old address to the new
+  one (keeping https or ssh) and says so; a fork or mirror is left alone.
+- **Checks that keep the database's protections in place:** CI compares every
+  constraint and trigger with a committed list and proves every foreign key refuses
+  a bad row, and a new migration may not drop a constraint, trigger, policy or
+  function unless it is marked and approved.
+- **CI upgrades from the previous release** with that release's own script, in three
+  variants (a clean database, one with an orphaned row, and one where a busy table
+  makes a migration time out and the documented recovery is used), and checks that
+  going back is refused.
+
+### Known limitation
+
+- **Delayed-payment interest can't be switched on for a booking.** Interest rules
+  can be set up, but nothing in the app attaches one to a booking, so no interest is
+  charged in practice. A fix is planned for v0.9.
 
 ## [0.8.3] - 2026-10-10
 
