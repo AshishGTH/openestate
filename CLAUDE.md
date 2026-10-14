@@ -7635,7 +7635,7 @@ dropped foreign keys, deferred).
 
 **Release record.** v0.8.3 is public: master `1f48533`, annotated tag `v0.8.3`,
 the GitHub release, and advisory
-[GHSA-gq5m-m6q6-x32p](https://github.com/AshishGTH/openestate/security/advisories/GHSA-gq5m-m6q6-x32p)
+[GHSA-gq5m-m6q6-x32p](https://github.com/stemagh/openestate/security/advisories/GHSA-gq5m-m6q6-x32p)
 published 2026-10-10 03:50 UTC (Low, CVSS 3.1 score 3.1, CWE-639, affected
 <= 0.8.2, patched 0.8.3). A CVE was requested while the advisory was a draft; **the
 number is still pending** (re-request it from the advisory page if none is assigned

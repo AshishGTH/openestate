@@ -129,7 +129,7 @@ SSH into your server as a user with sudo access, install the prerequisites
 above, then clone the repository and run the installer from inside it:
 
 ```bash
-git clone https://github.com/AshishGTH/openestate.git /opt/openestate-src
+git clone https://github.com/stemagh/openestate.git /opt/openestate-src
 cd /opt/openestate-src/deploy/native
 sudo ./install-native.sh --server-name crm.yourcompany.com
 ```
@@ -471,7 +471,7 @@ Redis there too; see `CONTRIBUTING.md`.
 - This documentation site (build it locally with `pnpm --filter @openestate/docs build`,
   or `pnpm --filter @openestate/docs dev` to browse it live — it isn't
   hosted anywhere public yet).
-- GitHub Issues on [AshishGTH/openestate](https://github.com/AshishGTH/openestate): bug reports and feature requests.
+- GitHub Issues on [stemagh/openestate](https://github.com/stemagh/openestate): bug reports and feature requests.
 - GitHub Discussions: usage questions, "how do I configure X".
 - Security issues: **do not open a public issue** — see `SECURITY.md` for
   the private disclosure process (GitHub Security Advisories).
