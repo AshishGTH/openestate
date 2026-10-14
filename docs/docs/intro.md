@@ -28,7 +28,7 @@ admin-issued, one-time password-reset links for staff and portal users (no
 mail server needed); v0.5.0 was a security release that closed a
 two-factor-authentication bypass and made 2FA codes resistant to
 guessing — see
-[SECURITY.md](https://github.com/stemagh/openestate/blob/master/SECURITY.md)
+[SECURITY.md](https://github.com/stemAGH/openestate/blob/master/SECURITY.md)
 if you're upgrading from a version before that. See the
 [known gaps](./features-and-usage.md#known-gaps-before-you-run-a-real-project-on-this)
 before relying on it for a real pilot.
@@ -39,9 +39,9 @@ before relying on it for a real pilot.
 - **Customization guide** — custom fields, terminology, and module flags are covered in the
   [Admin guide's Customization section](./features-and-usage.md#7-customization--this-isnt-just-for-real-estate)
 - **Plugin development** — not yet written as a standalone guide; the
-  [`generic-sales`](https://github.com/stemagh/openestate/tree/master/plugins/generic-sales)
+  [`generic-sales`](https://github.com/stemAGH/openestate/tree/master/plugins/generic-sales)
   plugin is the closest thing to one today — read it alongside
   `packages/plugin-sdk` for the capability-gated `PluginContext` API
 - **Security** — [ASVS L2 self-assessment](./security/asvs-checklist.md)
   and [STRIDE threat model](./security/threat-model.md);
-  disclosure policy in the repo's [SECURITY.md](https://github.com/stemagh/openestate/blob/master/SECURITY.md)
+  disclosure policy in the repo's [SECURITY.md](https://github.com/stemAGH/openestate/blob/master/SECURITY.md)

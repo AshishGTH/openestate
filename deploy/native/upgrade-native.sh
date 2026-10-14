@@ -59,6 +59,8 @@ done
 [ -L "$CURRENT_LINK" ] || die "${CURRENT_LINK} is not a symlink — is OpenEstate installed via install-native.sh?"
 PREVIOUS_RELEASE="$(readlink -f "$CURRENT_LINK")"
 
+switch_moved_origin "$SRC_DIR"
+
 if [ -n "$REF" ]; then
   log "Checking out ${REF}..."
   checkout_ref "$SRC_DIR" "$REF"

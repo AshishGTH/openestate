@@ -84,7 +84,7 @@ work — read that file for the full reasoning behind any entry here.
   turn a victim's 2FA off, or replace it with an attacker's own
   authenticator. **Fixed in v0.5.0** — see the "Two-factor authentication
   bypass and guessable 2FA codes" advisory in
-  [SECURITY.md](https://github.com/stemagh/openestate/blob/master/SECURITY.md)
+  [SECURITY.md](https://github.com/stemAGH/openestate/blob/master/SECURITY.md)
   for the full account; OpenEstate had no installs outside the author's
   own test machines at the time, so there was no third party to notify.
 

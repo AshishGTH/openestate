@@ -121,7 +121,7 @@ Open a GitHub issue. Security issues are handled separately — see
 
 The plugin system shipped in Phase 7. There's no standalone
 plugin-development guide yet — read the
-[`generic-sales`](https://github.com/stemagh/openestate/tree/master/plugins/generic-sales)
+[`generic-sales`](https://github.com/stemAGH/openestate/tree/master/plugins/generic-sales)
 plugin alongside `packages/plugin-sdk`'s capability-gated `PluginContext`
 API; it's the closest thing to one today. Vertical-specific logic belongs
 in a plugin, not in core.

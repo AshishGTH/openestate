@@ -38,7 +38,7 @@ A security release. **Every install should upgrade.** Two migrations: one adds a
 column (`users.authz_version`), the other only changes database access rules (no
 table or data changes). No new environment variable; no change to install, backup,
 restore or uninstall. Advisory:
-[GHSA-gq5m-m6q6-x32p](https://github.com/stemagh/openestate/security/advisories/GHSA-gq5m-m6q6-x32p).
+[GHSA-gq5m-m6q6-x32p](https://github.com/stemAGH/openestate/security/advisories/GHSA-gq5m-m6q6-x32p).
 
 ### How to upgrade
 
@@ -164,7 +164,7 @@ sudo ./upgrade-native.sh --ref v0.8.3
 A security fix. **Every install should upgrade.** One migration (a database
 trigger; no table or column changes); no new environment variable; no change
 to install, backup, restore or uninstall. Advisory:
-[GHSA-6qrx-8q6w-hvgj](https://github.com/stemagh/openestate/security/advisories/GHSA-6qrx-8q6w-hvgj).
+[GHSA-6qrx-8q6w-hvgj](https://github.com/stemAGH/openestate/security/advisories/GHSA-6qrx-8q6w-hvgj).
 
 ### If your upgrade stops with "would clobber existing tag"
 

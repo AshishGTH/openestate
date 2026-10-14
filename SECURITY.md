@@ -42,7 +42,7 @@ deliberately open `CORS_ALLOWLIST`).
 
 Only the latest tagged release and the `master` branch are supported.
 OpenEstate is pre-1.0 and does not yet maintain parallel patch branches
-for older minor releases — see the [releases page](https://github.com/stemagh/openestate/releases)
+for older minor releases — see the [releases page](https://github.com/stemAGH/openestate/releases)
 for the current version and [CHANGELOG.md](CHANGELOG.md) for what changed
 since the one before it. If you're running an older tagged release,
 upgrade to the latest before reporting — we'll ask you to reproduce there
