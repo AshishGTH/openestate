@@ -5,7 +5,7 @@ with whatever a new session needs to pick up work immediately; prune stale facts
 rather than layering history on top of them. For *why* a decision was made, see
 CLAUDE.md's Decisions log; this file is only *what's true right now*.
 
-**Last updated: 2026-10-15, v0.8.4 release commit prepared on `wip/v0.8.4` (draft PR #74); not yet merged, tagged or released.**
+**Last updated: 2026-10-15, master holds the 0.8.4 release commit (`aa7daf5`), not yet tagged; the race fixes are on `fix/refresh-and-lead-stage-races` (draft PR).**
 
 ## Where things stand
 
@@ -21,12 +21,19 @@ CLAUDE.md's Decisions log; this file is only *what's true right now*.
   sessions that end at once when a user stops being authorised, the refusal of
   tokens with no surface claim, UTC audit timestamps, and the upgrade-script
   fetch fix. See `CHANGELOG.md` and CLAUDE.md's "0.8.3" entry.
-- **v0.8.4 is ready for release on `wip/v0.8.4` (draft PR #74), not merged.**
-  It contains G, A, B, M, N, O, P and I (see CHANGELOG `[0.8.4]` and
-  `docs/releases/v0.8.4-release-notes.md`), the repository move, and the 0.8.4
-  version bump. The VM rehearsal from `v0.8.3-clean` with v0.8.3's own script
-  passed on 2026-10-15 (CLAUDE.md, "v0.8.4 rehearsal"). Left: merge to master
-  as a fast-forward, CI green on master, tag `v0.8.4`, GitHub release.
+- **Master holds the v0.8.4 release commit (`aa7daf5`, version 0.8.4), but v0.8.4
+  is not tagged or released.** It contains G, A, B, M, N, O, P and I (see
+  CHANGELOG `[0.8.4]` and `docs/releases/v0.8.4-release-notes.md`), the
+  repository move, and the version bump. The VM rehearsal from `v0.8.3-clean`
+  with v0.8.3's own script passed on 2026-10-15 (CLAUDE.md, "v0.8.4 rehearsal").
+  Master CI on `aa7daf5` failed one E2E test, the concurrent-refresh race; the
+  owner chose to fix it before releasing.
+- **The fix is on `fix/refresh-and-lead-stage-races` (draft PR into master):**
+  a per-user lock on every refresh-token write, and a test-only scope for
+  `syncLeadStages`. Left: PR CI green, the owner's OK, fast-forward master to
+  the PR head, master CI green, re-date CHANGELOG and release notes to the
+  release day, tag `v0.8.4`, GitHub release, and publish the private draft
+  advisory at the same time.
 - **The repository moved to https://github.com/stemAGH/openestate** (was
   AshishGTH). GitHub redirects the old address for now; the v0.8.4 upgrade script
   switches an old origin itself.

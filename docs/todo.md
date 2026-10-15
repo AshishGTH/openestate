@@ -76,29 +76,37 @@ draft. No number was assigned at publication. If none appears by about
 2026-10-17, re-request it from the advisory page
 (https://github.com/stemAGH/openestate/security/advisories/GHSA-gq5m-m6q6-x32p).
 
-## HIGH PRIORITY: fix the two flaky test races soon — flaky CI hides real failures
+## Done (v0.8.4): the two flaky test races
 
-Two known races make CI fail intermittently on unrelated changes. Each one
-teaches people to press "re-run" instead of reading the failure, which is
-how a real failure eventually gets waved through. Fix both soon, not
-"someday".
+Both fixed at their cause on `fix/refresh-and-lead-stage-races`, each shown by a
+forced-interleaving test that failed 5 of 5 on the old code and passed 5 of 5
+after the fix (CLAUDE.md, "Every writer of a user's refresh tokens takes the
+per-user lock").
 
-1. **`syncLeadStages`' unscoped scan (`packages/db`).** Two test files
-   running it at the same moment can both seed the same company, and the
-   second insert fails `lead_stages (company_id, name)` with P2002. It
-   failed the v0.8.0 release PR's Integration job on 2026-09-25 and passed
-   on a re-run. Candidate fixes are in "Test-infra flakiness from
-   `syncLeadStages`' unscoped scan" below.
-2. **`rapid-reload-session.spec.ts`'s concurrent-refresh test
-   (`apps/e2e`).** "Two concurrent refreshes sharing one cookie do not end
-   the session" failed once in a local full Playwright run on 2026-09-25
-   and passed on the next. It's the refresh-rotation race described in the
-   E2E flakiness entry below (`REFRESH_REUSE_GRACE_SECONDS`).
+1. **`syncLeadStages` (`packages/db`).** The cause was not two syncs at once
+   (only one test file calls it). Another test file's cleanup deleted its
+   company's config, and with it the "already seeded" marker, after the sync
+   had seeded that company; every later sync call then met six stages with no
+   marker and failed with P2002 (CI log of the 2026-09-23 scheduled run). Fixed
+   by an optional company scope the tests pass; the upgrade still runs it
+   unscoped.
+2. **The concurrent-refresh test (`apps/e2e`).** Rotation ran as separate
+   statements with no lock, so a second refresh arriving between the revoke and
+   the insert was refused and cleared the cookies. Now every write to a user's
+   refresh tokens runs in one transaction under a per-user advisory lock.
 
-Done means: each race is fixed at its cause (not by raising a timeout or
-adding a retry), and the fix is shown by running the test repeatedly
-against the unfixed code first, so it fails reliably, then against the
-fix (CLAUDE.md, "a concurrency test must force its interleaving").
+## Follow-up: which cookie the browser keeps after two overlapping refreshes
+
+Owner decision (v0.8.4): keep today's behaviour and log it. When two refreshes
+overlap, both now succeed, but each sets a new cookie and the browser keeps the
+one whose response arrives last. The second request rotates the first one's
+token, so if the first response arrives last, the browser holds a revoked
+token: it still works for 30 seconds (the grace window), and the next refresh
+after that, typically 15 minutes later, signs the user out. With the lock the
+second response is normally sent second, so this is rare. The full fix: in the
+grace path, issue an extra token without revoking the live one, so either
+cookie works. Needs its own design (more live tokens per family) and a
+real-browser check on staff and portal.
 
 ## v0.8.3: `upgrade-native.sh` must survive diverged local tags and fail loudly
 
@@ -755,6 +763,11 @@ it; the repo itself uses no containers (see CLAUDE.md), so this is a
 machine setup issue, not a repo one.
 
 ## Test-infra flakiness from `syncLeadStages`' unscoped scan — timeboxed, root cause not fixed
+
+**Fixed in v0.8.4:** `syncLeadStages` takes an optional company scope and the
+tests pass it, so a test's sync no longer reaches other test files' companies.
+The cleanup workarounds described below stay in place (owner decision); they
+are now redundant, not harmful. The rest of this entry is the history.
 
 **Honest root cause, stated plainly**: `syncLeadStages` (`packages/db/prisma/
 sync-permissions.ts`) does a deliberately UNSCOPED whole-database
@@ -1575,6 +1588,11 @@ waiting for the form to be populated — not fixed in the app. A real
 admin on a slow connection hits the same thing.
 
 ## `apps/e2e`'s CI job has a real, pre-existing intermittent flakiness under concurrency — found while shipping the pre-sales reporting suite, not caused by it
+
+**v0.8.4:** the refresh-rotation race this entry traces the failures to is
+fixed (per-user lock on every refresh-token write; see the "Done (v0.8.4)"
+entry above). If E2E failures of this shape come back, investigate them fresh
+rather than assuming this race.
 
 Building the reporting suite's own Playwright coverage
 (`presales-reports.spec.ts`, PR #27) surfaced a genuine, reproducible

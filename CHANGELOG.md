@@ -89,6 +89,12 @@ sudo ./upgrade-native.sh --ref v0.8.4
   earlier versions stay until you delete them.
 - **The upgrade script names the commit it deploys** and stops if what it would
   build differs from what it downloaded.
+- **Two refreshes at the same moment no longer sign a user out** (staff and
+  portal), for example when a browser restores several tabs at once. Every change
+  to one user's sign-in tokens (sign-in, refresh, sign-out, and ending sessions
+  after a password, 2FA or account change) now happens one at a time for that
+  user, so each sees the others' results.
+- A flaky test in the database package no longer fails CI at random.
 
 ### Added
 

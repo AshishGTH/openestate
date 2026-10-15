@@ -7843,9 +7843,41 @@ portal sessions each did one silent refresh and carried on.
   until master was merged into the branch. Manual runs on one branch cancel each
   other (`cancel-in-progress`). Windows PowerShell strips inner double quotes from
   `ssh` arguments, so commands for the owner must be single-quoted with none
-  inside. VMware Tools aren't running in the guest, so the VM is powered off from
   inside before a snapshot. The new SSH key (`~/.ssh/id_ed25519_openestate_vm`,
   alias `openestate-vm`) exists only in the `v0.8.4-rehearsal` snapshot.
+
+### v0.8.4 — every writer of a user's refresh tokens takes the per-user lock
+
+- **Rule: every create, rotate or revoke of a user's refresh tokens runs in one
+  transaction that first takes `pg_advisory_xact_lock(hashtextextended('refresh:'
+  || user_id, 0))`.** In the API that is `TokenService.withUserLock`, used by
+  `createRefreshToken`, `rotateRefreshToken`, `revokeFamily`, `revokeAllForUser`
+  and `revokeAllForUserExceptToken`; every app path (sign-in, 2FA, invite,
+  refresh, sign-out, password/2FA/account changes) goes through those. The one
+  writer outside the API, `reset-admin-password.sh`, takes the same key in its
+  psql transaction. A new writer must do the same, or it can run in another
+  writer's gap. Rotation reads the token again under the lock.
+- **Why:** rotation was a read, an update and an insert with no lock, so a second
+  refresh arriving between the update and the insert was refused and cleared the
+  session (the master CI failure on `aa7daf5`, and the long-standing E2E flake).
+  Four forced-interleaving tests in
+  `apps/api/test/refresh-rotation-race.test.ts` fail 5 of 5 without the lock.
+- **Per user, not per family:** revoking every session goes by user, so a
+  per-family lock would not serialise it with a rotation (shown by mutation).
+- **Bounded waits:** `lock_timeout` 5 s inside the transaction (PostgreSQL gives
+  up and frees the connection), transaction timeout 10 s, maxWait 10 s. The locked
+  work is a few single-row statements with no outside I/O, and only one user's own
+  requests share a key, so waits can't pile up across users.
+- **Same role and context as before:** the transaction runs on the injected
+  `SYSTEM_PRISMA` client (plain client, `openestate_system`, no tenant or audit
+  extension); `refresh_tokens` has no RLS policy, and scoping is by token hash,
+  family and user id in the queries, which two isolation tests pin.
+- **Not changed (owner decision):** after two overlapping refreshes the browser
+  keeps whichever cookie arrives last (`docs/todo.md`).
+- **`syncLeadStages` takes an optional `{ companyId }` scope for tests**, like
+  the two other sync functions; the upgrade runs it unscoped. The P2002 flake was
+  another test file's cleanup deleting its company's "already seeded" marker
+  after the sync had seeded that company, not two syncs at once.
 
 ## graphify
 
