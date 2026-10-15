@@ -95,6 +95,16 @@ per-user lock").
    the insert was refused and cleared the cookies. Now every write to a user's
    refresh tokens runs in one transaction under a per-user advisory lock.
 
+## v0.9: "Log out everywhere" should also end other devices' access tokens at once
+
+Today "Log out everywhere" (staff and portal) revokes every refresh token but
+does not bump the session version, so an access token another device already
+holds keeps working until it expires (up to 15 minutes). Every other
+session-ending action bumps the version too (`TokenService.endSessions`). Make
+log-out-everywhere use `endSessions` as well, keeping the calling session's own
+behaviour (it signs out too), with a test that another device's access token is
+refused on its next request.
+
 ## Follow-up: which cookie the browser keeps after two overlapping refreshes
 
 Owner decision (v0.8.4): keep today's behaviour and log it. When two refreshes
