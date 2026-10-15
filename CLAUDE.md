@@ -7895,6 +7895,51 @@ portal sessions each did one silent refresh and carried on.
   another test file's cleanup deleting its company's "already seeded" marker
   after the sync had seeded that company, not two syncs at once.
 
+### v0.8.4 released (2026-10-15) — the release record, and what it taught
+
+- **Record.** Master fast-forwarded to `5891f99` (PR #76; PR #74 also shows as
+  merged, both by fast-forward, never squashed). Annotated tag `v0.8.4` on that
+  exact commit; GitHub release `v0.8.4` (latest); advisory GHSA-x58f-9wjq-rjgj
+  (Low, CVSS 3.1 3.3, CWE-362 and CWE-613, affects up to 0.8.3, patched 0.8.4)
+  published at 10:05:01 UTC, six seconds after the release (10:04:55), with a CVE
+  requested. GHSA-gq5m-m6q6-x32p (v0.8.3) was re-requested the same day. Both
+  still have no number; re-check around 2026-10-22. Master CI on `5891f99`:
+  8 of 8 jobs, the previous-release jobs starting from v0.8.3 (`1f48533`).
+- **Why the release waited a day.** Master CI on the release commit `aa7daf5`
+  failed one E2E test, the concurrent-refresh race. The owner chose to fix it
+  before tagging, which led to the per-user lock and then to the session-end
+  fix (see the entry above). Nothing was tagged until the fix had been verified
+  on the VM.
+- **Verification on the VM (snapshot `v0.8.4-verified`).** The installed v0.8.4
+  script upgraded the rehearsal VM to `5891f99`: no pending migration (42), every
+  foreign key validated, money totals unchanged, no "Failed to create bin"
+  warnings and nothing new in `apps/openestate` (the real-world proof of part P).
+  The owner's Incognito checks passed: sign-in, bursts of reloads on staff and
+  portal, two simultaneous refreshes returning `[200, 200]`, a password change
+  signing the other tab out while the changing tab stayed in, and sign-out. One
+  `404` pair in the console was the owner's own misspelt address, confirmed from
+  the nginx log, not a fault.
+- **A test that can't fail is a guard, not a reproduction.** Of the three
+  session-end tests written first, two failed on the old code and the third
+  (a refresh landing between the bump and the revoke) passed, because the old
+  order (revoke, then bump) already refused that refresh. It was kept as the guard
+  that the two steps stay in one transaction, and mutation S2 proves it can fail.
+  It was reported as passing on the old code, not forced to fail.
+- **Proofread advisory text after widening it.** Adding a third gap left "Both
+  need" and "Neither lets" in the first paragraph of the published advisory; it
+  was corrected afterwards by editing only those words and re-fetching to confirm
+  nothing else changed. Check number words whenever a list grows.
+- **Smaller lessons.** `pnpm test --force` hands `--force` to pnpm and fails; use
+  `pnpm exec turbo run test --force`. Git Bash's `/tmp` is not visible to Windows
+  Python. A script with backslashes, backticks or line breaks written through a
+  shell heredoc gets mangled; write it with a file tool. `docs/*.md` and
+  `CHANGELOG.md` have CRLF working copies (git stores LF), so a plain string
+  match from a shell script misses; normalise first. A todo or handoff entry
+  that names a security gap stays out of public files until the release.
+- **Follow-ups, all in `docs/todo.md` and `docs/handoff.md`:** the v0.9 list
+  (interest-rule gap first), the CVE re-checks, and the open owner items
+  (rotate the test-VM passwords and the Cloudflare token first).
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

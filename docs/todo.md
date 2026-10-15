@@ -4,6 +4,23 @@ Cross-phase follow-ups that were consciously deferred, with the phase where
 they're expected to land. Each entry should say *what*, *why deferred*, and
 *what unblocks it*.
 
+## v0.9 "pilot readiness": what is planned
+
+The top item comes first; the rest are each written up in their own entry below
+(search the heading) and are not ordered.
+
+1. **Delayed-payment interest can't be switched on for a booking** (next entry;
+   frozen core, so a written plan and owner approval first).
+2. **"Log out everywhere" should also end other devices' access tokens at once.**
+3. **Which cookie the browser keeps after two overlapping refreshes.**
+4. **Indexes on the 70 unindexed foreign-key columns** (in "Deferred from v0.8.4
+   items A and G").
+5. **The erasure CLI hard-delete tool (item Q)** (in "Erasure").
+6. **Upgrades refresh the installed systemd unit.**
+7. **Lint the root `scripts/` folder.**
+8. **A fragile super_admin test** and **audit rows that record keys where they
+   should record ids**: two short notes whose details need confirming.
+
 ## v0.9 TOP ITEM: delayed-payment interest can't be switched on for a booking
 
 Found in the v0.8.4 VM rehearsal (2026-10-15). Interest rules can be set up
@@ -18,7 +35,7 @@ written plan and owner approval before any code. Decide with it: whether a rule
 may be attached after booking, and whether changing it is allowed once interest
 has been charged.
 
-## Upgrades never refresh the installed systemd unit
+## v0.9: upgrades never refresh the installed systemd unit
 
 `install-native.sh` copies `deploy/native/systemd/openestate-api.service` to
 `/etc/systemd/system/` and runs `systemctl daemon-reload`; `upgrade-native.sh`
@@ -34,14 +51,15 @@ say so in the upgrade output.
 Each is written up, with its fix and tests, in
 [`docs/testing/v0.8.3-plan.md`](testing/v0.8.3-plan.md) (the v0.8.4 parts):
 
-- **Parts M, N, O, P and I: built on the v0.8.4 branch (unreleased, 2026-10-10).**
+- **Parts M, N, O, P and I: DONE, released in v0.8.4 (2026-10-15).**
   M: the API listens on 127.0.0.1 (API_HOST to change) and trusts only loopback
   proxies. N: the upgrade refuses an older version or a database ahead of the
   checkout. O: CI upgrades from the previous release tag with its own script
   (clean, orphan, lock-timeout). P: pnpm deploy's stray bin warnings hidden and
   the stray tree removed. I: system-role permission sync with a per-role seed
   baseline. The VM rehearsal from `v0.8.3-clean` passed on 2026-10-15 (snapshot
-  `v0.8.4-rehearsal`); see CLAUDE.md's v0.8.4 rehearsal entry.
+  `v0.8.4-rehearsal`); see CLAUDE.md's v0.8.4 rehearsal entry. The final check
+  of the release commit also passed (snapshot `v0.8.4-verified`).
 
 ## Deferred from v0.8.4 items A and G (architect decisions, 2026-10-10)
 
@@ -61,24 +79,31 @@ Each is written up, with its fix and tests, in
   correctness or for validating the constraints (each check is a primary-key
   lookup on the parent). They matter only when a parent row is deleted or its key
   changes, which for most of these parents (users, masters) is rare.
-- **Done on the v0.8.4 branch (unreleased):** Parts G, A and B, and the
+- **DONE, released in v0.8.4 (2026-10-15):** Parts G, A and B, and the
   `forbid_unlinked_portal_role()` ownership fix (now owned by the NOLOGIN role
   `openestate_guard_owner`). M, N, O, P and I followed (see the top of this file).
 - **A restored foreign key can be left NOT VALID on a real install** (orphan
   rows). The upgrade prints them and `deploy/native/check-foreign-keys.sh` lists
-  them; nothing resolves them yet (see "No orphan-fix script" above). Check the
-  verification VM with the scan before releasing.
+  them; nothing resolves them yet (see "No orphan-fix script" above). The scan
+  was run on the verification VM before release and found none (all 71 links
+  validated).
 
-## CVE for GHSA-gq5m-m6q6-x32p is pending
+## CVE numbers are pending for two advisories
 
-The advisory was published on 2026-10-10 and a CVE was requested while it was a
-draft. No number was assigned at publication. If none appears by about
-2026-10-17, re-request it from the advisory page
-(https://github.com/stemAGH/openestate/security/advisories/GHSA-gq5m-m6q6-x32p).
+- **GHSA-gq5m-m6q6-x32p** (v0.8.3, published 2026-10-10): a CVE was requested
+  while it was a draft, no number was assigned at publication, and it was
+  re-requested on 2026-10-15.
+- **GHSA-x58f-9wjq-rjgj** (v0.8.4, Low 3.3, published 2026-10-15): a CVE was
+  requested at publication on 2026-10-15.
+
+Re-check both around 2026-10-22 on the advisory pages
+(https://github.com/stemAGH/openestate/security/advisories/GHSA-gq5m-m6q6-x32p and
+https://github.com/stemAGH/openestate/security/advisories/GHSA-x58f-9wjq-rjgj);
+re-request any that still have no number.
 
 ## Done (v0.8.4): the two flaky test races
 
-Both fixed at their cause on `fix/refresh-and-lead-stage-races`, each shown by a
+DONE, released in v0.8.4 (2026-10-15). Both fixed at their cause, each shown by a
 forced-interleaving test that failed 5 of 5 on the old code and passed 5 of 5
 after the fix (CLAUDE.md, "Every writer of a user's refresh tokens takes the
 per-user lock").
@@ -105,7 +130,31 @@ log-out-everywhere use `endSessions` as well, keeping the calling session's own
 behaviour (it signs out too), with a test that another device's access token is
 refused on its next request.
 
-## Follow-up: which cookie the browser keeps after two overlapping refreshes
+## v0.9: lint the root `scripts/` folder
+
+`pnpm lint` runs `turbo run lint`, which only reaches workspace packages, so
+nothing under the repo's root `scripts/` is linted: `scripts/lint-migration-drops.mjs`
+and `scripts/ci/upgrade-scenario.mjs` (a CI gate and the CI upgrade driver), and
+the shell scripts. Running ESLint on the folder by hand on 2026-10-15 gave 17
+`no-undef` errors in those two `.mjs` files (Node globals such as `process` and
+`console` aren't declared for them in `eslint.config.mjs`). Fix: add a Node-globals
+block for `scripts/**/*.mjs` to the config and a root lint step (or turbo task)
+that covers the folder, then fix what it finds.
+
+## v0.9: a fragile super_admin test
+
+Owner-listed item (2026-10-15). Details to confirm and write up: which test, and
+what makes it depend on state it doesn't control. Not yet investigated; record the
+test file and the failure mode here when it is.
+
+## v0.9: audit rows that record keys where they should record ids
+
+Owner-listed item (2026-10-15). Details to confirm and write up: which audit
+rows, and where an identifier is recorded as a key (for example a permission key
+or slug) where a database id would survive a rename. Not yet investigated; record
+the call sites here when it is.
+
+## v0.9: which cookie the browser keeps after two overlapping refreshes
 
 Owner decision (v0.8.4): keep today's behaviour and log it. When two refreshes
 overlap, both now succeed, but each sets a new cookie and the browser keeps the
@@ -214,6 +263,11 @@ typed confirmation, no run; a failed backup deletes nothing. Every refusal
 mutation-checked.
 
 ## `Failed to create bin ... ENOENT` warnings during upgrade builds
+
+**DONE in v0.8.4 (part P).** Upgrades run with the v0.8.4 script no longer print
+the warnings or add to the stray `apps/openestate` folder; confirmed on the VM on
+2026-10-15. Folders left by earlier versions stay until the operator deletes
+them. The text below is the original finding.
 
 Every `upgrade-native.sh` build prints four pnpm warnings (browserslist,
 webpack, vite and one more) of the form `Failed to create bin at
@@ -373,6 +427,9 @@ mandatory external dependency (CLAUDE.md principle 1: self-hostable, no
 mandatory SaaS). Probably an optional check, off unless configured.
 
 ## Low priority: pnpm "Failed to create bin" warnings during the native upgrade build
+
+**DONE in v0.8.4 (part P):** see the entry above. The text below is the original
+note.
 
 **What:** `upgrade-native.sh` builds print four warnings of the form
 `WARN Failed to create bin at .../.bin/<name>. ENOENT: no such file or
