@@ -240,7 +240,7 @@ export class PortalAuthService {
       surface: 'portal',
       applicantId: user.applicantId ?? undefined,
       brokerId: user.brokerId ?? undefined,
-    });
+    }, result.authzVersion);
 
     return { accessToken, refreshRaw: result.newRaw, expiresAt: result.expiresAt };
   }
@@ -275,17 +275,9 @@ export class PortalAuthService {
       }),
     ]);
 
-    // Leaves the session that made this request alone — mirrors the
-    // staff-side fix in AuthService.changePassword (see CLAUDE.md's
-    // mirrored-auth standing rule).
-    if (currentRefreshToken) {
-      await this.tokenService.revokeAllForUserExceptToken(userId, currentRefreshToken);
-    } else {
-      await this.tokenService.revokeAllForUser(userId);
-    }
     // Mirrors AuthService.changePassword: every issued access token is refused
     // from the next request; this browser refreshes, other sessions don't.
-    await this.authzVersions.bumpUsers([userId]);
+    await this.endOtherSessions(userId, currentRefreshToken);
   }
 
   /**
@@ -447,8 +439,7 @@ export class PortalAuthService {
     // change, every other session of that account ends (refresh tokens revoked,
     // access tokens refused). The token issued below reads the new version.
     if (existingUser) {
-      await this.tokenService.revokeAllForUser(existingUser.id);
-      await this.authzVersions.bumpUsers([existingUser.id]);
+      await this.endOtherSessions(existingUser.id);
     }
 
     const tokens = await this.issueTokens(user);
@@ -510,8 +501,7 @@ export class PortalAuthService {
         }),
       });
     });
-    await this.tokenService.revokeAllForUser(reset.userId);
-    await this.authzVersions.bumpUsers([reset.userId]);
+    await this.endOtherSessions(reset.userId);
   }
 
   /**
@@ -671,8 +661,7 @@ export class PortalAuthService {
       return row.totp_enabled;
     });
 
-    await this.tokenService.revokeAllForUser(user.id);
-    await this.authzVersions.bumpUsers([user.id]);
+    await this.endOtherSessions(user.id);
     return { wasEnabled };
   }
 
@@ -733,11 +722,7 @@ export class PortalAuthService {
    * carries on. Same shape as changePassword.
    */
   private async endOtherSessions(userId: string, currentRefreshToken?: string) {
-    if (currentRefreshToken) {
-      await this.tokenService.revokeAllForUserExceptToken(userId, currentRefreshToken);
-    } else {
-      await this.tokenService.revokeAllForUser(userId);
-    }
-    await this.authzVersions.bumpUsers([userId]);
+    const version = await this.tokenService.endSessions(userId, currentRefreshToken);
+    await this.authzVersions.publish(userId, version);
   }
 }

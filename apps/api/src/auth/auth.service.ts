@@ -280,7 +280,7 @@ export class AuthService {
       permissions,
       surface: 'staff',
       forcePasswordChange: user.forcePasswordChange,
-    });
+    }, result.authzVersion);
 
     return {
       accessToken,
@@ -330,17 +330,10 @@ export class AuthService {
       }),
     ]);
 
-    // Leaves the session that made this request alone — only OTHER
-    // sessions are revoked (see TokenService.revokeAllForUserExceptToken).
-    if (currentRefreshToken) {
-      await this.tokenService.revokeAllForUserExceptToken(userId, currentRefreshToken);
-    } else {
-      await this.tokenService.revokeAllForUser(userId);
-    }
     // Every access token already issued (this one included) is refused from
-    // the next request on; this browser's refresh token survives above, so it
+    // the next request on. This browser's refresh token survives, so it
     // silently gets a fresh token and stays signed in. Other sessions don't.
-    await this.authzVersions.bumpUsers([userId]);
+    await this.endOtherSessions(userId, currentRefreshToken);
   }
 
   /**
@@ -386,8 +379,7 @@ export class AuthService {
         }),
       });
     });
-    await this.tokenService.revokeAllForUser(reset.userId);
-    await this.authzVersions.bumpUsers([reset.userId]);
+    await this.endOtherSessions(reset.userId);
   }
 
   async forceChangePassword(userId: string, companyId: string, newPassword: string) {
@@ -408,8 +400,7 @@ export class AuthService {
         }),
       }),
     ]);
-    await this.tokenService.revokeAllForUser(userId);
-    await this.authzVersions.bumpUsers([userId]);
+    await this.endOtherSessions(userId);
   }
 
   /**
@@ -478,11 +469,7 @@ export class AuthService {
    * carries on. Same shape as changePassword.
    */
   private async endOtherSessions(userId: string, currentRefreshToken?: string) {
-    if (currentRefreshToken) {
-      await this.tokenService.revokeAllForUserExceptToken(userId, currentRefreshToken);
-    } else {
-      await this.tokenService.revokeAllForUser(userId);
-    }
-    await this.authzVersions.bumpUsers([userId]);
+    const version = await this.tokenService.endSessions(userId, currentRefreshToken);
+    await this.authzVersions.publish(userId, version);
   }
 }

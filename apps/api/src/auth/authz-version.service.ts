@@ -118,6 +118,14 @@ export class AuthzVersionService implements OnModuleInit, OnModuleDestroy {
     await this.writeThrough(rows);
   }
 
+  /**
+   * Writes a version already committed elsewhere (TokenService.endSessions,
+   * which bumps under the per-user token lock) to the cache.
+   */
+  async publish(userId: string, version: number): Promise<void> {
+    await this.writeThrough([{ id: userId, authz_version: version }]);
+  }
+
   /** Ends every existing session of every user holding this role. */
   async bumpRole(roleId: string): Promise<void> {
     const rows = await this.prisma.$queryRaw<Array<{ id: string; authz_version: number }>>`

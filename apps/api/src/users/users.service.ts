@@ -456,11 +456,10 @@ export class UsersService {
 
     // Refresh tokens die so they can't renew, and the authorisation version
     // moves on so an access token already issued is refused on its very next
-    // request (SessionVersionGuard). Same pattern as
-    // AuthService.forceChangePassword: DB write first, revoke after, outside
-    // the tenant transaction (TokenService uses SYSTEM_PRISMA).
-    await this.tokenService.revokeAllForUser(userId);
-    await this.authzVersions.bumpUsers([userId]);
+    // request (SessionVersionGuard). Both in one transaction under the per-user
+    // token lock (TokenService.endSessions), after the tenant transaction
+    // (TokenService uses SYSTEM_PRISMA).
+    await this.authzVersions.publish(userId, await this.tokenService.endSessions(userId));
 
     // Outstanding reset links die too, staff and portal tables both (this
     // endpoint deactivates either kind of user), so reactivation can't bring
@@ -614,9 +613,9 @@ export class UsersService {
    * reset-link redemption refuses it since v0.6.0). Requiring reactivation
    * first would add an ordering step with no security gain.
    *
-   * Sessions: revokeAllForUser stops every refresh token from renewing, and
-   * the authorisation-version bump makes an access token already issued fail
-   * on its next request (SessionVersionGuard).
+   * Sessions: TokenService.endSessions revokes every refresh token and bumps
+   * the authorisation version in one locked transaction, so an access token
+   * already issued fails on its next request (SessionVersionGuard).
    *
    * The audit row is written even when 2FA was already off (wasEnabled:
    * false): the admin's action is itself worth recording.
@@ -681,8 +680,7 @@ export class UsersService {
 
     // After the transaction, like deactivate(): TokenService writes through
     // its own client. The version bump ends sessions already signed in.
-    await this.tokenService.revokeAllForUser(userId);
-    await this.authzVersions.bumpUsers([userId]);
+    await this.authzVersions.publish(userId, await this.tokenService.endSessions(userId));
     return { wasEnabled };
   }
 }

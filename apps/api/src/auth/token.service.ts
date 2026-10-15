@@ -43,14 +43,15 @@ export class TokenService {
   }
 
   /**
-   * Every token carries the user's CURRENT authorisation version (`av`), read
-   * here from the database at the moment of issue rather than taken from the
-   * caller, so a caller holding a user row loaded before a version bump can never
-   * mint a token that is stale on arrival. SessionVersionGuard compares it on
-   * every request.
+   * Every token carries the user's authorisation version (`av`);
+   * SessionVersionGuard refuses it once the version moves on. Without `av` the
+   * version is read here at the moment of issue. A refresh passes the version it
+   * read under the per-user lock (rotateRefreshToken) instead: a session end that
+   * lands after the rotation then leaves this token stale, where a fresh read
+   * would pick up the new version and keep the session alive.
    */
-  async signAccessToken(payload: Omit<JwtPayload, 'iat' | 'exp' | 'av'>): Promise<string> {
-    return this.jwt.sign({ ...payload, av: await this.currentAuthzVersion(payload.sub) });
+  async signAccessToken(payload: Omit<JwtPayload, 'iat' | 'exp' | 'av'>, av?: number): Promise<string> {
+    return this.jwt.sign({ ...payload, av: av ?? (await this.currentAuthzVersion(payload.sub)) });
   }
 
   private async currentAuthzVersion(userId: string): Promise<number> {
@@ -145,53 +146,70 @@ export class TokenService {
     userId: string;
     newRaw: string;
     expiresAt: Date;
+    /** The user's version when the token rotated; sign the access token with it. */
+    authzVersion: number;
   } | null> {
     const hash = this.hashToken(rawToken);
     const owner = await this.ownerOf(hash);
     if (!owner) return null;
 
     return this.withUserLock(owner, async (tx) => {
-      // Read again under the lock: another request may have rotated or
-      // revoked this token while this one waited.
-      const existing = await tx.refreshToken.findFirst({
-        where: { tokenHash: hash },
-      });
+      // Under the same lock every session end takes, so the version and the
+      // active flag can't change between this read and the rotation below.
+      const [user] = await tx.$queryRaw<Array<{ authz_version: number; is_active: boolean }>>`
+        SELECT authz_version, is_active FROM users WHERE id = ${owner}::uuid`;
+      if (!user?.is_active) return null;
 
-      if (!existing) return null;
-
-      if (existing.isRevoked) {
-        const revokedAgoMs = existing.revokedAt
-          ? Date.now() - existing.revokedAt.getTime()
-          : Number.POSITIVE_INFINITY;
-
-        if (revokedAgoMs <= this.reuseGraceMs) {
-          // Most recent live token in the same family, if the chain is intact.
-          const live = await tx.refreshToken.findFirst({
-            where: {
-              family: existing.family,
-              isRevoked: false,
-              expiresAt: { gt: new Date() },
-            },
-            orderBy: { createdAt: 'desc' },
-          });
-          if (live) return this.rotateRow(tx, live, expiresInOverride);
-        }
-
-        // Genuine reuse: outside the window, or the family is already dead.
-        await this.revokeFamilyById(tx, existing.family);
-        return null;
-      }
-
-      if (existing.expiresAt < new Date()) {
-        await tx.refreshToken.update({
-          where: { id: existing.id },
-          data: { isRevoked: true, revokedAt: new Date() },
-        });
-        return null;
-      }
-
-      return this.rotateRow(tx, existing, expiresInOverride);
+      const rotated = await this.rotateLocked(tx, hash, expiresInOverride);
+      return rotated && { ...rotated, authzVersion: user.authz_version };
     });
+  }
+
+  private async rotateLocked(
+    tx: Tx,
+    hash: string,
+    expiresInOverride?: string,
+  ): Promise<{ userId: string; newRaw: string; expiresAt: Date } | null> {
+    // Read again under the lock: another request may have rotated or
+    // revoked this token while this one waited.
+    const existing = await tx.refreshToken.findFirst({
+      where: { tokenHash: hash },
+    });
+
+    if (!existing) return null;
+
+    if (existing.isRevoked) {
+      const revokedAgoMs = existing.revokedAt
+        ? Date.now() - existing.revokedAt.getTime()
+        : Number.POSITIVE_INFINITY;
+
+      if (revokedAgoMs <= this.reuseGraceMs) {
+        // Most recent live token in the same family, if the chain is intact.
+        const live = await tx.refreshToken.findFirst({
+          where: {
+            family: existing.family,
+            isRevoked: false,
+            expiresAt: { gt: new Date() },
+          },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (live) return this.rotateRow(tx, live, expiresInOverride);
+      }
+
+      // Genuine reuse: outside the window, or the family is already dead.
+      await this.revokeFamilyById(tx, existing.family);
+      return null;
+    }
+
+    if (existing.expiresAt < new Date()) {
+      await tx.refreshToken.update({
+        where: { id: existing.id },
+        data: { isRevoked: true, revokedAt: new Date() },
+      });
+      return null;
+    }
+
+    return this.rotateRow(tx, existing, expiresInOverride);
   }
 
   /** Consumes one live token row and issues its successor in the same family. */
@@ -250,17 +268,27 @@ export class TokenService {
   }
 
   /**
-   * Same as revokeAllForUser, but leaves the CALLER's own session family
-   * alone — for change-password, which must not log the user themselves
-   * out. exceptRawToken is the raw refresh token from the request's own
-   * cookie; if it doesn't resolve to a live token (missing/expired/already
-   * rotated-away), falls back to revoking everything, same as
-   * revokeAllForUser — there's no "current session" to preserve.
+   * Ends a user's sessions: bumps authz_version (so every access token already
+   * issued is refused, SessionVersionGuard) and revokes their refresh tokens, in
+   * one transaction under the per-user lock, so no refresh can land between the
+   * two. Returns the new version; the caller writes it to the cache
+   * (AuthzVersionService.publish) after this commits.
+   *
+   * exceptRawToken leaves the caller's own refresh-token family alone (a
+   * password change must not sign the user out of the tab that made it). If it
+   * doesn't resolve to a token, every family is revoked.
    */
-  async revokeAllForUserExceptToken(userId: string, exceptRawToken: string): Promise<void> {
-    const hash = this.hashToken(exceptRawToken);
-    await this.withUserLock(userId, async (tx) => {
-      const current = await tx.refreshToken.findFirst({ where: { tokenHash: hash } });
+  async endSessions(userId: string, exceptRawToken?: string): Promise<number> {
+    const exceptHash = exceptRawToken ? this.hashToken(exceptRawToken) : undefined;
+    return this.withUserLock(userId, async (tx) => {
+      const [row] = await tx.$queryRaw<Array<{ authz_version: number }>>`
+        UPDATE users SET authz_version = authz_version + 1
+        WHERE id = ${userId}::uuid
+        RETURNING authz_version`;
+      if (!row) throw new Error('Cannot end sessions for a user that does not exist');
+      const current = exceptHash
+        ? await tx.refreshToken.findFirst({ where: { tokenHash: exceptHash } })
+        : null;
       await tx.refreshToken.updateMany({
         where: {
           userId,
@@ -269,6 +297,7 @@ export class TokenService {
         },
         data: { isRevoked: true, revokedAt: new Date() },
       });
+      return row.authz_version;
     });
   }
 

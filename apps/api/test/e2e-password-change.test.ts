@@ -4,7 +4,7 @@
  *  - POST /auth/change-password + /portal/auth/change-password: succeeds
  *    with the correct current password, fails with a wrong one, revokes
  *    OTHER sessions but leaves the calling session's own refresh token
- *    alone (see TokenService.revokeAllForUserExceptToken — the old
+ *    alone (see TokenService.endSessions — the old
  *    behavior revoked everything, including the session that just
  *    changed its own password), and is rate-limited.
  *  - POST /users/:id/force-password-reset (admin-triggered, for another
