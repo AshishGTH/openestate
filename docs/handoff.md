@@ -262,10 +262,14 @@ Release: https://github.com/stemAGH/openestate/releases/tag/v0.8.4. Advisory
 4. Indexes on the 70 unindexed foreign-key columns.
 5. The erasure CLI hard-delete tool (item Q; needs the CA and lawyer answers).
 6. Upgrades refreshing the installed systemd unit.
-7. Linting the root `scripts/` folder.
-8. A fragile super_admin test, and audit rows that record keys where they should
-   record ids (both are short notes in `docs/todo.md` whose details still need
-   confirming).
+7. Root scripts: nothing under `scripts/` is linted; ESLint finds 17 `no-undef`
+   errors in the two `.mjs` files (Node globals not configured).
+8. A fragile super_admin test: "no super_admin role at all" fails whenever
+   another test file has created a super_admin role, because the super_admin
+   sync is unscoped across the shared test database. Likely fix: a scope
+   parameter, as done for `syncLeadStages`.
+9. Audit rows: the upgrade's `ROLE_PERMS_CHANGED` rows list permission keys,
+   while the Roles screen's rows list permission ids. Make them consistent.
 
 ## 5. Open owner items
 

@@ -18,8 +18,8 @@ The top item comes first; the rest are each written up in their own entry below
 5. **The erasure CLI hard-delete tool (item Q)** (in "Erasure").
 6. **Upgrades refresh the installed systemd unit.**
 7. **Lint the root `scripts/` folder.**
-8. **A fragile super_admin test** and **audit rows that record keys where they
-   should record ids**: two short notes whose details need confirming.
+8. **A fragile super_admin test.**
+9. **Upgrade audit rows list permission keys; the Roles screen's list ids.**
 
 ## v0.9 TOP ITEM: delayed-payment interest can't be switched on for a booking
 
@@ -132,6 +132,9 @@ refused on its next request.
 
 ## v0.9: lint the root `scripts/` folder
 
+Nothing under `scripts/` is linted; ESLint finds 17 `no-undef` errors in the
+two `.mjs` files (Node globals not configured).
+
 `pnpm lint` runs `turbo run lint`, which only reaches workspace packages, so
 nothing under the repo's root `scripts/` is linted: `scripts/lint-migration-drops.mjs`
 and `scripts/ci/upgrade-scenario.mjs` (a CI gate and the CI upgrade driver), and
@@ -143,16 +146,15 @@ that covers the folder, then fix what it finds.
 
 ## v0.9: a fragile super_admin test
 
-Owner-listed item (2026-10-15). Details to confirm and write up: which test, and
-what makes it depend on state it doesn't control. Not yet investigated; record the
-test file and the failure mode here when it is.
+The "no super_admin role at all" test fails whenever another test file has
+created a super_admin role, because the super_admin sync is unscoped across the
+shared test database. Likely fix: a scope parameter, as done for
+`syncLeadStages`.
 
-## v0.9: audit rows that record keys where they should record ids
+## v0.9: upgrade audit rows list permission keys; the Roles screen's list ids
 
-Owner-listed item (2026-10-15). Details to confirm and write up: which audit
-rows, and where an identifier is recorded as a key (for example a permission key
-or slug) where a database id would survive a rename. Not yet investigated; record
-the call sites here when it is.
+The upgrade's `ROLE_PERMS_CHANGED` audit rows list permission keys, while the
+Roles screen's rows list permission ids. Make them consistent.
 
 ## v0.9: which cookie the browser keeps after two overlapping refreshes
 

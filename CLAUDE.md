@@ -7936,6 +7936,10 @@ portal sessions each did one silent refresh and carried on.
   `CHANGELOG.md` have CRLF working copies (git stores LF), so a plain string
   match from a shell script misses; normalise first. A todo or handoff entry
   that names a security gap stays out of public files until the release.
+- **After a release, the previous-release CI job must pick a lower version, not
+  just a different commit** (fixed in the docs PR after the release:
+  `previous_release_tag` in `deploy/native/lib.sh`, tested by
+  `test-previous-release.sh`).
 - **Follow-ups, all in `docs/todo.md` and `docs/handoff.md`:** the v0.9 list
   (interest-rule gap first), the CVE re-checks, and the open owner items
   (rotate the test-VM passwords and the Cloudflare token first).
