@@ -7872,6 +7872,22 @@ portal sessions each did one silent refresh and carried on.
   `SYSTEM_PRISMA` client (plain client, `openestate_system`, no tenant or audit
   extension); `refresh_tokens` has no RLS policy, and scoping is by token hash,
   family and user id in the queries, which two isolation tests pin.
+- **Ending sessions is one locked transaction: `TokenService.endSessions`** bumps
+  `authz_version` and revokes the refresh tokens together, then the caller
+  writes the new version to the cache (`AuthzVersionService.publish`). Used by
+  password change, password-reset confirm, first-login password change, 2FA
+  confirm/disable, admin 2FA reset (staff and portal), deactivation and
+  re-invite of an existing portal account. A refresh reads `authz_version` and
+  `is_active` inside its own locked transaction, refuses an inactive account
+  there, and signs the access token with that captured version, so a session end
+  landing after the rotation leaves the access token stale instead of fresh.
+  Log out everywhere still revokes without bumping (unchanged).
+- **Role and permission changes keep bump-only, without the lock** (`bumpUsers`
+  on a role change, `bumpRole`, reactivation). They revoke nothing, so a refresh
+  can't slip between two steps; a refresh that read the old version just signs a
+  token that is refused once, and the client refreshes again. Taking the lock for
+  every user of a role would serialise against every member's refresh for no
+  gain.
 - **Not changed (owner decision):** after two overlapping refreshes the browser
   keeps whichever cookie arrives last (`docs/todo.md`).
 - **`syncLeadStages` takes an optional `{ companyId }` scope for tests**, like

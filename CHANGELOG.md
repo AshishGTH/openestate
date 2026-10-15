@@ -93,7 +93,8 @@ sudo ./upgrade-native.sh --ref v0.8.4
   portal), for example when a browser restores several tabs at once. Every change
   to one user's sign-in tokens (sign-in, refresh, sign-out, and ending sessions
   after a password, 2FA or account change) now happens one at a time for that
-  user, so each sees the others' results.
+  user, so each sees the others' results. Ending a user's sessions now also ends
+  a refresh that is in progress at that moment.
 - A flaky test in the database package no longer fails CI at random.
 
 ### Added
