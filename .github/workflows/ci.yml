@@ -80,6 +80,16 @@ jobs:
       - name: Test the upgrade script's downgrade guard
         run: bash deploy/native/test-upgrade-guard.sh
 
+      # How the upgrade-from-previous-release job picks the release to start
+      # from: the newest tag with a LOWER version, not merely another commit.
+      - name: Test the previous-release selection
+        run: |
+          bash deploy/native/test-previous-release.sh
+          if PREVIOUS_RELEASE_IMPL=old bash deploy/native/test-previous-release.sh >/dev/null 2>&1; then
+            echo "::error::test-previous-release.sh passed against the OLD selection, so it can no longer detect the bug it guards"
+            exit 1
+          fi
+
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -995,11 +1005,10 @@ jobs:
         run: |
           set -euo pipefail
           HEAD_SHA="$(git rev-parse HEAD)"
-          PREV=""
-          for t in $(git tag -l 'v*' --sort=-v:refname); do
-            if [ "$(git rev-list -n1 "$t")" != "$HEAD_SHA" ]; then PREV="$t"; break; fi
-          done
-          [ -n "$PREV" ] || { echo "::error::no previous release tag found"; exit 1; }
+          # The newest tag whose version is lower than this commit's, so a
+          # commit after a release still starts from the release before it.
+          source deploy/native/lib.sh
+          PREV="$(previous_release_tag . 2>/tmp/prev-tag.err)" || { echo "::error::$(cat /tmp/prev-tag.err)"; exit 1; }
           echo "Previous release: ${PREV} ($(git log -1 --format='%h %s' "$PREV"))"
           echo "PREV_TAG=${PREV}" >> "$GITHUB_ENV"
           echo "HEAD_SHA=${HEAD_SHA}" >> "$GITHUB_ENV"

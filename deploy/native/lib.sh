@@ -84,6 +84,26 @@ version_is_older() {
   ' "$1" "$2"
 }
 
+# previous_release_tag REPO_DIR: prints the newest v* tag whose version is
+# strictly lower than the root package.json version at REPO_DIR's HEAD, using
+# version_is_older. Used by CI's upgrade-from-previous-release job: after a
+# release, a commit that still carries that release's version must start from
+# the release before it, not from the release's own tag. Fails, saying why,
+# when no lower tag exists.
+previous_release_tag() {
+  local repo="$1" head_v t v best="" best_v=""
+  head_v="$(cd "$repo" && git show HEAD:package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version')" \
+    || { echo "Could not read the version from package.json at HEAD in ${repo}." >&2; return 1; }
+  for t in $(cd "$repo" && git tag -l 'v*'); do
+    v="${t#v}"
+    [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] || continue
+    version_is_older "$v" "$head_v" || continue
+    if [ -z "$best" ] || version_is_older "$best_v" "$v"; then best="$t"; best_v="$v"; fi
+  done
+  [ -n "$best" ] || { echo "No release tag has a version lower than ${head_v} (the version at HEAD in ${repo})." >&2; return 1; }
+  printf '%s\n' "$best"
+}
+
 # migrations_not_in MIGRATIONS_DIR: reads applied migration names on stdin and
 # prints each one that has no folder in MIGRATIONS_DIR.
 migrations_not_in() {
