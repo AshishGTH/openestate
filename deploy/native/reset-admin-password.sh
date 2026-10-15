@@ -118,8 +118,11 @@ fi
 
 log "Updating database..."
 # One -c string runs as a single transaction, so the password, the 2FA clear
-# and the audit row commit together or not at all.
+# and the audit row commit together or not at all. The advisory lock is the one
+# the API takes for every write to a user's refresh tokens (TokenService), so a
+# refresh running at this moment can't leave a live token behind.
 psql "$DATABASE_URL_SYSTEM" -v ON_ERROR_STOP=1 -c "
+  SELECT pg_advisory_xact_lock(hashtextextended('refresh:' || '${USER_ID}', 0));
   UPDATE users SET password_hash = '${HASH_ESC}', force_password_change = false,
     failed_login_attempts = 0, locked_until = NULL, authz_version = authz_version + 1
     WHERE id = '${USER_ID}';

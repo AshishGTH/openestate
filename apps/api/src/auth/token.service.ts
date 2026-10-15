@@ -7,6 +7,24 @@ import { SYSTEM_PRISMA } from '../database/database.module';
 import type { JwtPayload } from '@openestate/shared';
 import { TWO_FACTOR_PENDING_PERMISSION, TWO_FACTOR_PENDING_TTL_SECONDS } from './guards/two-factor-pending.guard';
 
+/** The client a $transaction callback receives. */
+type Tx = Parameters<Parameters<PrismaClient['$transaction']>[0]>[0];
+
+/**
+ * Every write to a user's refresh tokens (create, rotate, revoke) runs in one
+ * transaction holding a per-user advisory lock, so these writes happen one at a
+ * time per user and each sees the others' committed results. Without it, a
+ * second refresh arriving between a rotation's revoke and its insert was refused
+ * as theft, and a revoke running in that gap missed the new token.
+ *
+ * Each wait is bounded twice: lock_timeout makes PostgreSQL give up on a lock
+ * after 5 s (freeing the connection), and the transaction is cancelled after
+ * 10 s. The locked work is a few single-row statements with no outside I/O, and
+ * only one user's own requests ever queue on the same lock.
+ */
+const LOCK_TIMEOUT = '5s';
+const TX_OPTIONS = { maxWait: 10_000, timeout: 10_000 };
+
 @Injectable()
 export class TokenService {
   private readonly refreshSecret: string;
@@ -70,15 +88,17 @@ export class TokenService {
     const tokenFamily = family ?? randomUUID();
     const expiresAt = this.computeExpiry(expiresInOverride ?? this.refreshExpiresIn);
 
-    await this.prisma.refreshToken.create({
-      data: {
-        id: jti,
-        userId,
-        tokenHash: hash,
-        family: tokenFamily,
-        expiresAt,
-      },
-    });
+    await this.withUserLock(userId, (tx) =>
+      tx.refreshToken.create({
+        data: {
+          id: jti,
+          userId,
+          tokenHash: hash,
+          family: tokenFamily,
+          expiresAt,
+        },
+      }),
+    );
 
     return { raw, expiresAt };
   }
@@ -127,53 +147,60 @@ export class TokenService {
     expiresAt: Date;
   } | null> {
     const hash = this.hashToken(rawToken);
+    const owner = await this.ownerOf(hash);
+    if (!owner) return null;
 
-    const existing = await this.prisma.refreshToken.findFirst({
-      where: { tokenHash: hash },
-    });
+    return this.withUserLock(owner, async (tx) => {
+      // Read again under the lock: another request may have rotated or
+      // revoked this token while this one waited.
+      const existing = await tx.refreshToken.findFirst({
+        where: { tokenHash: hash },
+      });
 
-    if (!existing) return null;
+      if (!existing) return null;
 
-    if (existing.isRevoked) {
-      const revokedAgoMs = existing.revokedAt
-        ? Date.now() - existing.revokedAt.getTime()
-        : Number.POSITIVE_INFINITY;
+      if (existing.isRevoked) {
+        const revokedAgoMs = existing.revokedAt
+          ? Date.now() - existing.revokedAt.getTime()
+          : Number.POSITIVE_INFINITY;
 
-      if (revokedAgoMs <= this.reuseGraceMs) {
-        // Most recent live token in the same family, if the chain is intact.
-        const live = await this.prisma.refreshToken.findFirst({
-          where: {
-            family: existing.family,
-            isRevoked: false,
-            expiresAt: { gt: new Date() },
-          },
-          orderBy: { createdAt: 'desc' },
-        });
-        if (live) return this.rotateRow(live, expiresInOverride);
+        if (revokedAgoMs <= this.reuseGraceMs) {
+          // Most recent live token in the same family, if the chain is intact.
+          const live = await tx.refreshToken.findFirst({
+            where: {
+              family: existing.family,
+              isRevoked: false,
+              expiresAt: { gt: new Date() },
+            },
+            orderBy: { createdAt: 'desc' },
+          });
+          if (live) return this.rotateRow(tx, live, expiresInOverride);
+        }
+
+        // Genuine reuse: outside the window, or the family is already dead.
+        await this.revokeFamilyById(tx, existing.family);
+        return null;
       }
 
-      // Genuine reuse: outside the window, or the family is already dead.
-      await this.revokeFamilyById(existing.family);
-      return null;
-    }
+      if (existing.expiresAt < new Date()) {
+        await tx.refreshToken.update({
+          where: { id: existing.id },
+          data: { isRevoked: true, revokedAt: new Date() },
+        });
+        return null;
+      }
 
-    if (existing.expiresAt < new Date()) {
-      await this.prisma.refreshToken.update({
-        where: { id: existing.id },
-        data: { isRevoked: true, revokedAt: new Date() },
-      });
-      return null;
-    }
-
-    return this.rotateRow(existing, expiresInOverride);
+      return this.rotateRow(tx, existing, expiresInOverride);
+    });
   }
 
   /** Consumes one live token row and issues its successor in the same family. */
   private async rotateRow(
+    tx: Tx,
     row: { id: string; userId: string; family: string },
     expiresInOverride?: string,
   ): Promise<{ userId: string; newRaw: string; expiresAt: Date }> {
-    await this.prisma.refreshToken.update({
+    await tx.refreshToken.update({
       where: { id: row.id },
       data: { isRevoked: true, revokedAt: new Date() },
     });
@@ -183,7 +210,7 @@ export class TokenService {
     const newJti = randomUUID();
     const expiresAt = this.computeExpiry(expiresInOverride ?? this.refreshExpiresIn);
 
-    await this.prisma.refreshToken.create({
+    await tx.refreshToken.create({
       data: {
         id: newJti,
         userId: row.userId,
@@ -196,8 +223,8 @@ export class TokenService {
     return { userId: row.userId, newRaw, expiresAt };
   }
 
-  private async revokeFamilyById(family: string): Promise<void> {
-    await this.prisma.refreshToken.updateMany({
+  private async revokeFamilyById(tx: Tx, family: string): Promise<void> {
+    await tx.refreshToken.updateMany({
       where: { family, isRevoked: false },
       data: { isRevoked: true, revokedAt: new Date() },
     });
@@ -205,22 +232,21 @@ export class TokenService {
 
   async revokeFamily(rawToken: string): Promise<void> {
     const hash = this.hashToken(rawToken);
-    const existing = await this.prisma.refreshToken.findFirst({
-      where: { tokenHash: hash },
+    const owner = await this.ownerOf(hash);
+    if (!owner) return;
+    await this.withUserLock(owner, async (tx) => {
+      const existing = await tx.refreshToken.findFirst({ where: { tokenHash: hash } });
+      if (existing) await this.revokeFamilyById(tx, existing.family);
     });
-    if (existing) {
-      await this.prisma.refreshToken.updateMany({
-        where: { family: existing.family, isRevoked: false },
-        data: { isRevoked: true, revokedAt: new Date() },
-      });
-    }
   }
 
   async revokeAllForUser(userId: string): Promise<void> {
-    await this.prisma.refreshToken.updateMany({
-      where: { userId, isRevoked: false },
-      data: { isRevoked: true, revokedAt: new Date() },
-    });
+    await this.withUserLock(userId, (tx) =>
+      tx.refreshToken.updateMany({
+        where: { userId, isRevoked: false },
+        data: { isRevoked: true, revokedAt: new Date() },
+      }),
+    );
   }
 
   /**
@@ -233,16 +259,36 @@ export class TokenService {
    */
   async revokeAllForUserExceptToken(userId: string, exceptRawToken: string): Promise<void> {
     const hash = this.hashToken(exceptRawToken);
-    const current = await this.prisma.refreshToken.findFirst({ where: { tokenHash: hash } });
-
-    await this.prisma.refreshToken.updateMany({
-      where: {
-        userId,
-        isRevoked: false,
-        ...(current ? { family: { not: current.family } } : {}),
-      },
-      data: { isRevoked: true, revokedAt: new Date() },
+    await this.withUserLock(userId, async (tx) => {
+      const current = await tx.refreshToken.findFirst({ where: { tokenHash: hash } });
+      await tx.refreshToken.updateMany({
+        where: {
+          userId,
+          isRevoked: false,
+          ...(current ? { family: { not: current.family } } : {}),
+        },
+        data: { isRevoked: true, revokedAt: new Date() },
+      });
     });
+  }
+
+  /** The user a token belongs to, so its writes can take that user's lock. */
+  private async ownerOf(tokenHash: string): Promise<string | null> {
+    const row = await this.prisma.refreshToken.findFirst({
+      where: { tokenHash },
+      select: { userId: true },
+    });
+    return row?.userId ?? null;
+  }
+
+  private withUserLock<T>(userId: string, fn: (tx: Tx) => Promise<T>): Promise<T> {
+    return this.prisma.$transaction(async (tx) => {
+      // Raw SQL: transaction-scoped settings and advisory locks have no Prisma
+      // API. Both values are bound parameters.
+      await tx.$executeRaw`SELECT set_config('lock_timeout', ${LOCK_TIMEOUT}, true)`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended('refresh:' || ${userId}, 0))`;
+      return fn(tx);
+    }, TX_OPTIONS);
   }
 
   private hashToken(raw: string): string {

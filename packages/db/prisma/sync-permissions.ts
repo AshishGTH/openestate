@@ -172,8 +172,12 @@ export async function syncSuperAdminPermissions(
  */
 export async function syncLeadStages(
   client: PrismaClient = prisma,
+  // For tests only: the upgrade runs it unscoped. In the shared test database
+  // an unscoped call reaches other test files' companies mid-cleanup.
+  scope: { companyId?: string } = {},
 ): Promise<{ seeded: number; skipped: number }> {
   const companies = await client.company.findMany({
+    where: scope.companyId ? { id: scope.companyId } : {},
     select: {
       id: true,
       config: { select: { leadStagesSeededAt: true } },
