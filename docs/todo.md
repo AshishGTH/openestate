@@ -68,6 +68,12 @@ GST applies to interest, grace days, any RERA-prescribed rate such as SBI
 MCLR + 2%), then make accrual honour `frequency` and lift the refusal in
 `BookingInterestRuleService`, with tests against hand-computed figures.
 
+## Follow-up: bookings created without the manage permission have no interest rule
+
+Bookings created without the manage permission have no interest rule and
+nothing flags them: add a visible 'No interest rule' marker or filter for
+Accounts.
+
 ## Follow-up: bulk move bookings between interest rules
 
 Not built (owner ruling j). A rule in use can't be re-rated, so a rate change
