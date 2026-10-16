@@ -11,8 +11,10 @@ import {
   makeUnit,
   makeApplicant,
   cleanupCompany,
+  TEST_SUPER_URL,
   type CompanyFixture,
 } from './helpers/postsales-harness';
+import { PrismaClient } from '@openestate/db';
 import { bookingsWithoutInterestRule } from '../../../packages/db/prisma/sync-permissions';
 
 const describeIf =
@@ -65,5 +67,26 @@ describeIf('upgrade report: active bookings with no interest rule', () => {
     const rows = await bookingsWithoutInterestRule(systemPrisma, { companyId: fx.companyId });
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ companyId: fx.companyId, count: 3 });
+  });
+
+  it('counts a booking whose rule no longer exists (an orphan) as having no rule', async () => {
+    // The state a v0.8.4 install can be in: the key is NOT VALID and a row
+    // points at a deleted rule. Accrual finds no rule for it, so it charges
+    // nothing; the report must say so. The orphan is planted with foreign-key
+    // triggers off for this one transaction (superuser only).
+    const before = (await bookingsWithoutInterestRule(systemPrisma, { companyId: fx.companyId }))[0]?.count ?? 0;
+    const orphan = await booking('BOOKED');
+    const sup = new PrismaClient({ datasourceUrl: TEST_SUPER_URL });
+    try {
+      await sup.$transaction([
+        sup.$executeRawUnsafe(`SET LOCAL session_replication_role = replica`),
+        sup.$executeRawUnsafe(`UPDATE bookings SET interest_rule_id = gen_random_uuid() WHERE id = $1::uuid`, orphan.id),
+      ]);
+    } finally {
+      await sup.$disconnect();
+    }
+    expect((await systemPrisma.booking.findUnique({ where: { id: orphan.id } })).interestRuleId).not.toBeNull();
+    const rows = await bookingsWithoutInterestRule(systemPrisma, { companyId: fx.companyId });
+    expect(rows[0].count).toBe(before + 1);
   });
 });

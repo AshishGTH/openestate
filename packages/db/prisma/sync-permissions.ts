@@ -392,7 +392,7 @@ export async function syncSystemRoleBaselines(
 
 /**
  * v0.9: active bookings (BOOKED, ALLOTTED, REGISTERED) with no delay-interest
- * rule, per company. Read-only. Printed by the CLI below so every upgrade
+ * rule, per company: none set, or a rule id that no longer exists. Read-only. Printed by the CLI below so every upgrade
  * shows it, including the first upgrade to v0.9, which runs the previous
  * release's upgrade-native.sh but this release's copy of this script.
  * Nothing attaches a rule automatically: an admin attaches one per booking,
@@ -406,8 +406,10 @@ export async function bookingsWithoutInterestRule(
   const rows = await client.$queryRaw<Array<{ company_id: string; name: string; n: number }>>`
     SELECT c.id AS company_id, c.name, count(*)::int AS n
       FROM bookings b JOIN companies c ON c.id = b.company_id
-     WHERE b.interest_rule_id IS NULL
-       AND b.status IN ('BOOKED', 'ALLOTTED', 'REGISTERED')
+     WHERE b.status IN ('BOOKED', 'ALLOTTED', 'REGISTERED')
+       -- No rule: none set, or one that no longer exists (an orphan left by a
+       -- NOT VALID key, which accrual treats as no rule).
+       AND NOT EXISTS (SELECT 1 FROM interest_rules r WHERE r.id = b.interest_rule_id)
        AND (${companyId}::uuid IS NULL OR b.company_id = ${companyId}::uuid)
      GROUP BY c.id, c.name
      ORDER BY c.name`;
