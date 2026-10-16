@@ -43,6 +43,10 @@ the VM rehearsal from `v0.8.4-verified`).**
   top), publish the advisory straight away and request its CVE, then check a fresh
   clone (tag points at the commit, `package.json` version), delete the merged
   branches. The owner is present from the master push to the advisory.
+  Before the first PR run of a new release, review the previous-release CI
+  variants (clean, orphan, lock-timeout) for what that release changes. (They
+  are marked "REVIEW EACH RELEASE" in `.github/workflows/ci.yml`; v0.9's first
+  run failed on all three because they still described v0.8.4.)
 - **Only one Claude session may use the VM or one working directory at a time.**
 
 ## 2. Environment
