@@ -200,6 +200,17 @@ shared test database. Likely fix: a scope parameter, as done for
 The upgrade's `ROLE_PERMS_CHANGED` audit rows list permission keys, while the
 Roles screen's rows list permission ids. Make them consistent.
 
+## Direct database bumps of `users.authz_version` don't clear the session-version cache
+
+Direct database bumps of `users.authz_version` (the upgrade sync,
+`packages/db/prisma/sync-permissions.ts`) don't clear the Redis
+session-version cache, so an old token can be accepted for up to 60s. Harmless
+while the sync only adds permissions; any future step that removes access this
+way must clear the cache. (The other direction was fixed in v0.9: a token newer
+than the cache is checked against the database, so a refreshed session is no
+longer signed out; found by PR #78's CI. `e2e-session-authz-version.test.ts`
+pins both, the old-token window as a "known window" test.)
+
 ## v0.9: which cookie the browser keeps after two overlapping refreshes
 
 Owner decision (v0.8.4): keep today's behaviour and log it. When two refreshes

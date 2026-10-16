@@ -40,6 +40,8 @@ missing rule). No new environment variable.
   period twice. Accrual now takes a per-booking lock.
 - The manual accrue action could charge interest on a cancelled or transferred
   booking.
+- After an upgrade that adds permissions, some users could be signed out for up
+  to a minute.
 
 ### Upgrade notes
 
