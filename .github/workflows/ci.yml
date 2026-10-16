@@ -1078,8 +1078,10 @@ jobs:
           node scripts/ci/upgrade-scenario.mjs sessions || exit 1
           echo "Half-migrated: hatch and portal-check migrations applied, foreign keys not; ${PREV_TAG} still records receipts and refreshes sessions."
 
-      - name: Record money totals before the upgrade
-        run: bash scripts/ci/upgrade-checks.sh money /tmp/money-before.txt
+      - name: Record money totals and staff role permissions before the upgrade
+        run: |
+          bash scripts/ci/upgrade-checks.sh money /tmp/money-before.txt
+          bash scripts/ci/upgrade-checks.sh roles /tmp/roles-before.txt
 
       - name: "Variant lock-timeout: the retry needs the release-notes recovery command"
         if: matrix.variant == 'lock-timeout'
@@ -1126,6 +1128,19 @@ jobs:
           bash scripts/ci/upgrade-checks.sh migrations "$GITHUB_WORKSPACE"
           bash scripts/ci/upgrade-checks.sh money /tmp/money-after.txt
           bash scripts/ci/upgrade-checks.sh same-money /tmp/money-before.txt /tmp/money-after.txt
+          bash scripts/ci/upgrade-checks.sh roles /tmp/roles-after.txt
+          bash scripts/ci/upgrade-checks.sh role-sync /tmp/roles-before.txt /tmp/roles-after.txt
+          bash scripts/ci/upgrade-checks.sh interest-report /tmp/upgrade.log
+          # Self-checks: the role comparison notices a lost permission, and the
+          # interest-report check notices a missing report line.
+          awk -F'|' 'NR==1{sub(/^[^,]*,?/, "", $3)} {print $1"|"$2"|"$3"|"$4}' /tmp/roles-after.txt > /tmp/roles-tampered.txt
+          if bash scripts/ci/upgrade-checks.sh role-sync /tmp/roles-before.txt /tmp/roles-tampered.txt >/dev/null 2>&1; then
+            echo "::error::the role comparison did not notice a lost permission"; exit 1
+          fi
+          : > /tmp/empty.log
+          if bash scripts/ci/upgrade-checks.sh interest-report /tmp/empty.log >/dev/null 2>&1; then
+            echo "::error::the interest-report check passed on an empty upgrade log"; exit 1
+          fi
           # Self-check: the money comparison does catch a changed total.
           sed '0,/^booking /s/^\(booking [^ ]*\) \([0-9-]*\)/\1 999\2/' /tmp/money-before.txt > /tmp/money-tampered.txt
           if bash scripts/ci/upgrade-checks.sh same-money /tmp/money-before.txt /tmp/money-tampered.txt >/dev/null 2>&1; then

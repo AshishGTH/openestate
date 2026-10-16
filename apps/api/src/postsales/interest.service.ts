@@ -123,7 +123,11 @@ export class InterestService {
         where: { companyId, installmentId: inst.id },
         orderBy: { periodEnd: 'desc' },
       });
-      const cursor: Date = priorAccruals.length > 0 ? priorAccruals[0].periodEnd : inst.dueDate!;
+      const lastEnd: Date = priorAccruals.length > 0 ? priorAccruals[0].periodEnd : inst.dueDate!;
+      // Interest runs only from the date the rule was attached (v0.9): a rule
+      // attached late, or re-attached after a removal, charges nothing before it.
+      const floor: Date | null = booking.interestFromDate;
+      const cursor: Date = floor && toUtcMidnight(floor) > toUtcMidnight(lastEnd) ? floor : lastEnd;
       const days = daysBetween(cursor, asOf);
       if (days <= 0) continue;
 

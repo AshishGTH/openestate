@@ -1,11 +1,12 @@
 /**
  * Forces an interleaving (CLAUDE.md: "a concurrency test must force its
  * interleaving"): a superuser connection holds an ACCESS EXCLUSIVE lock on
- * one table, the requests under test are started, and the lock is released
- * only once `expectedBlocked` backends are waiting on it, directly or behind
- * one another (pg_blocking_pids, followed transitively). Every request
- * therefore reaches its first read of `table` before any of them can
- * continue.
+ * one table, and the requests under test are started one at a time, in the
+ * order given. Each is started only once every earlier one is waiting,
+ * directly on the lock or behind another waiting request (pg_blocking_pids,
+ * followed transitively), or has finished, so the order in which they reach
+ * their locks is fixed, not left to timing. The lock is released when all
+ * are waiting or finished.
  *
  * Table-wide lock: only for *.serial.test.ts files (vitest.serial.config.ts),
  * which run after every other suite has finished.
@@ -25,28 +26,36 @@ const BLOCKED_BEHIND = `
 
 export async function behindTableLock<T>(
   table: string,
-  expectedBlocked: number,
-  start: () => Array<Promise<T>>,
+  starters: Array<() => Promise<T>>,
 ): Promise<Array<PromiseSettledResult<T>>> {
   const holder = new PrismaClient({ datasourceUrl: TEST_SUPER_URL });
   const observer = new PrismaClient({ datasourceUrl: TEST_SUPER_URL });
-  let started: Array<Promise<T>> = [];
+  const started: Array<Promise<T>> = [];
   try {
     await holder.$transaction(
       async (tx: any) => {
         const [{ pid }] = await tx.$queryRawUnsafe('SELECT pg_backend_pid() AS pid');
         await tx.$executeRawUnsafe(`LOCK TABLE ${table} IN ACCESS EXCLUSIVE MODE`);
-        started = start();
-        // Keep a rejection from surfacing as unhandled before allSettled below.
-        started.forEach((p) => p.catch(() => undefined));
-        const deadline = Date.now() + 15_000;
-        for (;;) {
-          const [{ n }] = (await observer.$queryRawUnsafe(BLOCKED_BEHIND, pid)) as Array<{ n: number }>;
-          if (n >= expectedBlocked) break;
-          if (Date.now() > deadline) {
-            throw new Error(`barrier: only ${n} of ${expectedBlocked} requests blocked behind the ${table} lock`);
+        let finished = 0;
+        for (const start of starters) {
+          const p = start();
+          // Counts a request that completes without ever blocking (which is
+          // what an unprotected one may do); also keeps a rejection from
+          // surfacing as unhandled before allSettled below.
+          p.then(
+            () => finished++,
+            () => finished++,
+          );
+          started.push(p);
+          const deadline = Date.now() + 15_000;
+          for (;;) {
+            const [{ n }] = (await observer.$queryRawUnsafe(BLOCKED_BEHIND, pid)) as Array<{ n: number }>;
+            if (n + finished >= started.length) break;
+            if (Date.now() > deadline) {
+              throw new Error(`barrier: only ${n} of ${started.length} requests blocked behind the ${table} lock`);
+            }
+            await new Promise((r) => setTimeout(r, 25));
           }
-          await new Promise((r) => setTimeout(r, 25));
         }
       },
       { timeout: 30_000, maxWait: 10_000 },
